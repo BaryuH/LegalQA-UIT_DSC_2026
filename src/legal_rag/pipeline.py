@@ -274,7 +274,7 @@ def _generation_record(
         "model": client.model,
         "temperature": config.generation.temperature,
         "max_output_chars": config.generation.max_output_chars,
-        "max_output_tokens": config.generation.max_output_chars,
+        "max_completion_length": config.generation.max_completion_length,
         "status": "error" if error else "success",
     }
     if response is not None:

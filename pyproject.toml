@@ -23,6 +23,12 @@ semantic-reranker = [
     # Optional F2 runtime; base/offline installs stay free of model dependencies.
     "sentence-transformers>=5.0,<6.0",
 ]
+reader = [
+    # Optional local-only extractive reader runtime; unit tests use the mock backend.
+    "torch>=2.0",
+    "transformers>=4.36,<5.0",
+    "sentencepiece>=0.1.99",
+]
 
 [project.scripts]
 legal-rag = "legal_rag.cli:main"

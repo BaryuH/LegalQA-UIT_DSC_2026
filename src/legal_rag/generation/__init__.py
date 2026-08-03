@@ -1,7 +1,12 @@
 """Typed generation client contracts and configured implementations."""
 
 from .mock import MockLLMClient, create_llm_client, prompt_hash
-from .openai_compatible import HTTPReply, HTTPTransport, OpenAICompatibleLLMClient
+from .openai_compatible import (
+    HTTPReply,
+    HTTPTransport,
+    OllamaLocalLLMClient,
+    OpenAICompatibleLLMClient,
+)
 from .postprocess import (
     AnswerPostprocessResult,
     PostprocessResult,
@@ -37,6 +42,7 @@ __all__ = [
     "HTTPReply",
     "HTTPTransport",
     "OpenAICompatibleLLMClient",
+    "OllamaLocalLLMClient",
     "AnswerPostprocessResult",
     "PostprocessResult",
     "postprocess_answer",

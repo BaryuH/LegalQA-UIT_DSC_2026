@@ -11,7 +11,14 @@ from legal_rag.config import ProjectConfig, load_config, redact_secrets
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_DIR = REPO_ROOT / "configs"
-PROFILE_NAMES = ("mock", "direct", "bm25_rag", "hybrid_rag")
+PROFILE_NAMES = (
+    "mock",
+    "direct",
+    "bm25_rag",
+    "hybrid_rag",
+    "finetuned_reader",
+    "tuned_bm25_reader",
+)
 
 
 def _profile_payload(profile_name: str = "mock") -> dict[str, object]:
@@ -40,6 +47,7 @@ def test_profiles_load_with_all_required_sections(profile_name: str) -> None:
         "evaluation",
         "runtime",
         "submission",
+        "reader",
     }
     assert not config.data.data_dir.is_absolute()
     assert config.submission.format == "object_by_question_id"
@@ -51,11 +59,42 @@ def test_profiles_load_with_all_required_sections(profile_name: str) -> None:
     assert config.submission.ensure_ascii is False
 
 
+def test_reader_profiles_are_isolated_and_share_checkpoint_settings() -> None:
+    direct_reader = load_config(CONFIG_DIR / "finetuned_reader.yaml")
+    bm25_reader = load_config(CONFIG_DIR / "tuned_bm25_reader.yaml")
+
+    assert direct_reader.reader is not None
+    assert bm25_reader.reader is not None
+    assert direct_reader.reader.mode == "original_context"
+    assert bm25_reader.reader.mode == "train_context_bm25"
+    assert direct_reader.reader.checkpoint_path == bm25_reader.reader.checkpoint_path
+    assert (
+        direct_reader.reader.checkpoint_manifest_path
+        == bm25_reader.reader.checkpoint_manifest_path
+    )
+    assert direct_reader.retrieval.strategy == "none"
+    assert bm25_reader.retrieval.strategy == "none"
+    assert direct_reader.reranker.enabled is False
+    assert bm25_reader.reranker.enabled is False
+
+
 def test_default_profile_is_a_valid_mock_profile() -> None:
     config = load_config(CONFIG_DIR / "default.yaml")
 
     assert config.project.profile == "mock"
     assert config.generation.provider == "mock"
+
+
+def test_qwen35_ollama_profile_is_local_ollama() -> None:
+    config = load_config(CONFIG_DIR / "qwen35_ollama.yaml")
+
+    assert config.project.profile == "direct"
+    assert config.generation.provider == "ollama"
+    assert config.generation.model == "qwen3.5:9b"
+    assert config.generation.base_url == "http://127.0.0.1:11434"
+    assert config.generation.max_completion_length == 96
+    assert config.generation.timeout_seconds == 180.0
+    assert config.submission.enabled is False
 
 
 def test_reranker_runtime_settings_are_config_driven_and_validated() -> None:

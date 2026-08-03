@@ -20,6 +20,7 @@ Snapshot này được cập nhật ngày 2026-08-03.
 | I1 | Đã build | Experiment registry JSONL cho mỗi run. |
 | I2 | Đã build | Báo cáo lỗi Markdown/CSV, join theo ID, sort worst-first. |
 | SUBMISSION-P0 | Đã build | Contract cố định cho `submission.zip`/`submission.json`, fail-closed. |
+| Reader profiles | Đã build runtime/offline | `finetuned_reader` và `tuned_bm25_reader`; real smoke chờ ALQAC data/split/checkpoint local. |
 
 “Đã build” ở đây nghĩa là implementation và offline acceptance tests đã có; không
 phải tuyên bố về chất lượng trên private test hay về metric cuối cuộc thi.
@@ -83,6 +84,23 @@ Tie được sắp xếp ổn định theo score rồi chunk ID. Trường hợp
 có sẵn được biểu diễn bằng `used=false`, model/version và fallback reason; với
 `required=true`, run phải fail thay vì tự động chuyển mode.
 
+### Extractive reader profiles (auxiliary)
+
+```text
+finetuned_reader:
+question + original case context -> shared extractive reader -> raw span
+
+tuned_bm25_reader:
+question -> BM25 over train contexts only
+         -> original + retrieved contexts
+         -> same shared extractive reader
+         -> highest-confidence span (stable tie)
+```
+
+Đây là pipeline extractive QA riêng, không gọi LLM và không thay đổi logic ba
+pipeline Legal-RAG ở trên. Hai profile dùng đúng cùng checkpoint; chỉ tập candidate
+contexts khác nhau. Contract chi tiết: `docs/READER_BASELINE_CONTRACT.md`.
+
 Các lớp chính:
 
 - `src/legal_rag/questions.py`: đọc question map, canonical ID và inference-safe view.
@@ -100,6 +118,8 @@ Các lớp chính:
   hashes.
 - `src/legal_rag/evaluation/`: evaluator, METEOR/ROUGE-L I/O và error report.
 - `src/legal_rag/submission.py`: serializer/validator chính thức cho submission.
+- `src/legal_rag/reader/`: typed ALQAC loader, train-context BM25, mock/local-only
+  extractive backend, hai reader pipeline và EM/token-F1 evaluator phụ trợ.
 
 ## Cài đặt
 
@@ -116,6 +136,12 @@ phép dùng model:
 python -m pip install -e ".[semantic-reranker]"
 ```
 
+Reader runtime cũng là optional và chỉ load checkpoint local:
+
+```bash
+python -m pip install -e ".[reader]"
+```
+
 Không commit secret; `.env.example` chỉ dành cho biến môi trường local.
 
 ## Cấu hình
@@ -127,6 +153,9 @@ Các profile đã có:
 - `configs/bm25_rag.yaml`: BM25-RAG.
 - `configs/hybrid_rag.yaml`: Hybrid-RAG.
 - `configs/default.yaml`: profile mặc định an toàn.
+- `configs/finetuned_reader.yaml`: original-context extractive reader.
+- `configs/tuned_bm25_reader.yaml`: train-context BM25 + cùng extractive reader.
+- `configs/qwen35_ollama.yaml`: Direct benchmark qua Ollama local với `qwen3.5:9b`.
 
 Config được validate, hash deterministic, chỉ cho relative paths và chặn secret keys.
 Semantic reranker dùng model config-driven; candidate mặc định là `BAAI/bge-m3`,
@@ -149,7 +178,14 @@ legal-rag inspect-retrieval --config configs/bm25_rag.yaml --question "..."
 legal-rag run --config configs/direct.yaml --limit 5
 legal-rag run --config configs/bm25_rag.yaml --limit 5
 legal-rag run --config configs/hybrid_rag.yaml --limit 5
+legal-rag run --config configs/finetuned_reader.yaml --limit 5
+legal-rag run --config configs/tuned_bm25_reader.yaml --limit 5
+legal-rag run --config configs/qwen35_ollama.yaml --limit 5
 ```
+
+Hai reader command không download model. Chúng validate `ALQAC.csv`, immutable
+split manifest, local checkpoint và checkpoint hash trước inference; thiếu bất kỳ
+asset nào sẽ exit non-zero với lỗi cụ thể.
 
 `build-index` và các pipeline retrieval fail-closed nếu selected-context corpus thiếu
 hoặc fingerprint không khớp. Dùng `--rebuild-index` chỉ khi muốn rebuild rõ ràng.
@@ -165,6 +201,10 @@ Mỗi run nằm trong `outputs/<timestamp>_<split>_<method>/` và ghi atomic art
 BM25/Hybrid. Metadata có run ID, command, git state, seed, model/prompt, data
 manifest hash, chunk/index fingerprint và output hash; prediction/inference artifacts
 không chứa reference answer.
+
+Reader run dùng `reader.jsonl` thay cho generation trace; tuned reader có thêm
+`retrieval.jsonl`. Các artifact này không ghi context hay gold answer, và lưu rõ
+model/version cùng train-context index fingerprint.
 
 Experiment registry dùng JSONL tại `artifacts/experiments.jsonl`, với các trường:
 `run_id`, commit/dirty, command, config hash, split, data manifest hash,
@@ -257,6 +297,9 @@ generation artifact, submission metadata và private-profile access.
   trước experiment.
 - Official train/public/private dataset và `selected-contexts.zip` chưa có trong
   workspace. Vì vậy retrieval run thật và official benchmark fail-closed.
+- Reader assets `data/ALQAC.csv`, `data/splits/alqac_v1.json` và
+  `checkpoints/legal_qa_reader/best_model` chưa có; real reader smoke vì vậy cũng
+  fail-closed, còn offline mock E2E vẫn chạy trong test suite.
 - `BAAI/bge-m3` không được download mặc định; môi trường hiện tại chưa có model cache
   semantic và không có CUDA smoke evidence.
 - `evaluate` CLI vẫn fail-closed cho tới khi evaluator input/contract chính thức được

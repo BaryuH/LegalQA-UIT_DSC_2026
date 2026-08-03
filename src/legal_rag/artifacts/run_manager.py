@@ -45,6 +45,7 @@ class RunArtifactPaths:
     metrics: Path
     submission: Path
     retrieval: Path | None = None
+    reader: Path | None = None
     registry: Path | None = None
 
     @property
@@ -187,7 +188,25 @@ class RunManager:
                 retrieval=(
                     run_dir / "retrieval.jsonl"
                     if selected_method
-                    in {"bm25_rag", "bm25-rag", "hybrid_rag", "hybrid-rag"}
+                    in {
+                        "bm25_rag",
+                        "bm25-rag",
+                        "hybrid_rag",
+                        "hybrid-rag",
+                        "tuned_bm25_reader",
+                        "tuned-bm25-reader",
+                    }
+                    else None
+                ),
+                reader=(
+                    run_dir / "reader.jsonl"
+                    if selected_method
+                    in {
+                        "finetuned_reader",
+                        "finetuned-reader",
+                        "tuned_bm25_reader",
+                        "tuned-bm25-reader",
+                    }
                     else None
                 ),
                 registry=None if registry_path is None else Path(registry_path),

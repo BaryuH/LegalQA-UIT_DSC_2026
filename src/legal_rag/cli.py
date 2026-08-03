@@ -13,11 +13,18 @@ from .data_validation import validate_data, write_validation_report
 from .pipeline import (
     PipelineError,
     PipelineRunError,
+    RunResult,
     inspect_bm25_retrieval,
     prepare_bm25_index_from_config,
     run_bm25_rag_from_config,
     run_direct_from_config,
     run_hybrid_rag_from_config,
+)
+from .reader import (
+    ReaderPipelineError,
+    ReaderRunResult,
+    ReaderUnavailableError,
+    run_reader_from_config,
 )
 from .submission import (
     SubmissionError,
@@ -110,7 +117,13 @@ def build_parser() -> argparse.ArgumentParser:
         if command == "run":
             command_parser.add_argument(
                 "--method",
-                choices=("direct", "bm25_rag", "hybrid_rag"),
+                choices=(
+                    "direct",
+                    "bm25_rag",
+                    "hybrid_rag",
+                    "finetuned_reader",
+                    "tuned_bm25_reader",
+                ),
                 default=None,
                 help="Explicit method; must agree with the selected profile.",
             )
@@ -297,6 +310,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "mock": "direct",
                 "bm25-rag": "bm25_rag",
                 "hybrid-rag": "hybrid_rag",
+                "finetuned-reader": "finetuned_reader",
+                "tuned-bm25-reader": "tuned_bm25_reader",
             }.get(config.project.profile)
             selected_method = args.method or profile_method
             if selected_method is None:
@@ -308,6 +323,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"Method {args.method!r} does not match profile "
                     f"{config.project.profile!r}"
                 )
+            result: RunResult | ReaderRunResult
             if selected_method == "bm25_rag":
                 result = run_bm25_rag_from_config(
                     args.config,
@@ -331,6 +347,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                     output_dir=args.output_dir,
                     run_id=args.run_id,
                 )
+            elif selected_method in {"finetuned_reader", "tuned_bm25_reader"}:
+                if args.rebuild_index:
+                    raise ReaderPipelineError(
+                        "Reader BM25 is built deterministically from train contexts "
+                        "for each run; --rebuild-index is not applicable"
+                    )
+                result = run_reader_from_config(
+                    args.config,
+                    limit=args.limit,
+                    output_dir=args.output_dir,
+                    run_id=args.run_id,
+                )
             else:
                 raise PipelineError(f"Unsupported run method: {selected_method!r}")
         except PipelineRunError as exc:
@@ -347,7 +375,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        except (OSError, ValueError, PipelineError) as exc:
+        except (
+            OSError,
+            ValueError,
+            PipelineError,
+            ReaderPipelineError,
+            ReaderUnavailableError,
+        ) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 2
         packaged_submission: Path | None = None

@@ -10,7 +10,7 @@ from legal_rag.generation import (
     LLMConfigurationError,
     create_llm_client,
 )
-from legal_rag.generation.openai_compatible import HTTPReply
+from legal_rag.generation.openai_compatible import HTTPReply, OllamaLocalLLMClient
 
 
 def _config(
@@ -18,6 +18,7 @@ def _config(
     retries: int = 2,
     base_url: str | None = "http://localhost:8000/v1",
     api_key_env: str | None = "TEST_OPENAI_API_KEY",
+    max_completion_length: int | None = None,
     timeout_seconds: float = 7.5,
     backoff_seconds: float = 0.25,
 ) -> GenerationSection:
@@ -26,6 +27,7 @@ def _config(
         model="local-chat-model",
         temperature=0.0,
         max_output_chars=1200,
+        max_completion_length=max_completion_length,
         retries=retries,
         base_url=base_url,
         api_key_env=api_key_env,
@@ -91,6 +93,60 @@ def test_openai_adapter_sends_configured_request_and_size_metadata(
     assert secret not in str(response.metadata)
     assert "Question with evidence." not in caplog.text
     assert secret not in caplog.text
+
+
+def test_openai_adapter_omits_or_sends_configured_completion_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_OPENAI_API_KEY", "test-key")
+    transport = FakeTransport([HTTPReply(200, _success_body())])
+
+    client = create_llm_client(
+        _config(max_completion_length=96),
+        transport=transport,
+    )
+    client.generate("A bounded prompt.", case_id="case-bounded")
+
+    request, _ = transport.calls[0]
+    assert json.loads(request.data.decode("utf-8"))["max_tokens"] == 96
+
+
+def test_ollama_adapter_requests_final_content_without_reasoning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TEST_OPENAI_API_KEY", raising=False)
+    response_body = json.dumps(
+        {
+            "message": {
+                "role": "assistant",
+                "content": "Câu trả lời cuối.",
+                "reasoning": "must not be read by the adapter",
+            }
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    transport = FakeTransport([HTTPReply(200, response_body)])
+    config = GenerationSection(
+        provider="ollama",
+        model="qwen3.5:9b",
+        temperature=0.0,
+        max_output_chars=1200,
+        max_completion_length=96,
+        retries=0,
+        base_url="http://127.0.0.1:11434",
+    )
+
+    client = create_llm_client(config, transport=transport)
+    assert isinstance(client, OllamaLocalLLMClient)
+    response = client.generate("Prompt an toàn.", case_id="ollama-case")
+
+    request, _ = transport.calls[0]
+    payload = json.loads(request.data.decode("utf-8"))
+    assert request.full_url == "http://127.0.0.1:11434/api/chat"
+    assert payload["think"] is False
+    assert payload["options"] == {"num_predict": 96, "temperature": 0.0}
+    assert response.text == "Câu trả lời cuối."
+    assert response.metadata["thinking_disabled"] is True
 
 
 def test_api_key_is_read_from_environment_and_missing_key_is_permanent(

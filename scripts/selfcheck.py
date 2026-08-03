@@ -56,7 +56,15 @@ def _check_manifest(root: Path) -> None:
 def _check_config_load(root: Path) -> None:
     from legal_rag.config import load_config
 
-    names = ("default", "mock", "direct", "bm25_rag", "hybrid_rag")
+    names = (
+        "default",
+        "mock",
+        "direct",
+        "bm25_rag",
+        "hybrid_rag",
+        "finetuned_reader",
+        "tuned_bm25_reader",
+    )
     configs = [load_config(root / "configs" / f"{name}.yaml") for name in names]
     _require(len(configs) == len(names), "not all project profiles loaded")
     _require(

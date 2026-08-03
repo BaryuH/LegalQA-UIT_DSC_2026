@@ -1,0 +1,68 @@
+# B0 Direct benchmark through the local Ollama OpenAI-compatible endpoint.
+project:
+  name: legal-rag
+  profile: direct
+  python_version: "3.11"
+data:
+  data_dir: data
+  question_path: data/warmup.json
+  selected_contexts_path: selected-contexts.zip
+  split: warmup
+  split_policy: warmup_evaluation
+chunking:
+  max_chars: 1200
+  overlap_chars: 200
+  min_chars: 100
+  version: legal-chunker-v1
+retrieval:
+  strategy: none
+  rough_top_n: 1
+  k1: 1.5
+  b: 0.75
+reranker:
+  enabled: false
+  required: false
+  provider: none
+evidence:
+  evidence_top_k: 1
+  max_total_chars: 4000
+  max_chunks_per_document: 2
+generation:
+  provider: ollama
+  model: qwen3.5:9b
+  base_url: http://127.0.0.1:11434
+  temperature: 0.0
+  max_output_chars: 1200
+  max_completion_length: 96
+  retries: 0
+  timeout_seconds: 180.0
+  backoff_seconds: 0.5
+prompts:
+  direct_version: direct-v1
+  rag_version: rag-v1
+evaluation:
+  enabled: true
+  reference_access: approved_evaluation
+  primary_metric: meteor
+  secondary_metric: rouge_l
+runtime:
+  cache_dir: cache
+  outputs_dir: outputs
+  artifacts_dir: artifacts
+  fail_fast: true
+  seed: 42
+submission:
+  enabled: false
+  format: object_by_question_id
+  answer_field: answer
+  output_filename: submission.zip
+  inner_filename: submission.json
+  encoding: utf-8
+  ensure_ascii: false
+  forbid_extra_fields: true
+  deterministic_order: dataset
+  require_full_coverage: true
+  reject_extra_ids: true
+  reject_duplicate_ids: true
+  reject_non_string_answers: true
+  reject_empty_answers: false

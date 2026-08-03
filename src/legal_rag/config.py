@@ -26,10 +26,12 @@ def _require_non_blank(value: str) -> str:
 
 
 NonBlankText = Annotated[str, AfterValidator(_require_non_blank)]
-GenerationProvider = Literal["mock", "openai", "anthropic"]
+GenerationProvider = Literal["mock", "openai", "anthropic", "ollama"]
 RetrievalStrategy = Literal["none", "bm25", "bm25_rerank"]
 RerankerProvider = Literal["none", "mock", "sentence_transformers"]
 RerankerDevice = Literal["auto", "cpu", "cuda"]
+ReaderMode = Literal["original_context", "train_context_bm25"]
+ReaderDevice = Literal["auto", "cpu", "cuda"]
 SplitName = Literal["train", "warmup", "public", "private"]
 SplitPolicy = Literal[
     "train_development",
@@ -175,6 +177,7 @@ class GenerationSection(ConfigSection):
     model: NonBlankText
     temperature: float = Field(ge=0.0, le=2.0)
     max_output_chars: int = Field(gt=0)
+    max_completion_length: int | None = Field(default=None, gt=0)
     retries: int = Field(ge=0)
     base_url: NonBlankText | None = None
     api_key_env: NonBlankText | None = None
@@ -183,8 +186,12 @@ class GenerationSection(ConfigSection):
 
     @model_validator(mode="after")
     def validate_provider_settings(self) -> Self:
-        if self.provider == "openai" and self.base_url is None:
-            raise ValueError("OpenAI-compatible provider requires generation.base_url")
+        if self.provider in {"openai", "ollama"} and self.base_url is None:
+            raise ValueError("Configured HTTP provider requires generation.base_url")
+        if self.provider == "ollama" and self.api_key_env is not None:
+            raise ValueError(
+                "Ollama local provider must not use generation.api_key_env"
+            )
         return self
 
 
@@ -246,6 +253,45 @@ class SubmissionSection(ConfigSection):
         return self
 
 
+class ReaderSection(ConfigSection):
+    """Optional extractive-reader settings, isolated from the Legal-RAG pipeline."""
+
+    enabled: bool
+    mode: ReaderMode
+    dataset_path: Path
+    split_manifest_path: Path
+    checkpoint_path: Path
+    checkpoint_manifest_path: Path
+    device: ReaderDevice = "auto"
+    batch_size: int = Field(gt=0, default=8)
+    max_seq_length: int = Field(gt=0, default=384)
+    doc_stride: int = Field(ge=0, default=128)
+    max_answer_length: int = Field(gt=0, default=50)
+    retrieval_top_k: int = Field(ge=1, default=5)
+    k1: float = Field(gt=0, default=1.5)
+    b: float = Field(ge=0.0, le=1.0, default=0.75)
+    local_files_only: Literal[True] = True
+
+    @field_validator(
+        "dataset_path",
+        "split_manifest_path",
+        "checkpoint_path",
+        "checkpoint_manifest_path",
+        mode="before",
+    )
+    @classmethod
+    def validate_relative_paths(cls, value: object) -> Path:
+        return _validate_relative_path(value)
+
+    @model_validator(mode="after")
+    def validate_reader_window(self) -> Self:
+        if self.doc_stride >= self.max_seq_length:
+            raise ValueError("reader.doc_stride must be smaller than max_seq_length")
+        if self.max_answer_length > self.max_seq_length:
+            raise ValueError("reader.max_answer_length must not exceed max_seq_length")
+        return self
+
+
 class ProjectConfig(ConfigSection):
     """Complete profile with validation, redaction, path resolution, and identity."""
 
@@ -260,6 +306,7 @@ class ProjectConfig(ConfigSection):
     evaluation: EvaluationSection
     runtime: RuntimeSection
     submission: SubmissionSection
+    reader: ReaderSection | None = None
 
     @model_validator(mode="after")
     def validate_profile_invariants(self) -> Self:
@@ -284,6 +331,31 @@ class ProjectConfig(ConfigSection):
             raise ValueError("An enabled reranker requires a non-none provider")
         if not self.reranker.enabled and self.reranker.provider != "none":
             raise ValueError("A disabled reranker must use provider 'none'")
+
+        reader_profiles = {"finetuned-reader", "tuned-bm25-reader"}
+        is_reader_profile = self.project.profile in reader_profiles
+        if is_reader_profile != (self.reader is not None and self.reader.enabled):
+            raise ValueError(
+                "Reader profiles require reader.enabled=true and non-reader "
+                "profiles must omit the reader section"
+            )
+        if self.reader is not None and not is_reader_profile:
+            raise ValueError("Non-reader profiles must omit the reader section")
+        if self.reader is not None:
+            expected_mode: ReaderMode = (
+                "original_context"
+                if self.project.profile == "finetuned-reader"
+                else "train_context_bm25"
+            )
+            if self.reader.mode != expected_mode:
+                raise ValueError(
+                    f"reader.mode must be {expected_mode!r} for profile "
+                    f"{self.project.profile!r}"
+                )
+            if self.retrieval.strategy != "none" or self.reranker.enabled:
+                raise ValueError(
+                    "Reader profiles must not reuse the Legal-RAG retrieval stack"
+                )
         return self
 
     @property
@@ -337,9 +409,17 @@ class ProjectConfig(ConfigSection):
         path_fields = {
             "data": ("data_dir", "question_path", "selected_contexts_path"),
             "runtime": ("cache_dir", "outputs_dir", "artifacts_dir"),
+            "reader": (
+                "dataset_path",
+                "split_manifest_path",
+                "checkpoint_path",
+                "checkpoint_manifest_path",
+            ),
         }
         for section_name, field_names in path_fields.items():
-            section = resolved[section_name]
+            section = resolved.get(section_name)
+            if section is None:
+                continue
             if not isinstance(section, dict):  # pragma: no cover - structural guard
                 raise TypeError(
                     f"Configuration section {section_name!r} must be a mapping"

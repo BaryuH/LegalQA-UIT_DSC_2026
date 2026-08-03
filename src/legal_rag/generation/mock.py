@@ -8,7 +8,11 @@ from dataclasses import replace
 from time import sleep as default_sleep
 
 from ..config import GenerationSection
-from .openai_compatible import HTTPTransport, OpenAICompatibleLLMClient
+from .openai_compatible import (
+    HTTPTransport,
+    OllamaLocalLLMClient,
+    OpenAICompatibleLLMClient,
+)
 from .protocol import (
     CaseError,
     LLMClient,
@@ -156,6 +160,12 @@ def create_llm_client(
         )
     if config.provider == "openai":
         return OpenAICompatibleLLMClient(
+            config,
+            transport=transport,
+            sleep=sleep,
+        )
+    if config.provider == "ollama":
+        return OllamaLocalLLMClient(
             config,
             transport=transport,
             sleep=sleep,
