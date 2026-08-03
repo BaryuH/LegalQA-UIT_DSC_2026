@@ -75,3 +75,19 @@ tmp/
 *~
 .DS_Store
 Thumbs.db
+
+# Local project memory and CodeGraph index
+memory-bank/
+.codegraph/
+.codex/
+
+# Local runtime cache
+cache/
+
+# Generated validation and experiment outputs
+artifacts/data-validation/
+artifacts/experiments.jsonl
+artifacts/submission-test/
+
+# Historical local audit; not part of the implementation contract
+docs/integration-audit.md

@@ -1,124 +1,284 @@
-# UIT Data Science Challenge 2026 - Task 2: Legal Question Answering (LegalQA)
+# Vietnamese Legal-RAG-QA
 
-![UIT DSC 2026 Banner](https://www.uit.edu.vn/media/736273091_959119480506217_7950056371708229845_n_c4c071de1d.png)
+Baseline nghiên cứu cho bài toán hỏi đáp pháp luật Việt Nam: nhận một câu hỏi,
+truy xuất các đoạn văn bản pháp lý phù hợp, rồi sinh câu trả lời có grounding.
+Repository hiện đã có pipeline Direct, BM25-RAG và Hybrid-RAG, cùng các ranh giới
+typed để ngăn gold leakage và kiểm soát artifact/submission.
 
-## 📌 Giới thiệu Cuộc thi
+## Trạng thái hiện tại
 
-**UIT Data Science Challenge 2026 (UIT DSC 2026)** là cuộc thi Khoa học Dữ liệu & Trí tuệ Nhân tạo do **Trường Đại học Công nghệ Thông tin - ĐHQG TP.HCM (UIT)** tổ chức. Cuộc thi hướng đến việc giải quyết các bài toán công nghệ mang tính thực tiễn cao, đặc biệt là ứng dụng AI trong lĩnh vực **Pháp luật Việt Nam**.
+Snapshot này được cập nhật ngày 2026-08-03.
 
-- **Website cuộc thi:** [UIT Data Science Challenge 2026](https://www.uit.edu.vn/bai-viet/chinh-thuc-khoi-dong-cuoc-thi-uit-data-science-challenge-2026)
-- **Cơ quan tổ chức:** Trường Đại học Công nghệ Thông tin, ĐHQG-HCM (UIT).
-- **Đối tượng tham gia:** Sinh viên đang theo học tại các trường đại học khu vực Đông Nam Bộ và Tây Nam Bộ (Mỗi đội tối đa 5 thành viên).
+| Phần | Trạng thái | Ghi chú |
+| --- | --- | --- |
+| B0/B1 | Đã build | Packaging Python 3.11+, CLI, mock/direct generation và run artifacts. |
+| B2 BM25-RAG | Đã build | BM25 trên selected legal contexts, dedup, pack và RAG prompt. |
+| B2 Hybrid-RAG | Đã build | BM25 rough candidates rồi semantic rerank; có fallback metadata. |
+| F1/F2 | Đã build | Reranker protocol/no-op/mock và adapter SentenceTransformers tùy chọn. |
+| G4 | Đã build | Self-check offline gồm đúng 12 kiểm tra, fail-fast. |
+| H2 | Đã build | Gold-leakage tests dùng typed boundaries và fixture có mục tiêu. |
+| I1 | Đã build | Experiment registry JSONL cho mỗi run. |
+| I2 | Đã build | Báo cáo lỗi Markdown/CSV, join theo ID, sort worst-first. |
+| SUBMISSION-P0 | Đã build | Contract cố định cho `submission.zip`/`submission.json`, fail-closed. |
 
----
+“Đã build” ở đây nghĩa là implementation và offline acceptance tests đã có; không
+phải tuyên bố về chất lượng trên private test hay về metric cuối cuộc thi.
 
-## 🎯 Task 2: Legal Question Answering (LegalQA)
+Đây là repository cho Task 2 - Legal Question Answering của UIT Data Science
+Challenge 2026. Thông tin cuộc thi và tài liệu dữ liệu gốc nằm tại [website UIT
+DSC](https://www.uit.edu.vn/bai-viet/chinh-thuc-khoi-dong-cuoc-thi-uit-data-science-challenge-2026)
+và `docs/DSC2026_Task2_LegalQA_Data_Overview.pdf`.
 
-Repository này tập trung nghiên cứu, phát triển và triển khai giải pháp cho **Task 2 - LegalQA (Hỏi đáp pháp luật tiếng Việt)**.
+## Ranh giới bắt buộc
 
-### Mục tiêu Bài toán
-Cho một câu hỏi pháp luật bằng tiếng Việt, hệ thống cần truy xuất văn bản/căn cứ pháp lý liên quan và tự động sinh ra **câu trả lời bằng văn xuôi (tự nhiên)** chính xác, minh bạch dựa trên các căn cứ pháp lý đó.
+- `data/` là source read-only. Không rewrite, normalize, di chuyển hoặc permanently
+  extract archive vào thư mục này.
+- Gold answer chỉ được dùng ở evaluation artifact hoặc training task được phê duyệt.
+  Gold không đi vào query retrieval, index, reranker, generator prompt, memory hay
+  inference artifact.
+- Prompt builder chỉ nhận question và retrieved evidence. Không request hoặc log
+  chain-of-thought.
+- Không tune trên private split; không silent fallback. Mọi fallback phải xuất hiện
+  trong metadata và artifact.
+- Legal index chỉ build từ selected legal contexts; mỗi chunk giữ provenance về
+  document, source member, section và offset.
+- Official submission chỉ chứa field theo `docs/SUBMISSION_CONTRACT.md`.
 
-- **Input:** Câu hỏi pháp luật tiếng Việt.
-- **Output:** Câu trả lời tự nhiên bằng văn xuôi kèm giải thích và trích dẫn quy định/điều luật liên quan.
+## Kiến trúc và luồng chạy
 
----
-
-> [!NOTE]
-> **Lưu ý về dữ liệu:** Hiện tại repository chỉ mới có tệp `data/warmup.json` dành cho vòng khởi động (Warm-up). Các tệp dữ liệu huấn luyện và đánh giá khác (`train.json`, `public-official.json`, `private-official.json`, `selected-contexts.zip`) sẽ được Ban Tổ Chức (BTC) cung cấp tương ứng theo timeline từng giai đoạn của cuộc thi.
-
-| Tệp Dữ liệu | Trạng thái hiện tại | Mô tả |
-| :--- | :--- | :--- |
-| `data/warmup.json` | 🟢 **Đã có sẵn** | Tập dữ liệu mẫu phục vụ vòng Warm-up giúp làm quen bài toán và quy trình submission. |
-| `data/train.json` | 🟡 *Cung cấp theo timeline* | Tập dữ liệu huấn luyện chính thức dành cho các đội phát triển mô hình. |
-| `data/public-official.json` | 🟡 *Cung cấp theo timeline* | Tập dữ liệu đánh giá giai đoạn Public Test. |
-| `data/private-official.json` | 🟡 *Cung cấp theo timeline* | Tập dữ liệu đánh giá giai đoạn Private Test (Vòng chung kết). |
-| `selected-contexts.zip` | 🟡 *Cung cấp theo timeline* | Kho văn bản pháp luật được chọn (chứa các tệp `context_*.json` làm căn cứ trích dẫn). |
-
-### Định dạng Dữ liệu Hỏi - Đáp (`warmup.json` / `train.json`):
-```json
-{
-  "35781": {
-    "question": "Trách nhiệm của tổ chức đấu thầu, bảo lãnh, đại lý phát hành",
-    "answer": "Theo Điều 37 Nghị định 153/2020/NĐ-CP, được sửa đổi bởi khoản 26 Điều 1 Nghị định 65/2022/NĐ-CP... quy định cụ thể:..."
-  }
-}
-```
-
-### Định dạng Văn bản Căn cứ (`context_*.json`):
-```json
-{
-  "id": 740,
-  "name": "Quyet-dinh-5868-QD-BYT-2018-co-cau-to-chuc-cua-Vu-Trang-thiet-bi-va-Cong-trinh-y-te-396608",
-  "link": "https://thuvienphapluat.vn/van-ban/...",
-  "passage": "BỘ Y TẾ... QUYẾT ĐỊNH QUY ĐỊNH CHỨC NĂNG, NHIỆM VỤ..."
-}
-```
-
----
-
-## 📏 Đánh giá Tác vụ (Evaluation Metrics)
-
-Kết quả câu trả lời sinh ra từ hệ thống được so sánh với câu trả lời tham chiếu (Ground Truth) từ chuyên gia pháp lý thông qua 2 độ đo:
-
-1. **METEOR (Độ đo chính - Main Metric):**
-   - Đánh giá mức độ tương đồng giữa câu trả lời dự đoán và câu trả lời tham chiếu dựa trên mức độ khớp của các token, kết hợp cả **Precision**, **Recall** và mức độ liên tục/thứ tự của các token được khớp.
-   - **Dùng làm tiêu chí chính để xếp hạng thứ hạng các đội trên Bảng xếp hạng (Leaderboard).**
-2. **ROUGE-L (Độ đo phụ - Secondary Metric):**
-   - Đánh giá mức độ tương đồng dựa trên chuỗi con chung dài nhất (**Longest Common Subsequence - LCS**), phản ánh mức độ bảo toàn nội dung và thứ tự thông tin.
-
----
-
-## 📅 Timeline Cuộc thi
-
-- **Hạn đăng ký:** 16/08/2026
-- **Giai đoạn Public Test:** 06/08/2026 – 18/09/2026
-- **Giai đoạn Private Test:** 19/09/2026 – 23/09/2026
-
----
-
-## 📁 Cấu trúc Thư mục Repository
+### Direct baseline
 
 ```text
-LegalQA-UIT_DSC_2026/
-├── data/
-│   └── warmup.json                            # Tập dữ liệu mẫu vòng Warm-up
-├── docs/
-│   └── DSC2026_Task2_LegalQA_Data_Overview.pdf # Tài liệu hướng dẫn chi tiết Task 2
-└── README.md                                  # Tài liệu tổng quan dự án
+question -> direct prompt -> generator adapter -> postprocess -> prediction
 ```
 
----
+### BM25-RAG (B1/B2 lexical)
 
-## 🚀 Hướng dẫn Sử dụng & Phát triển
+```text
+question
+  -> BM25 rough_top_n
+  -> deduplicate
+  -> pack evidence
+  -> RAG prompt
+  -> same generator adapter
+  -> answer
+```
 
-### 1. Cài đặt Môi trường
-Khuyến nghị sử dụng Python 3.10+ và tạo môi trường ảo:
+### Hybrid-RAG (B2)
+
+```text
+question
+  -> BM25 rough_top_n
+  -> optional multilingual semantic reranker
+  -> evidence_top_k
+  -> deduplicate
+  -> pack evidence
+  -> same RAG prompt and generator as BM25-RAG
+  -> answer
+```
+
+BM25 và Hybrid dùng cùng prompt RAG; khác biệt được giới hạn ở thứ tự evidence.
+BM25 score được bảo toàn trong retrieval metadata, còn rerank score là field riêng.
+Tie được sắp xếp ổn định theo score rồi chunk ID. Trường hợp model semantic không
+có sẵn được biểu diễn bằng `used=false`, model/version và fallback reason; với
+`required=true`, run phải fail thay vì tự động chuyển mode.
+
+Các lớp chính:
+
+- `src/legal_rag/questions.py`: đọc question map, canonical ID và inference-safe view.
+- `src/legal_rag/contexts.py`: đọc selected contexts, giữ provenance và fingerprint.
+- `src/legal_rag/text/`: chunking, normalization có kiểm soát và chunk cache.
+- `src/legal_rag/retrieval/bm25.py`: BM25 index/retrieval, stable ordering và fixture.
+- `src/legal_rag/retrieval/reranker.py`: `Reranker` protocol, no-op/mock và semantic
+  adapter tùy chọn.
+- `src/legal_rag/evidence.py`: deduplication, packing budget và dropped/truncated
+  evidence metadata.
+- `src/legal_rag/generation/`: prompt builder, mock client, OpenAI-compatible client
+  và postprocessing.
+- `src/legal_rag/pipeline.py`: orchestration Direct, BM25-RAG và Hybrid-RAG.
+- `src/legal_rag/artifacts/`: run manager, JSONL registry, fingerprints và output
+  hashes.
+- `src/legal_rag/evaluation/`: evaluator, METEOR/ROUGE-L I/O và error report.
+- `src/legal_rag/submission.py`: serializer/validator chính thức cho submission.
+
+## Cài đặt
+
+Yêu cầu Python 3.11 trở lên:
+
 ```bash
-python -m venv venv
-# On Windows:
-venv\Scripts\activate
-# On Linux/macOS:
-source venv/bin/activate
+python -m pip install -e ".[dev]"
 ```
 
-### 2. Khai thác Dữ liệu Warm-up
-Dữ liệu mẫu vòng khởi động nằm ở `data/warmup.json`. Bạn có thể nạp dữ liệu đơn giản bằng Python:
-```python
-import json
+Semantic reranker không nằm trong base/offline install. Chỉ cài khi môi trường được
+phép dùng model:
 
-with open("data/warmup.json", "r", encoding="utf-8") as f:
-    warmup_data = json.load(f)
-
-for item_id, content in list(warmup_data.items())[:3]:
-    print(f"ID: {item_id}")
-    print(f"Question: {content['question']}")
-    print(f"Answer: {content['answer'][:150]}...\n")
+```bash
+python -m pip install -e ".[semantic-reranker]"
 ```
 
----
+Không commit secret; `.env.example` chỉ dành cho biến môi trường local.
 
-## 📜 Tài liệu Tham khảo
+## Cấu hình
 
-- [Chi tiết phát động cuộc thi UIT DSC 2026](https://www.uit.edu.vn/bai-viet/chinh-thuc-khoi-dong-cuoc-thi-uit-data-science-challenge-2026)
-- [Tài liệu Tổng quan Task 2 LegalQA](docs/DSC2026_Task2_LegalQA_Data_Overview.pdf)
+Các profile đã có:
+
+- `configs/mock.yaml`: fixture/offline, không gọi model thật.
+- `configs/direct.yaml`: Direct baseline.
+- `configs/bm25_rag.yaml`: BM25-RAG.
+- `configs/hybrid_rag.yaml`: Hybrid-RAG.
+- `configs/default.yaml`: profile mặc định an toàn.
+
+Config được validate, hash deterministic, chỉ cho relative paths và chặn secret keys.
+Semantic reranker dùng model config-driven; candidate mặc định là `BAAI/bge-m3`,
+device hỗ trợ `auto`, `cpu`, `cuda`, có `batch_size`, revision/version và giới hạn
+truncation. Unit tests inject encoder giả nên không download model.
+
+Kiểm tra config:
+
+```bash
+legal-rag --config configs/hybrid_rag.yaml check-config
+```
+
+## CLI
+
+```bash
+legal-rag check-config
+legal-rag validate-data --config configs/mock.yaml
+legal-rag build-index --config configs/bm25_rag.yaml
+legal-rag inspect-retrieval --config configs/bm25_rag.yaml --question "..."
+legal-rag run --config configs/direct.yaml --limit 5
+legal-rag run --config configs/bm25_rag.yaml --limit 5
+legal-rag run --config configs/hybrid_rag.yaml --limit 5
+```
+
+`build-index` và các pipeline retrieval fail-closed nếu selected-context corpus thiếu
+hoặc fingerprint không khớp. Dùng `--rebuild-index` chỉ khi muốn rebuild rõ ràng.
+`--package-submission` chỉ được dùng sau một batch đầy đủ và sẽ gọi serializer chính
+thức; batch thiếu ID không được đóng gói.
+
+## Artifact và reproducibility
+
+Mỗi run nằm trong `outputs/<timestamp>_<split>_<method>/` và ghi atomic artifacts:
+
+`config.json`, `environment.json`, `run_summary.json`, `predictions.jsonl`,
+`generation.jsonl`, `errors.jsonl`, `metrics.json`, cùng `retrieval.jsonl` cho
+BM25/Hybrid. Metadata có run ID, command, git state, seed, model/prompt, data
+manifest hash, chunk/index fingerprint và output hash; prediction/inference artifacts
+không chứa reference answer.
+
+Experiment registry dùng JSONL tại `artifacts/experiments.jsonl`, với các trường:
+`run_id`, commit/dirty, command, config hash, split, data manifest hash,
+chunk/index fingerprint, prompt hash, model, seed, METEOR, ROUGE-L, error rate,
+latency, reranker fallback rate, output hash và notes. Đây là runtime log bị
+gitignore; không commit các row của local run. Không thêm MLflow/W&B.
+
+Tạo error report sau evaluation:
+
+```bash
+python scripts/generate_error_report.py \
+  --predictions outputs/<run>/predictions.jsonl \
+  --references <approved-evaluation-reference.jsonl> \
+  --metrics outputs/<run>/metrics.json \
+  --retrieval outputs/<run>/retrieval.jsonl \
+  --markdown reports/errors.md \
+  --csv reports/errors.csv
+```
+
+Reference chỉ được đọc trong evaluation artifact. Report join theo ID, có preview
+evidence và per-case metrics, cho phép `error_type` thủ công, và từ chối private
+report nếu không truyền explicit authorization. Taxonomy nằm tại
+`docs/ERROR_TAXONOMY.md`.
+
+## Submission contract
+
+Submission chính thức có đúng một file ở root archive:
+
+```text
+submission.zip
+└── submission.json
+```
+
+`submission.json` là JSON object ánh xạ question ID sang object chỉ có field chính
+thức `answer`. ID được đối chiếu với inference question dataset, giữ leading zero,
+sắp xếp deterministic, reject duplicate/missing/extra ID và reject mọi gold, evidence,
+score hoặc internal metadata.
+
+```bash
+legal-rag create-submission \
+  --predictions outputs/<run>/predictions.jsonl \
+  --questions <inference-questions.json> \
+  --output submission.zip
+
+legal-rag validate-submission \
+  --submission submission.zip \
+  --questions <inference-questions.json>
+```
+
+Chi tiết contract và failure codes: `docs/SUBMISSION_CONTRACT.md`.
+
+## Self-check và test gates
+
+Self-check mặc định không gọi model thật và chạy fail-fast đúng 12 bước:
+
+1. data manifest verify;
+2. config load;
+3. data validation;
+4. evaluator golden tests;
+5. chunk fixture;
+6. BM25 fixture;
+7. prompt leakage tests;
+8. Mock E2E Direct;
+9. Mock E2E BM25-RAG;
+10. Mock E2E Hybrid-RAG;
+11. submission validation;
+12. package import.
+
+```bash
+python scripts/selfcheck.py
+pytest -q
+ruff check .
+ruff format --check .
+mypy src
+python -m compileall -q src
+python scripts/verify_data_manifest.py
+```
+
+Lần xác minh gần nhất sau snapshot này: `pytest -q` đạt 223 passed; Ruff, format,
+mypy trên 36 source files, compileall, self-check 12/12 và manifest verification đều
+pass.
+
+Các gold-leakage tests kiểm tra nhiều boundary có type: inference view, prompt
+signature/text, question-only retrieval query, index corpus, prediction/retrieval/
+generation artifact, submission metadata và private-profile access.
+
+## Dữ liệu và blocker hiện tại
+
+- `data/` hiện chỉ có warm-up data được manifest hóa; source hash phải được verify
+  trước experiment.
+- Official train/public/private dataset và `selected-contexts.zip` chưa có trong
+  workspace. Vì vậy retrieval run thật và official benchmark fail-closed.
+- `BAAI/bge-m3` không được download mặc định; môi trường hiện tại chưa có model cache
+  semantic và không có CUDA smoke evidence.
+- `evaluate` CLI vẫn fail-closed cho tới khi evaluator input/contract chính thức được
+  cung cấp; không suy ra official schema/metric từ warm-up.
+- Không có claim về metric improvement trên private test trong repository này.
+
+## Tài liệu và metadata phát triển
+
+- `AGENTS.md`: invariants và workflow bắt buộc.
+- `docs/TASK_CONTRACT.md`, `docs/EVALUATION_CONTRACT.md`: contract task/metric.
+- `docs/ARCHITECTURE.md`: boundary kiến trúc.
+- `docs/REPRODUCIBILITY.md`: fingerprints và artifact.
+- `docs/ERROR_TAXONOMY.md`: phân loại lỗi và diagnostic flow.
+- `docs/SUBMISSION_CONTRACT.md`: contract package chính thức.
+- `memory-bank/`: context vận hành dài hạn; cập nhật sau mỗi task có thay đổi đáng kể.
+- `.codegraph/`: chỉ mục local để explore symbol/call graph; có thể rebuild bằng
+  `codegraph sync` hoặc `codegraph index`.
+
+Sau lần rebuild ngày 2026-08-03, CodeGraph ghi nhận 82 files, 1,475 nodes và 4,285
+edges. Khi thay đổi source, chạy `codegraph sync`; khi index version thay đổi hoặc
+cần tái lập toàn bộ, chạy `codegraph index` rồi kiểm tra bằng `codegraph status` và
+`codegraph explore "<symbol hoặc pipeline>"`.
+
+`memory-bank/` và `.codegraph/` là metadata local, không phải source data và không
+được dùng để đưa gold answer vào inference.
