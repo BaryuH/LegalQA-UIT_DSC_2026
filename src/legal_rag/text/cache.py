@@ -243,31 +243,34 @@ def read_chunk_cache(
         return _empty_result("miss", resolved_path, fingerprint, "cache_missing")
 
     try:
-        lines = resolved_path.read_text(encoding="utf-8").splitlines()
-        if not lines:
-            raise ValueError("cache is empty")
-        metadata = json.loads(lines[0])
-        if not isinstance(metadata, dict):
-            raise ValueError("metadata record must be an object")
-        if metadata.get("record_type") != "metadata":
-            raise ValueError("first record must be metadata")
-        if metadata.get("schema_version") != CACHE_SCHEMA_VERSION:
-            raise ValueError("unsupported cache schema version")
-        if metadata.get("fingerprint") != fingerprint.as_dict():
-            return _empty_result(
-                "stale", resolved_path, fingerprint, "fingerprint_mismatch"
-            )
-        if metadata.get("cache_fingerprint") != fingerprint.cache_fingerprint:
-            return _empty_result(
-                "stale", resolved_path, fingerprint, "cache_key_mismatch"
-            )
+        with resolved_path.open("r", encoding="utf-8", newline="") as handle:
+            metadata_line = handle.readline()
+            if not metadata_line:
+                raise ValueError("cache is empty")
+            metadata = json.loads(metadata_line)
+            if not isinstance(metadata, dict):
+                raise ValueError("metadata record must be an object")
+            if metadata.get("record_type") != "metadata":
+                raise ValueError("first record must be metadata")
+            if metadata.get("schema_version") != CACHE_SCHEMA_VERSION:
+                raise ValueError("unsupported cache schema version")
+            if metadata.get("fingerprint") != fingerprint.as_dict():
+                return _empty_result(
+                    "stale", resolved_path, fingerprint, "fingerprint_mismatch"
+                )
+            if metadata.get("cache_fingerprint") != fingerprint.cache_fingerprint:
+                return _empty_result(
+                    "stale", resolved_path, fingerprint, "cache_key_mismatch"
+                )
 
-        chunks: list[LegalChunk] = []
-        for line_number, line in enumerate(lines[1:], start=2):
-            record = json.loads(line)
-            if not isinstance(record, dict) or record.get("record_type") != "chunk":
-                raise ValueError(f"line {line_number} is not a chunk record")
-            chunks.append(LegalChunk.model_validate(record.get("chunk")))
+            chunks: list[LegalChunk] = []
+            for line_number, line in enumerate(handle, start=2):
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                if not isinstance(record, dict) or record.get("record_type") != "chunk":
+                    raise ValueError(f"line {line_number} is not a chunk record")
+                chunks.append(LegalChunk.model_validate(record.get("chunk")))
         ordered = tuple(chunks)
         if ordered != _ordered_chunks(ordered):
             raise ValueError("chunk records are not in deterministic order")
