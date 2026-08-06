@@ -84,10 +84,39 @@ memory-bank/
 # Local runtime cache
 cache/
 
-# Generated validation and experiment outputs
+# Generated validation, submission and experiment outputs
 artifacts/data-validation/
 artifacts/experiments.jsonl
 artifacts/submission-test/
+artifacts/finetuned_reader_audit/
+submission.json
+submission.zip
+*.submission.json
 
-# Historical local audit; not part of the implementation contract
+# Local AI workspace & agent caches
+.gemini/
+.antigravity/
+.cursor/
+.claude/
+scratch/
+
+# Vector indices & serialized cache
+*.pkl
+*.pickle
+*.faiss
+*.index
+*.hnsw
+
+# Historical local audit & agent playbooks; not part of the implementation contract
 docs/integration-audit.md
+docs/finetuned_reader/
+docs/CODEX_PLAYBOOK_*.md
+docs/HUONG_DAN_DUNG_CODEX_*.md
+docs/SPLIT_USAGE.md
+docs/TASK_CONTRACT.md
+docs/REPRODUCIBILITY.md
+docs/READER_BASELINE_CONTRACT.md
+docs/ARCHITECTURE.md
+overview1.md
+
+
