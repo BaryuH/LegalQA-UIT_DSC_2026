@@ -110,7 +110,6 @@ Cho dù phát triển hay thực thi theo bất kỳ pipeline nào (Direct, BM25
 - [`docs/EVALUATION_CONTRACT.md`](docs/EVALUATION_CONTRACT.md) — Quy chuẩn tính toán METEOR và ROUGE-L.
 - [`docs/SUBMISSION_CONTRACT.md`](docs/SUBMISSION_CONTRACT.md) — Quy định chi tiết về đóng gói và kiểm tra tính hợp lệ của `submission.zip`.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Sơ đồ kiến trúc toàn bộ hệ thống baseline & pipeline.
-- [`overview1.md`](overview1.md) — Bản tổng quan chi tiết trạng thái triển khai các giai đoạn (B0-B2, F1-F2, G4, H2, I1-I2, SUBMISSION-P0).
 
 ### ⚙️ Source Code Cốt Lõi (`src/legal_rag/`)
 - [`src/legal_rag/cli.py`](src/legal_rag/cli.py) — Điểm vào Command Line Interface (chạy pipeline, evaluation, đóng gói submission).
