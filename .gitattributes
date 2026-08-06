@@ -1,0 +1,7 @@
+# Enforce LF line endings for dataset JSON files to maintain exact SHA256 checksums
+data/*.json text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.sh text eol=lf

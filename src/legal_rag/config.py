@@ -6,7 +6,11 @@ import hashlib
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal
+try:
+    from typing import Self
+except ImportError:
+    from typing_extensions import Self
 
 import yaml
 from pydantic import (

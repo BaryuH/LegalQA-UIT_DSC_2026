@@ -6,7 +6,10 @@ import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Self
+try:
+    from typing import Self
+except ImportError:
+    from typing_extensions import Self
 
 from ..config import PromptsSection
 from ..schemas import PackedEvidence
