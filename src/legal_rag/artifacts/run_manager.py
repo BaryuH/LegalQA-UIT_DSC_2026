@@ -16,7 +16,7 @@ import subprocess
 import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from importlib import metadata as importlib_metadata
 from pathlib import Path
@@ -77,7 +77,7 @@ def _validate_component(value: str, name: str) -> str:
 
 
 def _timestamped_run_id(split: str, method: str) -> str:
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     return f"{timestamp}_{split}_{method}"
 
 

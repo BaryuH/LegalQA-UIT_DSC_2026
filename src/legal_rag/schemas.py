@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
-from typing import Annotated, Self
+from typing import Annotated
+try:
+    from typing import Self
+except ImportError:
+    from typing_extensions import Self
 
 from pydantic import (
     AfterValidator,
