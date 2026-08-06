@@ -59,12 +59,32 @@ def load_dataset(path: Path) -> dict[str, dict[str, Any]]:
     return {str(k): v for k, v in raw.items()}
 
 
+def load_bm25_index_if_available() -> tuple[Any, dict[str, Any]]:
+    """Load or build fingerprinted BM25 index from data/selected-contexts.zip if present."""
+    contexts_path = PROJECT_ROOT / "data" / "selected-contexts.zip"
+    if not contexts_path.exists():
+        print("📌 Note: 'data/selected-contexts.zip' not found. Running Direct Few-shot Mode.")
+        return None, {}
+    try:
+        from legal_rag.pipeline import prepare_bm25_index_from_config
+        config_path = PROJECT_ROOT / "configs" / "bm25_rag.yaml"
+        prep = prepare_bm25_index_from_config(config_path, repo_root=PROJECT_ROOT, rebuild_index=False)
+        chunks_map = {c.chunk_id: c for c in prep.chunks}
+        print(f"✅ Loaded BM25 Retrieval Index ({len(chunks_map)} legal context chunks indexed from selected-contexts.zip).")
+        return prep.index, chunks_map
+    except Exception as exc:
+        print(f"⚠️ Note: BM25 Index initialization warning ({exc}). Running Direct Few-shot Mode.")
+        return None, {}
+
+
 def generate_with_hf_model(
     model_name: str,
     questions_dict: dict[str, dict[str, Any]],
+    bm25_index: Any = None,
+    chunks_map: dict[str, Any] | None = None,
     is_benchmark: bool = True,
 ) -> tuple[dict[str, str], list[dict[str, Any]]]:
-    """Generate answers using Hugging Face model."""
+    """Generate answers using Hugging Face model with optional BM25 retrieval."""
     
     print(f"\n🚀 Loading Hugging Face Model: {model_name}...")
     
@@ -105,6 +125,17 @@ def generate_with_hf_model(
         question_text = item.get("question", "")
         evidence_text = item.get("evidence", "")
         
+        # If BM25 Index is available, retrieve top-K context chunks from selected-contexts.zip
+        if bm25_index is not None and chunks_map:
+            try:
+                from legal_rag.retrieval.bm25 import retrieve_bm25
+                hits = retrieve_bm25(bm25_index, question_text, top_k=3)
+                retrieved_chunks = [chunks_map[h.chunk_id].text for h in hits if h.chunk_id in chunks_map]
+                if retrieved_chunks:
+                    evidence_text = "\n\n".join(retrieved_chunks)
+            except Exception:
+                pass
+
         prompt_text = build_fewshot_prompt(question_text, evidence_text)
         
         if model is not None and tokenizer is not None:
@@ -149,12 +180,14 @@ def main() -> int:
         print(f"   {idx}. {m}")
     print("==================================================")
 
-    # 1. Load Warmup (for benchmark scoring) and Public (for submission)
-    print("\n📂 Loading Datasets...")
+    # 1. Load Datasets & Optional BM25 Retrieval Index
+    print("\n📂 Loading Datasets & Retrieval Index...")
     warmup_data = load_dataset(WARMUP_PATH)
     public_data = load_dataset(PUBLIC_PATH)
     print(f"✅ Loaded Warmup Dataset: {len(warmup_data)} questions.")
     print(f"✅ Loaded Public Dataset: {len(public_data)} questions.")
+    
+    bm25_index, chunks_map = load_bm25_index_if_available()
 
     results_summary: list[dict[str, Any]] = []
 
@@ -171,7 +204,9 @@ def main() -> int:
         
         # --- A. BENCHMARK ON WARMUP DATASET ---
         print(f"\n📊 [1/2] Benchmarking METEOR & ROUGE-L on Warmup Split...")
-        warmup_answers, warmup_records = generate_with_hf_model(model_name, warmup_data, is_benchmark=True)
+        warmup_answers, warmup_records = generate_with_hf_model(
+            model_name, warmup_data, bm25_index=bm25_index, chunks_map=chunks_map, is_benchmark=True
+        )
         
         # Build InputRecords for METEOR & ROUGE-L evaluation
         ref_records = [InputRecord(id=qid, answer=item.get("answer", "")) for qid, item in warmup_data.items()]
@@ -193,7 +228,9 @@ def main() -> int:
 
         # --- B. PREDICT ON PUBLIC DATASET & CREATE SUBMISSION ---
         print(f"\n📦 [2/2] Generating Predictions & Submission for Public Official Dataset...")
-        public_answers, public_records = generate_with_hf_model(model_name, public_data, is_benchmark=False)
+        public_answers, public_records = generate_with_hf_model(
+            model_name, public_data, bm25_index=bm25_index, chunks_map=chunks_map, is_benchmark=False
+        )
         
         # Write public predictions
         public_pred_file = model_out_dir / "public_predictions.json"

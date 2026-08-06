@@ -17,7 +17,7 @@ TRAIN_PATH = DATA_DIR / "train.json"
 MODELS = [
     "Qwen/Qwen2.5-3B-Instruct",
     "google/gemma-2-2b-it",
-    "mistralai/Ministral-3b-instruct-2512",
+    "mistralai/Ministral-3B-Instruct-2512",
     "Aimin12/Qwen3-4B-Thinking-2507-Distill-Claude-Opus-4.6-Reasoning-Abliterated",
 ]
 

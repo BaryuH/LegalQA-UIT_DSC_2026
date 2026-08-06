@@ -39,7 +39,6 @@ venv.bak/
 .ruff_cache/
 
 # Large Datasets, Model Checkpoints & Outputs
-*.zip
 *.tar.gz
 *.7z
 *.rar
