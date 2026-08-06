@@ -18,6 +18,15 @@ from pydantic import (
     model_validator,
 )
 
+from .splits import (
+    ReferenceAccess,
+    SplitName,
+    SplitPolicy,
+    SplitUsage,
+    get_split_usage,
+    validate_reference_access,
+)
+
 
 def _require_non_blank(value: str) -> str:
     if not value.strip():
@@ -32,22 +41,9 @@ RerankerProvider = Literal["none", "mock", "sentence_transformers"]
 RerankerDevice = Literal["auto", "cpu", "cuda"]
 ReaderMode = Literal["original_context", "train_context_bm25"]
 ReaderDevice = Literal["auto", "cpu", "cuda"]
-SplitName = Literal["train", "warmup", "public", "private"]
-SplitPolicy = Literal[
-    "train_development",
-    "warmup_evaluation",
-    "public_inference",
-    "private_final_inference",
-]
 SubmissionFormat = Literal["object_by_question_id"]
 SubmissionOrder = Literal["dataset"]
 
-_SPLIT_POLICIES: dict[SplitName, SplitPolicy] = {
-    "train": "train_development",
-    "warmup": "warmup_evaluation",
-    "public": "public_inference",
-    "private": "private_final_inference",
-}
 _SECRET_KEY_MARKERS = (
     "apikey",
     "authorization",
@@ -202,7 +198,7 @@ class PromptsSection(ConfigSection):
 
 class EvaluationSection(ConfigSection):
     enabled: bool
-    reference_access: Literal["none", "approved_evaluation"]
+    reference_access: ReferenceAccess
     primary_metric: Literal["meteor"]
     secondary_metric: Literal["rouge_l"]
 
@@ -313,7 +309,8 @@ class ProjectConfig(ConfigSection):
         if self.retrieval.rough_top_n < self.evidence.evidence_top_k:
             raise ValueError("retrieval.rough_top_n must be >= evidence.evidence_top_k")
 
-        expected_policy = _SPLIT_POLICIES[self.data.split]
+        split_usage = get_split_usage(self.data.split)
+        expected_policy = split_usage.policy
         if self.data.split_policy != expected_policy:
             raise ValueError(
                 f"data.split_policy must be {expected_policy!r} for split "
@@ -321,6 +318,10 @@ class ProjectConfig(ConfigSection):
             )
         if self.data.split == "private" and self.evaluation.reference_access != "none":
             raise ValueError("Private split must disallow evaluator reference access")
+        try:
+            validate_reference_access(self.data.split, self.evaluation.reference_access)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
 
         uses_reranker = self.retrieval.strategy == "bm25_rerank"
         if uses_reranker != self.reranker.enabled:
@@ -381,6 +382,12 @@ class ProjectConfig(ConfigSection):
         """Compatibility accessor exposing the selected profile name."""
 
         return self.project.profile
+
+    @property
+    def split_usage(self) -> SplitUsage:
+        """Return the immutable registry entry for the configured split."""
+
+        return get_split_usage(self.data.split)
 
     def redacted_dict(self) -> dict[str, Any]:
         """Serialize the validated profile while redacting secret-shaped keys."""

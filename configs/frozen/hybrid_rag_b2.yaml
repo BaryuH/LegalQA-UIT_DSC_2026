@@ -1,7 +1,10 @@
-# Offline smoke profile; it does not download models or call external providers.
+# FROZEN B2 CONTROL — FTR-02. Do not tune or improve this profile.
+# Canonical approved Hybrid-RAG snapshot for generative finetuned_reader comparisons.
+# See docs/finetuned_reader/FTR_02_B2_FREEZE.md and artifacts/b2_freeze/fingerprint.json.
+# B2 hybrid profile: BM25 candidates followed by an optional semantic reranker.
 project:
   name: legal-rag
-  profile: mock
+  profile: hybrid-rag
   python_version: "3.11"
 data:
   data_dir: data
@@ -15,16 +18,20 @@ chunking:
   min_chars: 100
   version: legal-chunker-v1
 retrieval:
-  strategy: none
-  rough_top_n: 1
+  strategy: bm25_rerank
+  rough_top_n: 12
   k1: 1.5
   b: 0.75
 reranker:
-  enabled: false
+  enabled: true
   required: false
-  provider: none
+  provider: sentence_transformers
+  model: BAAI/bge-m3
+  device: auto
+  batch_size: 8
+  max_length: 512
 evidence:
-  evidence_top_k: 1
+  evidence_top_k: 4
   max_total_chars: 4000
   max_chunks_per_document: 2
 generation:

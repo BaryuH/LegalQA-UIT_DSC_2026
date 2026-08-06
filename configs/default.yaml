@@ -6,7 +6,7 @@ project:
 data:
   data_dir: data
   question_path: data/warmup.json
-  selected_contexts_path: selected-contexts.zip
+  selected_contexts_path: data/selected-contexts.zip
   split: warmup
   split_policy: warmup_evaluation
 chunking:

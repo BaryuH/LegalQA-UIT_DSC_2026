@@ -14,8 +14,9 @@ exit code when a source file is missing, extra, or has a different size/SHA256.
 
 The current source scope is:
 
-- every file recursively under `data/`;
-- the root-level `selected-contexts.zip` when it exists.
+- every file recursively under `data/` (currently `train.json`, `warmup.json`,
+  `public-official.json`, and `selected-contexts.zip`);
+- the root-level `selected-contexts.zip` when it exists as a separate copy.
 
 Paths containing `cache/`, `output/`, or `outputs/` are excluded from hashing. The
 manifest stores each included file's repository-relative POSIX path, byte size, and
@@ -65,10 +66,12 @@ used to define coverage:
 
 ```bash
 python -m legal_rag.cli create-submission \
+  --split public \
   --predictions outputs/<run>/predictions.jsonl \
   --questions data/public-official.json \
   --output submission.zip
 python -m legal_rag.cli validate-submission \
+  --split public \
   --submission submission.zip \
   --questions data/public-official.json
 ```

@@ -212,6 +212,8 @@ def validate_data(config: ProjectConfig, repo_root: str | Path) -> ValidationRun
         "schema_version": REPORT_SCHEMA_VERSION,
         "profile": config.project.profile,
         "split": config.data.split,
+        "split_policy": config.data.split_policy,
+        "split_usage": config.split_usage.as_dict(),
         "config_hash": config.config_hash(),
         "manifest": {
             **manifest_status,

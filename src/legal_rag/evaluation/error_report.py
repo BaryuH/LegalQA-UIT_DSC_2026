@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..schemas import PackedEvidence
+from ..splits import SplitAccessError, validate_reference_access
 from .alignment import canonical_id
 from .io import load_records
 
@@ -374,6 +375,11 @@ def generate_error_report(
             "Private-answer error reports are disabled; pass allow_private=True "
             "only with explicit evaluation authorization"
         )
+    if selected_split not in {"private", "unknown"}:
+        try:
+            validate_reference_access(selected_split, "approved_evaluation")
+        except SplitAccessError as exc:
+            raise ErrorReportError(str(exc)) from exc
     if default_error_type not in ERROR_TYPES:
         raise ErrorReportError(f"Unknown default error_type: {default_error_type}")
     selected_manual = dict(manual_error_types or {})

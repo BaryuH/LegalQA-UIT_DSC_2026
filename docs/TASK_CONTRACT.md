@@ -51,12 +51,18 @@ Observed warm-up facts: 500 records; no missing or null `question`/`answer`; no 
 
 | File | Documented role | Exact record schema |
 |---|---|---|
-| `train.json` | Training/development data for teams | `UNRESOLVED`; only the question-answer example is documented. |
+| `train.json` | Training/development data for teams | **OBSERVED:** same top-level map and `question`/`answer` fields as warm-up; 7000 records; all records contain non-blank `question` and `answer`. |
 | `warmup.json` | Warm-up sample and submission-process practice | The observed schema above. |
-| `public-official.json` | Public test data | `UNRESOLVED`; actual file absent. |
+| `public-official.json` | Public test data | **OBSERVED:** same top-level map and `question`/`answer` fields as warm-up; 1000 records; all records contain non-blank `question` and `answer`. The team file may be distributed as `public_test.json`, but the local read-only source name is `public-official.json`. |
 | `private-official.json` | Private test data | `UNRESOLVED`; actual file absent. |
 
-Until the official files are inspected, no loader or contract may assume list-vs-map form, optional fields, answer visibility, or submission fields beyond the observed warm-up facts.
+Observed cross-split ID overlaps (canonical string IDs, no rewriting):
+
+- `train` ∩ `warmup`: 387 IDs
+- `warmup` ∩ `public`: 40 IDs
+- `train` ∩ `public`: 0 IDs
+
+Until `private-official.json` is inspected, no loader or contract may assume its schema or answer visibility.
 
 ## 3. ID normalization
 
@@ -81,8 +87,8 @@ Until the official files are inspected, no loader or contract may assume list-vs
 | Source/split | Gold-answer availability and use |
 |---|---|
 | Warm-up | `answer` is present in the observed file. Whether it may be used for tuning, few-shot examples, or only evaluation is `UNRESOLVED`; it must not enter inference retrieval/prompt paths by default. |
-| Train | Gold-answer availability and approved training use are `UNRESOLVED` until the file and competition rules are inspected. |
-| Public official | Reference-answer availability to the team is `UNRESOLVED`. It is not a training/index/prompt source. |
+| Train | `answer` is present in the observed file (7000/7000 records). Approved training use remains governed by competition rules and split policy; gold must not enter inference retrieval/prompt paths. |
+| Public official | `answer` is present in the observed file (1000/1000 records). It is not a training/index/prompt source; inference must use the question-only view. |
 | Private official | Reference-answer availability to the team is `UNRESOLVED`; private data is evaluation-only and never a tuning source. |
 
 ### Inference-safe view
@@ -108,12 +114,12 @@ The task description documents `context_*.json` records with these fields:
 
 | Field | Documented meaning | Contract status |
 |---|---|---|
-| `id` | Unique document identifier | Field documented; exact required type is `UNRESOLVED` (the example uses integer `740`). |
-| `name` | Document title/name | Field documented; exact requiredness/type validation is `UNRESOLVED`. |
-| `link` | Source URL | Field documented; whether optional, required, or validated as a URL is `UNRESOLVED`. |
-| `passage` | Legal text used as context/evidence | Field documented; non-empty/type/encoding rules for official files are `UNRESOLVED`. |
+| `id` | Unique document identifier | **OBSERVED:** integer in `data/selected-contexts.zip`; normalized internally to decimal string. |
+| `name` | Document title/name | **OBSERVED:** present in 7407/8532 JSON members; absent in 1125 members. Loader uses deterministic fallback `str(id)` when `name` is omitted. |
+| `link` | Source URL | **OBSERVED:** string when present; omitted members are allowed. |
+| `passage` | Legal text used as context/evidence | **OBSERVED:** required non-blank string for indexing; 20 members with blank `passage` are excluded with `BLANK_PASSAGE` warnings. |
 
-The selected-context corpus is the only permitted legal-index source. Every later derived chunk must retain source document ID, source path/archive member, and enough section/chunk metadata to trace back to the original passage. No context record is currently present locally, so no stricter type or duplicate policy may be claimed as observed.
+The selected-context corpus is the only permitted legal-index source. The current local archive is `data/selected-contexts.zip` with 8532 `context_*.json` members; 8512 documents load for indexing after blank-passage exclusion. Every later derived chunk must retain source document ID, source path/archive member, and enough section/chunk metadata to trace back to the original passage.
 
 ## 6. Source-data immutability
 
@@ -121,11 +127,11 @@ The following is frozen by `AGENTS.md` and the data-manifest workflow:
 
 1. `data/` is read-only source data.
 2. No source file may be renamed, moved, rewritten, normalized in place, or timestamp/content-mutated by the pipeline.
-3. `selected-contexts.zip` must not be rewritten.
+3. `data/selected-contexts.zip` (and any root-level copy if present) must not be rewritten.
 4. The archive must not be permanently extracted into the source data directory.
 5. Derived chunks, indexes, caches, predictions, and reports live outside `data/`.
 6. `python scripts/verify_data_manifest.py` must pass before experiments.
-7. The current manifest covers `data/**` and an optional root-level `selected-contexts.zip`, excluding cache/output directory names.
+7. The current manifest covers every file under `data/**` and an optional root-level `selected-contexts.zip`, excluding cache/output directory names. The current checkout hashes four files: `data/train.json`, `data/warmup.json`, `data/public-official.json`, and `data/selected-contexts.zip`.
 
 ## 7. Allowed split usage
 

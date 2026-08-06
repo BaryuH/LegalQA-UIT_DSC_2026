@@ -126,6 +126,16 @@ def test_bm25_rag_fixture_e2e_writes_inference_artifacts_without_gold(
     assert generation["temperature"] == config.generation.temperature
 
 
-def test_real_bm25_run_fails_closed_when_selected_contexts_are_missing() -> None:
+def test_real_bm25_run_fails_closed_when_selected_contexts_are_missing(
+    tmp_path: Path,
+) -> None:
+    config_text = (Path("configs/bm25_rag.yaml")).read_text(encoding="utf-8")
+    config_text = config_text.replace(
+        "data/selected-contexts.zip",
+        "data/missing-selected-contexts.zip",
+    )
+    config_path = tmp_path / "bm25_missing_contexts.yaml"
+    config_path.write_text(config_text, encoding="utf-8")
+
     with pytest.raises((PipelineError, FileNotFoundError, ValueError)):
-        run_bm25_rag_from_config("configs/bm25_rag.yaml", limit=5)
+        run_bm25_rag_from_config(str(config_path), limit=5)

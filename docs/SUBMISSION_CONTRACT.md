@@ -76,6 +76,7 @@ dataset:
 
 ```bash
 python -m legal_rag.cli create-submission \
+  --split public \
   --predictions outputs/<run>/predictions.jsonl \
   --questions data/public-official.json \
   --output submission.zip
@@ -85,6 +86,7 @@ Validate without rewriting:
 
 ```bash
 python -m legal_rag.cli validate-submission \
+  --split public \
   --submission submission.zip \
   --questions data/public-official.json
 ```

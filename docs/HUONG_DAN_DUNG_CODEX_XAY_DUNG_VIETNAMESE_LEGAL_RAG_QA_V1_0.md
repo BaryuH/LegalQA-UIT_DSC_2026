@@ -2277,6 +2277,7 @@ python -m legal_rag.cli evaluate \
 
 # Submission
 python -m legal_rag.cli create-submission \
+  --split public \
   --predictions outputs/<run>/predictions.jsonl \
   --output outputs/<run>/submission.json
 

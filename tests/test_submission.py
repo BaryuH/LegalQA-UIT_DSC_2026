@@ -165,6 +165,8 @@ def test_cli_create_and_validate_submission(
         main(
             [
                 "create-submission",
+                "--split",
+                "warmup",
                 "--predictions",
                 str(predictions_path),
                 "--questions",
@@ -193,6 +195,8 @@ def test_cli_create_and_validate_submission(
         main(
             [
                 "validate-submission",
+                "--split",
+                "warmup",
                 "--submission",
                 str(output_path),
                 "--questions",

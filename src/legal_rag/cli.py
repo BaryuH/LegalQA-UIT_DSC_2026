@@ -26,6 +26,7 @@ from .reader import (
     ReaderUnavailableError,
     run_reader_from_config,
 )
+from .splits import SPLIT_NAMES, require_split_capability
 from .submission import (
     SubmissionError,
     create_submission,
@@ -157,7 +158,20 @@ def build_parser() -> argparse.ArgumentParser:
                     "directory with the dedicated official serializer."
                 ),
             )
+        if command == "evaluate":
+            command_parser.add_argument(
+                "--split",
+                required=True,
+                choices=SPLIT_NAMES,
+                help="Registered split role for the evaluation reference set.",
+            )
         if command in {"create-submission", "validate-submission"}:
+            command_parser.add_argument(
+                "--split",
+                required=True,
+                choices=SPLIT_NAMES,
+                help="Registered split role for the submission dataset.",
+            )
             command_parser.add_argument(
                 "--predictions" if command == "create-submission" else "--submission",
                 type=Path,
@@ -206,7 +220,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(args.config)
         print(
             f"Loaded {args.config}: project={config.project_name!r}, "
-            f"mode={config.mode!r}"
+            f"mode={config.mode!r}, split={config.data.split!r}, "
+            f"split_policy={config.data.split_policy!r}"
         )
         return 0
 
@@ -227,6 +242,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "questions": run.report["questions"]["count"],
                     "contexts": run.report["contexts"]["count"],
                     "critical_error_count": len(run.report["critical_errors"]),
+                    "split": config.data.split,
+                    "split_policy": config.data.split_policy,
+                    "split_role": config.split_usage.purpose,
                 },
                 ensure_ascii=False,
                 sort_keys=True,
@@ -236,6 +254,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "build-index":
         try:
+            config = load_config(args.config)
+            require_split_capability(config.data.split, "build_index")
             preparation = prepare_bm25_index_from_config(
                 args.config,
                 rebuild_index=True,
@@ -253,6 +273,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "chunks": len(preparation.chunks),
                     "documents": len(preparation.documents),
                     "manifest_hash": preparation.manifest_hash,
+                    "split": preparation.config.data.split,
+                    "split_policy": preparation.config.data.split_policy,
                 },
                 ensure_ascii=False,
                 sort_keys=True,
@@ -262,6 +284,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "inspect-retrieval":
         try:
+            config = load_config(args.config)
+            require_split_capability(config.data.split, "inspect_retrieval")
             preparation = prepare_bm25_index_from_config(
                 args.config,
                 rebuild_index=args.rebuild_index,
@@ -305,6 +329,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "run":
         try:
             config = load_config(args.config)
+            require_split_capability(config.data.split, "inference")
             profile_method = {
                 "direct": "direct",
                 "mock": "direct",
@@ -426,6 +451,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "create-submission":
         try:
+            split_usage = require_split_capability(args.split, "submission")
             prediction_count = len(load_predictions(args.predictions))
             validation = create_submission(
                 args.predictions,
@@ -448,6 +474,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "missing": list(validation.missing_ids),
                     "extra": list(validation.extra_ids),
                     "warnings": list(validation.warnings),
+                    "split": split_usage.name,
+                    "split_policy": split_usage.policy,
                     "json_path": "<temporary>/submission.json",
                     "zip_members": zip_members,
                     "sha256": hashlib.sha256(args.output.read_bytes()).hexdigest(),
@@ -460,6 +488,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "validate-submission":
         try:
+            split_usage = require_split_capability(args.split, "submission")
             validation = validate_submission_file(
                 args.submission,
                 args.questions,
@@ -478,6 +507,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "extra": list(validation.extra_ids),
                     "error_codes": list(validation.error_codes),
                     "warnings": list(validation.warnings),
+                    "split": split_usage.name,
+                    "split_policy": split_usage.policy,
                 },
                 ensure_ascii=False,
                 sort_keys=True,

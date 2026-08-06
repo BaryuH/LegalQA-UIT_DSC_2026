@@ -24,6 +24,7 @@ from legal_rag.evaluation import (  # noqa: E402
 )
 from legal_rag.evaluation.alignment import AlignmentError  # noqa: E402
 from legal_rag.evaluation.io import InputFormatError, load_records  # noqa: E402
+from legal_rag.splits import SPLIT_NAMES, validate_reference_access  # noqa: E402
 
 
 def _sha256(path: Path) -> str:
@@ -50,7 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--predictions", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--method", default="local")
-    parser.add_argument("--split", default="unknown")
+    parser.add_argument(
+        "--split",
+        required=True,
+        choices=SPLIT_NAMES,
+        help="Registered split role; only reference-enabled roles can be scored.",
+    )
     parser.add_argument("--run-id", default=None)
     parser.add_argument(
         "--manifest",
@@ -77,6 +83,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     repo_root = Path(__file__).resolve().parents[1]
     run_id = args.run_id or args.output.stem
     try:
+        # Validate before opening the reference path so private/public files
+        # cannot cross the evaluation boundary through this command.
+        validate_reference_access(args.split, "approved_evaluation")
         references = load_records(args.references, "Reference")
         predictions = load_records(args.predictions, "Prediction")
         manifest_hash = args.data_manifest_hash or _manifest_hash(
@@ -107,6 +116,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             {
                 "output": args.output.as_posix(),
                 "run_id": run_id,
+                "split": report.artifact["split"],
+                "split_policy": report.artifact["split_policy"],
                 "counts": report.artifact["counts"],
                 "metrics": report.artifact["metrics"],
             },

@@ -1,0 +1,67 @@
+{
+  "bm25_index_schema_version": "c4.bm25-index.v1",
+  "chunk_cache_fingerprint": "UNRESOLVED",
+  "chunk_cache_schema_version": "c3.chunk-cache.v1",
+  "chunking": {
+    "max_chars": 1200,
+    "min_chars": 100,
+    "overlap_chars": 200,
+    "version": "legal-chunker-v1"
+  },
+  "config_hash": "8ac601b8dcd4352ef1fc7f6fa6b27b4585b887ada77922e59baf9ded698dd126",
+  "context_content_hash": "ebcfc896df06087e7da532b4653f32adfaba2200c8ed92a0069e46dbfa126a97",
+  "context_corpus_status": "present",
+  "data_manifest_hash": "46ed1ad9d80fac553712f3f21602ca6197a6e38641a59fa0354dab2bf6b31fea",
+  "evaluator": {
+    "metric_contract_version": "A2-local-v1",
+    "name": "legal_rag.local_exact_token_metrics",
+    "version": "local-v1"
+  },
+  "evidence": {
+    "evidence_top_k": 4,
+    "max_chunks_per_document": 2,
+    "max_total_chars": 4000
+  },
+  "freeze_id": "hybrid_rag_b2",
+  "frozen_config_path": "configs/frozen/hybrid_rag_b2.yaml",
+  "generation": {
+    "max_completion_length": null,
+    "max_output_chars": 1200,
+    "model": "deterministic-mock-v1",
+    "provider": "mock",
+    "retries": 0,
+    "temperature": 0.0
+  },
+  "index_fingerprint": "UNRESOLVED",
+  "normalization_version": "retrieval-normalization-v1",
+  "prompt": {
+    "name": "rag",
+    "path": "configs/prompts/rag_v1.txt",
+    "sha256": "41df15e9f776e0ca72ab7d0812a51de31159a863f88e0deec813875df962d2f1",
+    "version": "rag-v1"
+  },
+  "representative_run": {
+    "path": null,
+    "reason": "representative Hybrid-RAG run artifact not yet recorded",
+    "status": "UNRESOLVED"
+  },
+  "reranker": {
+    "batch_size": 8,
+    "device": "auto",
+    "enabled": true,
+    "max_length": 512,
+    "model": "BAAI/bge-m3",
+    "model_revision": null,
+    "provider": "sentence_transformers",
+    "required": false
+  },
+  "retrieval": {
+    "b": 0.75,
+    "k1": 1.5,
+    "rough_top_n": 12,
+    "strategy": "bm25_rerank"
+  },
+  "schema_version": "ftr02.b2_freeze.v1",
+  "source_config_path": "configs/hybrid_rag.yaml",
+  "status": "config_locked_corpus_pending"
+}

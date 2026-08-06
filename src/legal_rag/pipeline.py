@@ -40,7 +40,7 @@ from .generation import (
     create_llm_client,
     postprocess_answer,
 )
-from .questions import inference_view, load_questions
+from .questions import load_inference_questions
 from .retrieval import (
     BM25Config,
     BM25Index,
@@ -246,6 +246,8 @@ def comparison_controls(config: ProjectConfig) -> dict[str, str | float | int]:
 
     return {
         "split": config.data.split,
+        "split_policy": config.data.split_policy,
+        "reference_access": config.evaluation.reference_access,
         "model": config.generation.model,
         "temperature": config.generation.temperature,
         "max_output_chars": config.generation.max_output_chars,
@@ -707,6 +709,8 @@ def _run_pipeline(
             "run_id": run_manager.run_id,
             "method": method,
             "split": config.data.split,
+            "split_policy": config.data.split_policy,
+            "split_usage": config.split_usage.as_dict(),
             "seed": config.runtime.seed,
             "config_hash": config_hash,
             "data_manifest_hash": data_manifest_hash,
@@ -995,11 +999,10 @@ def run_bm25_rag_from_config(
     )
     config = preparation.config
     root = Path(repo_root or Path(__file__).resolve().parents[2]).resolve()
-    records = load_questions(
+    views = load_inference_questions(
         root / config.data.question_path,
         split=config.data.split,
     )
-    views = inference_view(records)
     selected = views if limit is None else views[:limit]
     selected_output = (
         root / config.runtime.outputs_dir if output_dir is None else Path(output_dir)
@@ -1040,11 +1043,10 @@ def run_hybrid_rag_from_config(
             "Hybrid-RAG config must set retrieval.strategy='bm25_rerank'"
         )
     root = Path(repo_root or Path(__file__).resolve().parents[2]).resolve()
-    records = load_questions(
+    views = load_inference_questions(
         root / config.data.question_path,
         split=config.data.split,
     )
-    views = inference_view(records)
     selected = views if limit is None else views[:limit]
     selected_output = (
         root / config.runtime.outputs_dir if output_dir is None else Path(output_dir)
@@ -1078,11 +1080,10 @@ def run_direct_from_config(
         raise PipelineError("Direct config must set retrieval.strategy='none'")
     root = Path(repo_root or Path(__file__).resolve().parents[2]).resolve()
     manifest_hash = _manifest_hash(root)
-    records = load_questions(
+    views = load_inference_questions(
         root / config.data.question_path,
         split=config.data.split,
     )
-    views = inference_view(records)
     selected = views if limit is None else views[:limit]
     selected_output = (
         root / config.runtime.outputs_dir if output_dir is None else Path(output_dir)

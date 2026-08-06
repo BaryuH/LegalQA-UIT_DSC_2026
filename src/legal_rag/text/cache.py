@@ -311,6 +311,33 @@ def load_chunk_cache(
     )
 
 
+def _write_cache_lines(
+    handle: Any,
+    chunks: tuple[LegalChunk, ...],
+    fingerprint: ChunkCacheFingerprint,
+) -> None:
+    """Stream JSONL cache records without materializing the full file in memory."""
+
+    summary = _summary(chunks)
+    metadata = {
+        "record_type": "metadata",
+        "schema_version": CACHE_SCHEMA_VERSION,
+        "cache_fingerprint": fingerprint.cache_fingerprint,
+        "fingerprint": fingerprint.as_dict(),
+        "summary": summary.as_dict(),
+    }
+    handle.write(
+        json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        + "\n"
+    )
+    for chunk in chunks:
+        record = {"record_type": "chunk", "chunk": chunk.model_dump(mode="json")}
+        handle.write(
+            json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            + "\n"
+        )
+
+
 def _serialize_cache(
     chunks: tuple[LegalChunk, ...], fingerprint: ChunkCacheFingerprint
 ) -> str:
@@ -357,7 +384,6 @@ def write_chunk_cache(
             f"Refusing to overwrite stale chunk cache {path}: {existing.reason}"
         )
 
-    serialized = _serialize_cache(ordered, fingerprint)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
     try:
@@ -371,7 +397,7 @@ def write_chunk_cache(
             delete=False,
         ) as handle:
             temporary_path = Path(handle.name)
-            handle.write(serialized)
+            _write_cache_lines(handle, ordered, fingerprint)
             handle.flush()
             os.fsync(handle.fileno())
         if path.exists():

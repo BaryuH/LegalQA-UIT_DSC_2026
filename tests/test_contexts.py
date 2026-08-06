@@ -74,6 +74,26 @@ def test_zip_loader_is_deterministic_preserves_provenance_and_warns(
     assert not (tmp_path / "nested").exists()
 
 
+def test_zip_loader_accepts_missing_name_with_deterministic_fallback(
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "selected-contexts.zip"
+    _write_zip(
+        archive_path,
+        [
+            (
+                "context_42.json",
+                {"id": 42, "passage": "Điều 42.", "link": "https://example.test/42"},
+            )
+        ],
+    )
+
+    corpus = load_contexts(archive_path)
+
+    assert len(corpus.documents) == 1
+    assert corpus.documents[0].name == "42"
+
+
 def test_directory_loader_uses_file_provenance_and_optional_link(
     tmp_path: Path,
 ) -> None:
@@ -114,12 +134,29 @@ def test_duplicate_document_ids_fail_with_both_locations(tmp_path: Path) -> None
     assert "context_second.json" in message
 
 
+def test_blank_passage_is_excluded_with_warning(tmp_path: Path) -> None:
+    archive_path = tmp_path / "contexts.zip"
+    _write_zip(
+        archive_path,
+        [
+            ("context_blank.json", {"id": 1, "name": "A", "passage": "   "}),
+            ("context_ok.json", _context(2, "Hợp lệ.")),
+        ],
+    )
+
+    corpus = load_contexts(archive_path)
+
+    assert [document.id for document in corpus.documents] == ["2"]
+    assert len(corpus.warnings) == 1
+    assert corpus.warnings[0].code == "BLANK_PASSAGE"
+    assert corpus.warnings[0].path == f"{archive_path}::context_blank.json"
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
         ("id", "   ", "field 'id' must not be blank"),
         ("name", "\n", "field 'name' must not be blank"),
-        ("passage", "\t", "field 'passage' must not be blank"),
         ("link", 123, "optional field 'link' must be a string"),
     ],
 )

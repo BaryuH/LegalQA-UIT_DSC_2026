@@ -6,7 +6,7 @@ project:
 data:
   data_dir: data
   question_path: data/ALQAC.csv
-  selected_contexts_path: selected-contexts.zip
+  selected_contexts_path: data/selected-contexts.zip
   split: public
   split_policy: public_inference
 chunking:

@@ -81,7 +81,12 @@ from .pipeline import (
     run_hybrid_rag,
     run_hybrid_rag_from_config,
 )
-from .questions import QuestionLoadError, inference_view, load_questions
+from .questions import (
+    QuestionLoadError,
+    inference_view,
+    load_inference_questions,
+    load_questions,
+)
 from .retrieval import (
     DEFAULT_RERANKER_BATCH_SIZE,
     DEFAULT_RERANKER_MAX_LENGTH,
@@ -114,6 +119,15 @@ from .schemas import (
     SubmissionAnswer,
     SubmissionPayload,
     SubmissionRecord,
+)
+from .splits import (
+    SPLIT_NAMES,
+    SPLIT_USAGE_REGISTRY,
+    SplitAccessError,
+    SplitUsage,
+    get_split_usage,
+    require_split_capability,
+    validate_reference_access,
 )
 from .submission import (
     OFFICIAL_JSON_FILENAME,
@@ -224,6 +238,7 @@ __all__ = [
     "deduplicate_hits",
     "deduplicate_retrieved_chunks",
     "QuestionLoadError",
+    "load_inference_questions",
     "PipelineError",
     "PipelineRunError",
     "BM25Preparation",
@@ -244,6 +259,13 @@ __all__ = [
     "run_direct_from_config",
     "inference_view",
     "load_questions",
+    "SPLIT_NAMES",
+    "SPLIT_USAGE_REGISTRY",
+    "SplitAccessError",
+    "SplitUsage",
+    "get_split_usage",
+    "require_split_capability",
+    "validate_reference_access",
     "DEFAULT_RERANKER_BATCH_SIZE",
     "DEFAULT_RERANKER_MAX_LENGTH",
     "DEFAULT_SEMANTIC_RERANKER_MODEL",

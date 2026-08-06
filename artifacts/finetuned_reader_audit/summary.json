@@ -1,0 +1,294 @@
+{
+  "b2_freeze": {
+    "config_hash": "43b6fed31101a80586e3d451bc37a52c843cb760aa8d53fa9fe465912def8a19",
+    "frozen_config_path": "configs/frozen/hybrid_rag_b2.yaml",
+    "index_fingerprint": "UNRESOLVED",
+    "prompt_hash": "41df15e9f776e0ca72ab7d0812a51de31159a863f88e0deec813875df962d2f1",
+    "status": "config_locked_corpus_pending"
+  },
+  "cross_split": {
+    "forbidden_id_overlap_counts": {},
+    "forbidden_normalized_question_overlap_counts": {},
+    "forbidden_overlap_total": 0,
+    "id_overlap_counts": {},
+    "id_overlaps": {},
+    "normalized_question_overlap_counts": {},
+    "normalized_question_overlaps": {},
+    "present_splits": [
+      "warmup"
+    ]
+  },
+  "fit": {
+    "estimator": "tokenize_legal_text_local_proxy",
+    "prompt_plus_target_fit_rate": null,
+    "provisional_max_seq_tokens": 4096,
+    "status": "blocked",
+    "target_does_not_fit_rate": null
+  },
+  "hard_stop": true,
+  "hard_stop_reasons": [
+    "train split file missing; no train answers available",
+    "frozen B2 corpus/index fingerprints unresolved; retrieval control incomplete"
+  ],
+  "leakage": {
+    "gold_in_index_or_chunk_metadata": {
+      "pass": null,
+      "reason": "selected-contexts / BM25 index unavailable for competition audit",
+      "status": "skipped"
+    },
+    "gold_in_retrieval_query": {
+      "count": 0,
+      "note": "Query is question-only by construction; count flags answers that are substrings of the question text itself",
+      "pass": null
+    },
+    "pass": true,
+    "public_private_reference_access": {
+      "pass": true,
+      "private_answer_load_blocked": true,
+      "private_error": "Private split answers are not permitted in an inference loader",
+      "public_answer_load_blocked": true,
+      "public_error": "Public split answers are not permitted in an inference loader",
+      "train_reference_access": "none",
+      "warmup_reference_access": "approved_evaluation"
+    },
+    "training_paths_train_only": {
+      "allowed_splits": [
+        "train"
+      ],
+      "candidate_splits": [
+        "train"
+      ],
+      "disallowed_splits": [],
+      "pass": true
+    }
+  },
+  "per_case_count": 0,
+  "retrieval": {
+    "prompt_plus_target_fit_rate": null,
+    "provisional_max_seq_tokens": 4096,
+    "reason": "Frozen B2 retrieval diagnostics require selected-contexts.zip and a built BM25 index; corpus currently missing",
+    "status": "blocked",
+    "zero_evidence_rate": null
+  },
+  "schema_version": "ftr03.data-feasibility.v1",
+  "source_integrity": {
+    "data_manifest_hash": "939bbd241742ec67a9aded4dfc524b44bcf50aefe018aeff7aab7bf02ffc6e8b",
+    "file_count": 1,
+    "status": "verified"
+  },
+  "splits": {
+    "private": {
+      "answer_length_chars": {
+        "count": 0,
+        "max": null,
+        "mean": null,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p95": null
+      },
+      "answer_length_tokens": {
+        "count": 0,
+        "max": null,
+        "mean": null,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p95": null
+      },
+      "answer_type": "absent",
+      "blank_answer_count": 0,
+      "blank_question_count": 0,
+      "duplicate_id_count": 0,
+      "duplicate_qa_pairs": 0,
+      "error": "Source file missing: D:\\LegalQA-UIT_DSC_2026\\data\\private-official.json",
+      "exact_duplicate_questions": 0,
+      "missing_answer_count": 0,
+      "normalized_duplicate_questions": 0,
+      "path": "D:/LegalQA-UIT_DSC_2026/data/private-official.json",
+      "question_length_chars": {
+        "count": 0,
+        "max": null,
+        "mean": null,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p95": null
+      },
+      "question_length_tokens": {
+        "count": 0,
+        "max": null,
+        "mean": null,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p95": null
+      },
+      "question_type": "absent",
+      "record_count": 0,
+      "split": "private",
+      "status": "missing",
+      "unique_id_count": 0
+    },
+    "public": {
+      "answer_length_chars": {
+        "count": 0,
+        "max": null,
+        "mean": null,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p95": null
+      },
+      "answer_length_tokens": {
+        "count": 0,
+        "max": null,
+        "mean": null,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p95": null
+      },
+      "answer_type": "absent",
+      "blank_answer_count": 0,
+      "blank_question_count": 0,
+      "duplicate_id_count": 0,
+      "duplicate_qa_pairs": 0,
+      "error": "Source file missing: D:\\LegalQA-UIT_DSC_2026\\data\\public-official.json",
+      "exact_duplicate_questions": 0,
+      "missing_answer_count": 0,
+      "normalized_duplicate_questions": 0,
+      "path": "D:/LegalQA-UIT_DSC_2026/data/public-official.json",
+      "question_length_chars": {
+        "count": 0,
+        "max": null,
+        "mean": null,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p95": null
+      },
+      "question_length_tokens": {
+        "count": 0,
+        "max": null,
+        "mean": null,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p95": null
+      },
+      "question_type": "absent",
+      "record_count": 0,
+      "split": "public",
+      "status": "missing",
+      "unique_id_count": 0
+    },
+    "train": {
+      "answer_length_chars": {
+        "count": 0,
+        "max": null,
+        "mean": null,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p95": null
+      },
+      "answer_length_tokens": {
+        "count": 0,
+        "max": null,
+        "mean": null,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p95": null
+      },
+      "answer_type": "absent",
+      "blank_answer_count": 0,
+      "blank_question_count": 0,
+      "duplicate_id_count": 0,
+      "duplicate_qa_pairs": 0,
+      "error": "Source file missing: D:\\LegalQA-UIT_DSC_2026\\data\\train.json",
+      "exact_duplicate_questions": 0,
+      "missing_answer_count": 0,
+      "normalized_duplicate_questions": 0,
+      "path": "D:/LegalQA-UIT_DSC_2026/data/train.json",
+      "question_length_chars": {
+        "count": 0,
+        "max": null,
+        "mean": null,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p95": null
+      },
+      "question_length_tokens": {
+        "count": 0,
+        "max": null,
+        "mean": null,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p95": null
+      },
+      "question_type": "absent",
+      "record_count": 0,
+      "split": "train",
+      "status": "missing",
+      "unique_id_count": 0
+    },
+    "warmup": {
+      "answer_length_chars": {
+        "count": 500,
+        "max": 8089,
+        "mean": 1556.164,
+        "min": 176,
+        "p50": 1373.0,
+        "p90": 2499.4,
+        "p95": 2973.899999999994
+      },
+      "answer_length_tokens": {
+        "count": 500,
+        "max": 2014,
+        "mean": 380.798,
+        "min": 41,
+        "p50": 339.0,
+        "p90": 610.4000000000001,
+        "p95": 747.05
+      },
+      "answer_type": "str",
+      "blank_answer_count": 0,
+      "blank_question_count": 0,
+      "duplicate_id_count": 0,
+      "duplicate_qa_pairs": 0,
+      "error": null,
+      "exact_duplicate_questions": 0,
+      "missing_answer_count": 0,
+      "normalized_duplicate_questions": 0,
+      "path": "D:/LegalQA-UIT_DSC_2026/data/warmup.json",
+      "question_length_chars": {
+        "count": 500,
+        "max": 193,
+        "mean": 85.628,
+        "min": 21,
+        "p50": 83.0,
+        "p90": 123.0,
+        "p95": 134.14999999999986
+      },
+      "question_length_tokens": {
+        "count": 500,
+        "max": 45,
+        "mean": 20.402,
+        "min": 6,
+        "p50": 20.0,
+        "p90": 29.0,
+        "p95": 31.049999999999955
+      },
+      "question_type": "str",
+      "record_count": 500,
+      "split": "warmup",
+      "status": "present",
+      "unique_id_count": 500
+    }
+  },
+  "status": "hard_stop"
+}

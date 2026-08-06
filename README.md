@@ -7,7 +7,7 @@ typed để ngăn gold leakage và kiểm soát artifact/submission.
 
 ## Trạng thái hiện tại
 
-Snapshot này được cập nhật ngày 2026-08-03.
+Snapshot này được cập nhật ngày 2026-08-06.
 
 | Phần | Trạng thái | Ghi chú |
 | --- | --- | --- |
@@ -245,6 +245,7 @@ score hoặc internal metadata.
 
 ```bash
 legal-rag create-submission \
+  --split public \
   --predictions outputs/<run>/predictions.jsonl \
   --questions <inference-questions.json> \
   --output submission.zip
@@ -293,10 +294,11 @@ generation artifact, submission metadata và private-profile access.
 
 ## Dữ liệu và blocker hiện tại
 
-- `data/` hiện chỉ có warm-up data được manifest hóa; source hash phải được verify
-  trước experiment.
-- Official train/public/private dataset và `selected-contexts.zip` chưa có trong
-  workspace. Vì vậy retrieval run thật và official benchmark fail-closed.
+- `data/` hiện có `train.json` (7000), `warmup.json` (500), `public-official.json`
+  (1000) và `selected-contexts.zip` (8532 context members; 8512 indexed sau khi loại
+  passage trống). Chạy `python scripts/verify_data_manifest.py` trước mọi experiment.
+- Config mặc định trỏ `selected_contexts_path` tới `data/selected-contexts.zip`.
+- `private-official.json` chưa có trong workspace; private benchmark vẫn fail-closed.
 - Reader assets `data/ALQAC.csv`, `data/splits/alqac_v1.json` và
   `checkpoints/legal_qa_reader/best_model` chưa có; real reader smoke vì vậy cũng
   fail-closed, còn offline mock E2E vẫn chạy trong test suite.
@@ -314,6 +316,7 @@ generation artifact, submission metadata và private-profile access.
 - `docs/REPRODUCIBILITY.md`: fingerprints và artifact.
 - `docs/ERROR_TAXONOMY.md`: phân loại lỗi và diagnostic flow.
 - `docs/SUBMISSION_CONTRACT.md`: contract package chính thức.
+- `docs/SPLIT_USAGE.md`: registry train/warmup/public/private và command boundary.
 - `memory-bank/`: context vận hành dài hạn; cập nhật sau mỗi task có thay đổi đáng kể.
 - `.codegraph/`: chỉ mục local để explore symbol/call graph; có thể rebuild bằng
   `codegraph sync` hoặc `codegraph index`.

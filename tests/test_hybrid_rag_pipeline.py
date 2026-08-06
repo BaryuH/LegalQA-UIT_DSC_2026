@@ -293,6 +293,14 @@ def test_hybrid_cli_routes_to_separate_method(monkeypatch, capsys) -> None:
     assert json.loads(capsys.readouterr().out)["method"] == "hybrid_rag"
 
 
-def test_real_hybrid_smoke_fails_closed_before_model_download() -> None:
+def test_real_hybrid_smoke_fails_closed_before_model_download(tmp_path: Path) -> None:
+    config_text = (Path("configs/hybrid_rag.yaml")).read_text(encoding="utf-8")
+    config_text = config_text.replace(
+        "data/selected-contexts.zip",
+        "data/missing-selected-contexts.zip",
+    )
+    config_path = tmp_path / "hybrid_missing_contexts.yaml"
+    config_path.write_text(config_text, encoding="utf-8")
+
     with pytest.raises((PipelineError, FileNotFoundError, ValueError)):
-        run_hybrid_rag_from_config("configs/hybrid_rag.yaml", limit=1)
+        run_hybrid_rag_from_config(str(config_path), limit=1)

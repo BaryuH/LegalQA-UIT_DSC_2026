@@ -207,6 +207,8 @@ def test_cli_writes_deterministic_metric_artifact(tmp_path: Path) -> None:
         str(predictions_path),
         "--output",
         str(output_path),
+        "--split",
+        "warmup",
         "--run-id",
         "golden-cli",
     ]

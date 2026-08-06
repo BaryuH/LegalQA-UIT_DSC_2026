@@ -44,7 +44,7 @@ def test_placeholder_commands_fail_closed(
     command: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     with pytest.raises(SystemExit) as exc_info:
-        main([command])
+        main([command, "--split", "warmup"])
 
     assert exc_info.value.code == 2
     assert "scaffold placeholder" in capsys.readouterr().err

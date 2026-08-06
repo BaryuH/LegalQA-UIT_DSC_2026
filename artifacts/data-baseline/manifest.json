@@ -6,6 +6,21 @@
   ],
   "files": [
     {
+      "path": "data/public-official.json",
+      "size": 185622,
+      "sha256": "5f68ca901cb20798559538bef60fa7c32bd7d0df59f5bf31a37eb220c9e00df5"
+    },
+    {
+      "path": "data/selected-contexts.zip",
+      "size": 97276888,
+      "sha256": "ebcfc896df06087e7da532b4653f32adfaba2200c8ed92a0069e46dbfa126a97"
+    },
+    {
+      "path": "data/train.json",
+      "size": 16078892,
+      "sha256": "2a52501cc065d266f2f832475950bcf1e7c75c386efa9b2f568f251d745f5988"
+    },
+    {
       "path": "data/warmup.json",
       "size": 1135881,
       "sha256": "0b416328977471c8baca70050dff04d1108a263ca6562be13f80fb3dd64c0c17"

@@ -14,7 +14,7 @@ The task names three files that are not present under those exact paths:
 
 `docs/DE_BAI_CUOC_THI.md` is also present and was read as the available task-contract source named by `AGENTS.md`.
 
-The design below distinguishes observed facts from planned interfaces. Locally observed facts are limited to the current scaffold, `data/warmup.json`, the task PDF, the playbook, `AGENTS.md`, and the data manifest. Official train/public/private datasets, selected contexts, and the official evaluator are not present; the official submission boundary is fixed in `docs/SUBMISSION_CONTRACT.md`.
+The design below distinguishes observed facts from planned interfaces. Locally observed facts now include `data/train.json`, `data/warmup.json`, `data/public-official.json`, `data/selected-contexts.zip`, the data manifest, the task PDF, the playbook, `AGENTS.md`, and the submission contract. `private-official.json` and the official evaluator remain absent.
 
 ## 1. Design goals and non-goals
 
@@ -110,12 +110,16 @@ Pydantic v2 models are the preferred implementation for externally loaded record
 
 ### Observed source schema
 
-`data/warmup.json` is a UTF-8 JSON object with 500 numeric-looking string keys. Each value has exactly:
+Question files (`data/train.json`, `data/warmup.json`, `data/public-official.json`) are UTF-8 JSON objects/maps with numeric-looking string keys. Each value has exactly:
 
 - `question: string`;
 - `answer: string`.
 
-The official train/public/private schemas and the context records are not locally available. The PDF example documents context fields `id`, `name`, `link`, and `passage`; this remains a documented contract candidate, not an observed runtime schema.
+Observed record counts: train 7000, warm-up 500, public 1000. Cross-split ID overlaps exist (`train`∩`warmup` 387, `warmup`∩`public` 40, `train`∩`public` 0).
+
+`data/selected-contexts.zip` contains 8532 `context_*.json` members. Observed fields are `id` (integer), optional `name`, optional `link`, and `passage` (string). The loader indexes 8512 documents and excludes 20 blank-passage members with `BLANK_PASSAGE` warnings; when `name` is omitted, the loader uses deterministic fallback `str(id)`.
+
+`private-official.json` is not locally available.
 
 ## 5. Read-only source paths
 
@@ -123,13 +127,13 @@ The following paths are source or specification inputs and must not be rewritten
 
 | Path | Role | Policy |
 |---|---|---|
-| `data/**` | Competition source data; currently `data/warmup.json`. | Read-only; no rename, move, normalization-in-place, extraction, or generated index. |
-| `selected-contexts.zip` | Expected root-level selected-context archive if later supplied. | Read-only; hash and read directly or use a temporary derived view outside `data/`; never rewrite. |
-| `data/selected-contexts.zip` | Possible archive location covered by the `data/**` source scope. | Same read-only policy. |
+| `data/**` | Competition source data: `train.json`, `warmup.json`, `public-official.json`, `selected-contexts.zip`. | Read-only; no rename, move, normalization-in-place, extraction, or generated index. |
+| `data/selected-contexts.zip` | Selected legal-context archive used by default configs. | Read-only; hash and read directly; never rewrite. |
+| `selected-contexts.zip` | Optional root-level copy of the archive if later supplied. | Same read-only policy; configs default to `data/selected-contexts.zip`. |
 | `AGENTS.md`, `docs/**` | Human-reviewed task/specification documents. | Read as configuration/specification; never treat prose examples as observed data. |
 | `artifacts/data-baseline/manifest.json` | Integrity baseline for source data. | Versioned provenance artifact; update only through an intentional manifest review. |
 
-The current manifest script hashes every file under `data/` and the optional root-level `selected-contexts.zip`, while excluding directory names `cache`, `output`, and `outputs`.
+The current manifest script hashes every file under `data/` and the optional root-level `selected-contexts.zip`, while excluding directory names `cache`, `output`, and `outputs`. The current checkout manifest covers four files under `data/`.
 
 ## 6. Cache paths
 

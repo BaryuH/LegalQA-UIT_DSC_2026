@@ -27,6 +27,14 @@ class ContextLoadError(ValueError):
     """Raised when a selected-context source cannot satisfy its schema."""
 
 
+class ContextSkipError(ContextLoadError):
+    """Raised when a context member should be excluded with a structured warning."""
+
+    def __init__(self, warning: ContextLoadWarning) -> None:
+        self.warning = warning
+        super().__init__(warning.message)
+
+
 @dataclass(frozen=True, slots=True)
 class ContextLoadWarning:
     """Structured diagnostic for a source member ignored by the loader."""
@@ -136,7 +144,7 @@ def _validate_document_fields(
         )
 
     expected_fields = {"id", "name", "passage", "link"}
-    required_fields = {"id", "name", "passage"}
+    required_fields = {"id", "passage"}
     missing_fields = required_fields - set(payload)
     if missing_fields:
         raise ContextLoadError(
@@ -157,14 +165,18 @@ def _validate_document_fields(
     if isinstance(document_id, str) and not document_id.strip():
         raise ContextLoadError(f"{location}: field 'id' must not be blank")
 
-    for field_name in ("name", "passage"):
-        value = payload[field_name]
-        if not isinstance(value, str):
-            raise ContextLoadError(f"{location}: field {field_name!r} must be a string")
-        if not value.strip():
-            raise ContextLoadError(
-                f"{location}: field {field_name!r} must not be blank"
-            )
+    if "name" in payload:
+        name = payload["name"]
+        if not isinstance(name, str):
+            raise ContextLoadError(f"{location}: field 'name' must be a string")
+        if not name.strip():
+            raise ContextLoadError(f"{location}: field 'name' must not be blank")
+
+    passage = payload["passage"]
+    if not isinstance(passage, str):
+        raise ContextLoadError(f"{location}: field 'passage' must be a string")
+    if not passage.strip():
+        raise ContextLoadError(f"{location}: field 'passage' must not be blank")
 
     link = payload.get("link")
     if link is not None and not isinstance(link, str):
@@ -177,6 +189,17 @@ def _validate_document_fields(
     return payload
 
 
+def _default_document_name(document_id: object) -> str:
+    """Return a deterministic non-blank title when the source omits ``name``."""
+
+    if isinstance(document_id, bool) or not isinstance(document_id, (str, int)):
+        raise ValueError("document_id must be a non-blank string or integer")
+    normalized = str(document_id)
+    if not normalized.strip():
+        raise ValueError("document_id must not be blank")
+    return normalized
+
+
 def _build_document(
     payload: Any,
     source_path: str,
@@ -185,10 +208,11 @@ def _build_document(
 ) -> LegalDocument:
     fields = _validate_document_fields(payload, source_path, source_member)
     location = _location(source_path, source_member)
+    document_name = fields.get("name") or _default_document_name(fields["id"])
     try:
         return LegalDocument(
             id=fields["id"],
-            name=fields["name"],
+            name=document_name,
             link=fields.get("link"),
             passage=fields["passage"],
             source_path=source_path,
@@ -214,12 +238,38 @@ def _read_document(
         raise ContextLoadError(f"{location}: source must be UTF-8") from exc
     except json.JSONDecodeError as exc:
         raise ContextLoadError(f"{location}: invalid JSON: {exc}") from exc
+
+    if isinstance(converted, dict):
+        passage = converted.get("passage")
+        if not isinstance(passage, str) or not passage.strip():
+            raise ContextSkipError(
+                ContextLoadWarning(
+                    code="BLANK_PASSAGE",
+                    source_path=source_path,
+                    source_member=source_member,
+                    message="Excluded context document with blank passage",
+                )
+            )
+
     return _build_document(
         converted,
         source_path,
         source_member,
         content_hash=sha256(content).hexdigest(),
     )
+
+
+def _append_document(
+    content: bytes,
+    source_path: str,
+    source_member: str | None,
+    documents: list[LegalDocument],
+    warnings: list[ContextLoadWarning],
+) -> None:
+    try:
+        documents.append(_read_document(content, source_path, source_member))
+    except ContextSkipError as exc:
+        warnings.append(exc.warning)
 
 
 def _directory_files(root: Path) -> Iterator[Path]:
@@ -244,7 +294,7 @@ def _load_directory(
             content = file_path.read_bytes()
         except OSError as exc:
             raise ContextLoadError(f"{file_path}: cannot read source: {exc}") from exc
-        documents.append(_read_document(content, str(file_path), None))
+        _append_document(content, str(file_path), None, documents, warnings)
 
 
 def _load_zip(
@@ -270,7 +320,7 @@ def _load_zip(
                     raise ContextLoadError(
                         f"{location}: cannot read source: {exc}"
                     ) from exc
-                documents.append(_read_document(content, source_path, member))
+                _append_document(content, source_path, member, documents, warnings)
     except ContextLoadError:
         raise
     except (OSError, zipfile.BadZipFile) as exc:

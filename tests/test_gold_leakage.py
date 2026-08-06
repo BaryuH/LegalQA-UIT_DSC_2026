@@ -8,6 +8,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 import yaml
@@ -32,7 +33,12 @@ from legal_rag.schemas import (
     Prediction,
     RetrievalHit,
 )
-from legal_rag.submission import SubmissionError, SubmissionSpec, build_submission
+from legal_rag.submission import (
+    SubmissionError,
+    SubmissionSpec,
+    build_submission,
+    create_submission,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOLD_SENTINEL = "H2 GOLD ANSWER MUST NEVER ENTER INFERENCE"
@@ -335,6 +341,34 @@ def test_retrieval_query_receives_question_only(monkeypatch, tmp_path: Path) -> 
     assert all(query != GOLD_SENTINEL for query in observed_queries)
 
 
+def test_hybrid_reranker_query_receives_question_only(tmp_path: Path) -> None:
+    fixture = _fixture(tmp_path)
+    observed_queries: list[str] = []
+
+    def score(query: str, hit: RetrievalHit) -> float:
+        observed_queries.append(query)
+        return 1.0 if hit.chunk_id == "h2-annual:0" else 0.5
+
+    run_hybrid_rag(
+        (fixture.question,),
+        {chunk.chunk_id: chunk for chunk in fixture.chunks},
+        fixture.index,
+        fixture.hybrid_config,
+        documents=fixture.documents,
+        prompt_builder=fixture.prompt_builder,
+        client=MockLLMClient(fixture.hybrid_config.generation),
+        reranker=MockReranker(score_fn=score, model="h2-query-reranker"),
+        output_dir=tmp_path / "outputs",
+        run_id="h2-reranker-query-only",
+        data_manifest_hash="h2-fixture-manifest",
+        chunk_cache_fingerprint="h2-fixture-cache",
+    )
+
+    assert observed_queries == [fixture.question.question] * len(observed_queries)
+    assert observed_queries
+    assert all(query != GOLD_SENTINEL for query in observed_queries)
+
+
 def test_prediction_artifacts_have_typed_predictions_without_gold(
     tmp_path: Path,
 ) -> None:
@@ -439,6 +473,69 @@ def test_submission_rejects_gold_metadata_and_emits_official_fields_only() -> No
             ],
             ["h2-case-1"],
             spec,
+        )
+
+
+def test_official_submission_zip_drops_internal_fields_and_rejects_gold(
+    tmp_path: Path,
+) -> None:
+    questions_path = tmp_path / "questions.json"
+    questions_path.write_text(
+        json.dumps(
+            {
+                "h2-case-1": {
+                    "question": "Question text.",
+                    "answer": GOLD_SENTINEL,
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    predictions_path = tmp_path / "predictions.jsonl"
+    predictions_path.write_text(
+        json.dumps(
+            {
+                "id": "h2-case-1",
+                "answer": "Generated answer.",
+                "method": "direct",
+                "raw_answer": "Generated answer.",
+                "cleaned_answer": "Generated answer.",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    submission_path = tmp_path / "submission.zip"
+
+    result = create_submission(predictions_path, questions_path, submission_path)
+
+    assert result.valid
+    with ZipFile(submission_path) as archive:
+        assert archive.namelist() == ["submission.json"]
+        payload = json.loads(archive.read("submission.json").decode("utf-8"))
+    assert payload == {"h2-case-1": {"answer": "Generated answer."}}
+    _assert_no_gold_payload(payload, GOLD_SENTINEL)
+
+    gold_predictions_path = tmp_path / "gold-predictions.jsonl"
+    gold_predictions_path.write_text(
+        json.dumps(
+            {
+                "id": "h2-case-1",
+                "answer": "Generated answer.",
+                "gold_answer": GOLD_SENTINEL,
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(SubmissionError, match="unsupported prediction field"):
+        create_submission(
+            gold_predictions_path,
+            questions_path,
+            tmp_path / "rejected-submission.zip",
         )
 
 

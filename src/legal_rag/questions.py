@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from .schemas import InferenceQuestion, LegalQuestion
+from .splits import SplitName, get_split_usage
 
 
 class QuestionLoadError(ValueError):
@@ -105,13 +106,18 @@ def _record_fields(path: Path, record_key: str, value: Any) -> dict[str, Any]:
 
 
 def _build_question(
-    path: Path, record_key: str, fields: dict[str, Any], split: str
+    path: Path,
+    record_key: str,
+    fields: dict[str, Any],
+    split: str,
+    *,
+    include_answer: bool,
 ) -> LegalQuestion:
     try:
         return LegalQuestion(
             id=record_key,
             question=fields["question"],
-            answer=fields.get("answer"),
+            answer=fields.get("answer") if include_answer else None,
             split=split,
         )
     except ValidationError as exc:
@@ -181,17 +187,34 @@ def inspect_questions(path: str | Path) -> QuestionSourceStats:
     )
 
 
-def load_questions(path: str | Path, *, split: str) -> tuple[LegalQuestion, ...]:
+def load_questions(
+    path: str | Path,
+    *,
+    split: str,
+    include_answers: bool | None = None,
+) -> tuple[LegalQuestion, ...]:
     """Load the observed question map without modifying the source file.
 
     The source is expected to be a UTF-8 JSON object whose keys are question
     IDs and whose values are nested objects with exactly ``question`` and
     ``answer`` fields.  ``answer`` may be omitted for inference-only input.
-    Returned records are sorted by their canonical string IDs.
+    When ``include_answers`` is false, answer values are deliberately excluded
+    from returned domain records.  Returned records are sorted by their
+    canonical string IDs.
     """
 
     source_path = Path(path)
     _validate_split(source_path, split)
+    if include_answers is None:
+        include_answers = split not in {"public", "private"}
+    if split == "private" and include_answers:
+        raise QuestionLoadError(
+            "Private split answers are not permitted in an inference loader"
+        )
+    if split == "public" and include_answers:
+        raise QuestionLoadError(
+            "Public split answers are not permitted in an inference loader"
+        )
     payload = _read_json(source_path)
 
     records: list[LegalQuestion] = []
@@ -206,9 +229,27 @@ def load_questions(path: str | Path, *, split: str) -> tuple[LegalQuestion, ...]
             )
         seen_ids.add(canonical_id)
         fields = _record_fields(source_path, canonical_id, value)
-        records.append(_build_question(source_path, canonical_id, fields, split))
+        records.append(
+            _build_question(
+                source_path,
+                canonical_id,
+                fields,
+                split,
+                include_answer=include_answers,
+            )
+        )
 
     return tuple(sorted(records, key=lambda record: record.id))
+
+
+def load_inference_questions(
+    path: str | Path, *, split: SplitName
+) -> tuple[InferenceQuestion, ...]:
+    """Load a split for inference without materializing any gold answers."""
+
+    get_split_usage(split)
+    records = load_questions(path, split=split, include_answers=False)
+    return inference_view(records)
 
 
 def inference_view(
@@ -217,3 +258,13 @@ def inference_view(
     """Return deterministic question-only records with gold answers removed."""
 
     return tuple(record.inference_view() for record in records)
+
+
+__all__ = [
+    "QuestionLoadError",
+    "QuestionSourceStats",
+    "inference_view",
+    "inspect_questions",
+    "load_inference_questions",
+    "load_questions",
+]

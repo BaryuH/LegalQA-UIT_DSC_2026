@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..splits import ReferenceAccess, validate_reference_access
 from .alignment import align_records
 from .meteor import MeteorResult, compute_meteor
 from .models import AlignedRecord, InputRecord
@@ -26,6 +27,7 @@ class EvaluationOptions:
     run_id: str = "local-evaluation"
     method: str = "local"
     split: str = "unknown"
+    reference_access: ReferenceAccess = "approved_evaluation"
     data_manifest_hash: str = "UNRESOLVED"
     prediction_artifact: str = "UNRESOLVED"
     command: str = "UNRESOLVED"
@@ -112,6 +114,11 @@ def evaluate_records(
     """Strictly align and locally score a complete prediction set."""
 
     selected_options = options or EvaluationOptions()
+    split_usage = None
+    if selected_options.split != "unknown":
+        split_usage = validate_reference_access(
+            selected_options.split, selected_options.reference_access
+        )
     aligned = align_records(references, predictions)
     cases = tuple(
         _score_case(record, selected_options.normalization) for record in aligned
@@ -128,6 +135,8 @@ def evaluate_records(
         "run_id": selected_options.run_id,
         "method": selected_options.method,
         "split": selected_options.split,
+        "split_policy": split_usage.policy if split_usage else "UNRESOLVED",
+        "split_role": split_usage.purpose if split_usage else "UNRESOLVED",
         "metric_contract_version": METRIC_CONTRACT_VERSION,
         "evaluator_kind": "local",
         "evaluator_name": EVALUATOR_NAME,
@@ -136,6 +145,7 @@ def evaluate_records(
         "data_manifest_hash": selected_options.data_manifest_hash,
         "prediction_artifact": selected_options.prediction_artifact,
         "reference_role": "evaluation_reference_only",
+        "reference_access": selected_options.reference_access,
         "command": selected_options.command,
         "normalization": selected_options.normalization.as_dict(),
         "aggregation": {
