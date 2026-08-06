@@ -8,11 +8,14 @@ import pytest
 from legal_rag.schemas import LegalDocument
 from legal_rag.text import (
     ChunkCacheError,
+    ChunkCacheFingerprint,
     ChunkCacheStaleError,
     ChunkingConfig,
     build_chunk_cache,
+    chunk_document,
     read_chunk_cache,
 )
+from legal_rag.text import cache as cache_module
 
 
 def _document(
@@ -37,6 +40,32 @@ def _config(**overrides: object) -> ChunkingConfig:
     }
     values.update(overrides)
     return ChunkingConfig(**values)
+
+
+class _ShortWritingHandle:
+    """Test double that accepts only a short prefix per write call."""
+
+    def __init__(self, limit: int = 7) -> None:
+        self.limit = limit
+        self.value = ""
+
+    def write(self, text: str) -> int:
+        written = min(self.limit, len(text))
+        self.value += text[:written]
+        return written
+
+
+def test_jsonl_writer_completes_partial_text_writes() -> None:
+    config = _config()
+    fingerprint = ChunkCacheFingerprint.from_config("manifest-a", config)
+    chunks = chunk_document(_document("partial"), config)
+    handle = _ShortWritingHandle()
+
+    cache_module._write_cache_lines(handle, chunks, fingerprint)
+
+    records = [json.loads(line) for line in handle.value.splitlines()]
+    assert records[0]["record_type"] == "metadata"
+    assert [record["record_type"] for record in records[1:]] == ["chunk"] * len(chunks)
 
 
 def test_jsonl_cache_miss_hit_and_summary_are_auditable(tmp_path: Path) -> None:

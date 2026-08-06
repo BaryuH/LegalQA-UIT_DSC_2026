@@ -314,6 +314,19 @@ def load_chunk_cache(
     )
 
 
+def _write_all(handle: Any, text: str) -> None:
+    """Write a complete text record even when the stream short-writes."""
+
+    offset = 0
+    while offset < len(text):
+        written = handle.write(text[offset:])
+        if not isinstance(written, int) or isinstance(written, bool):
+            raise OSError("Chunk cache writer must return an integer character count")
+        if written <= 0:
+            raise OSError("Chunk cache writer made no progress")
+        offset += written
+
+
 def _write_cache_lines(
     handle: Any,
     chunks: tuple[LegalChunk, ...],
@@ -329,15 +342,19 @@ def _write_cache_lines(
         "fingerprint": fingerprint.as_dict(),
         "summary": summary.as_dict(),
     }
-    handle.write(
+    _write_all(
+        handle,
         json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        + "\n"
+        + "\n",
     )
     for chunk in chunks:
         record = {"record_type": "chunk", "chunk": chunk.model_dump(mode="json")}
-        handle.write(
-            json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            + "\n"
+        _write_all(
+            handle,
+            json.dumps(
+                record, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+            + "\n",
         )
 
 
