@@ -1,3 +1,4 @@
+
 # Vietnamese Legal RAG-QA Target Architecture
 
 **Task:** P0.3 - Define target architecture and task dependency graph  
