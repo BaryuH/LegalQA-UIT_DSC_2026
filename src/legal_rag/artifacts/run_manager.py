@@ -157,6 +157,7 @@ class RunManager:
         repo_root: str | Path,
         run_id: str | None = None,
         registry_path: str | Path | None = None,
+        with_retrieval: bool | None = None,
     ) -> RunManager:
         """Create a manager without overwriting an existing run directory."""
 
@@ -187,15 +188,18 @@ class RunManager:
                 submission=run_dir / "submission.json",
                 retrieval=(
                     run_dir / "retrieval.jsonl"
-                    if selected_method
-                    in {
-                        "bm25_rag",
-                        "bm25-rag",
-                        "hybrid_rag",
-                        "hybrid-rag",
-                        "tuned_bm25_reader",
-                        "tuned-bm25-reader",
-                    }
+                    if (
+                        with_retrieval is True
+                        or selected_method
+                        in {
+                            "bm25_rag",
+                            "bm25-rag",
+                            "hybrid_rag",
+                            "hybrid-rag",
+                            "tuned_bm25_reader",
+                            "tuned-bm25-reader",
+                        }
+                    )
                     else None
                 ),
                 reader=(

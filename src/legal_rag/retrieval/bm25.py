@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import heapq
 import json
 import math
 import os
 import tempfile
+from array import array
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -18,6 +20,11 @@ from pydantic import ValidationError
 from ..schemas import LegalChunk, RetrievalHit
 from ..text.cache import ChunkCacheFingerprint
 from ..text.normalize import tokenize_legal_text
+
+try:  # Optional acceleration; the exact Python path remains the compatibility path.
+    import numpy as _numpy
+except ImportError:  # pragma: no cover - exercised only in minimal installations
+    _numpy = None
 
 BM25_INDEX_SCHEMA_VERSION = "c4.bm25-index.v1"
 BM25_INDEX_VERSION = "legal-bm25-v1"
@@ -314,11 +321,101 @@ class BM25IndexResult:
     reason: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class BM25PostingList:
+    """Compact ordinal/term-frequency postings for one query term."""
+
+    ordinals: Sequence[int]
+    term_frequencies: Sequence[int]
+
+    def __post_init__(self) -> None:
+        if len(self.ordinals) != len(self.term_frequencies):
+            raise ValueError("BM25 posting arrays must have equal lengths")
+        if tuple(sorted(self.ordinals)) != tuple(self.ordinals):
+            raise ValueError("BM25 posting ordinals must be sorted")
+        if any(term_frequency <= 0 for term_frequency in self.term_frequencies):
+            raise ValueError("BM25 posting term frequencies must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class BM25QueryCache:
+    """In-memory postings limited to the terms used by one inference batch."""
+
+    index_fingerprint: str
+    postings: Mapping[str, BM25PostingList]
+    document_frequencies: Mapping[str, int]
+    document_lengths: Sequence[int]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.index_fingerprint, str) or not self.index_fingerprint:
+            raise ValueError("index_fingerprint must not be blank")
+        if set(self.postings) != set(self.document_frequencies):
+            raise ValueError(
+                "BM25 query cache postings and document frequencies must cover "
+                "the same terms"
+            )
+        for term, posting in self.postings.items():
+            if not isinstance(term, str) or not term:
+                raise ValueError("BM25 query cache terms must be non-blank")
+            if any(ordinal < 0 for ordinal in posting.ordinals):
+                raise ValueError("BM25 query cache ordinals must be non-negative")
+        if any(length < 0 for length in self.document_lengths):
+            raise ValueError("BM25 query cache document lengths must be non-negative")
+
+
+def build_bm25_query_cache(
+    index: BM25Index,
+    queries: Iterable[str],
+) -> BM25QueryCache:
+    """Build exact BM25 postings for the terms used by a query batch.
+
+    The persisted index remains unchanged.  Restricting the derived postings to
+    the batch's query vocabulary avoids scanning every corpus document for every
+    question while preserving the original BM25 scoring formula.
+    """
+
+    query_terms: set[str] = set()
+    for query in queries:
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("BM25 query must be a non-blank string")
+        query_terms.update(tokenize_legal_text(query))
+
+    postings_lists: dict[str, tuple[array, array]] = {
+        term: (array("I"), array("I")) for term in query_terms
+    }
+    if postings_lists:
+        for ordinal, document in enumerate(index.documents):
+            for term, term_frequency in document.term_frequencies:
+                entries = postings_lists.get(term)
+                if entries is not None:
+                    entries[0].append(ordinal)
+                    entries[1].append(term_frequency)
+
+    document_frequencies = dict(index.document_frequencies)
+    return BM25QueryCache(
+        index_fingerprint=index.index_fingerprint,
+        postings={
+            term: BM25PostingList(
+                ordinals=entries[0],
+                term_frequencies=entries[1],
+            )
+            for term, entries in postings_lists.items()
+        },
+        document_frequencies={
+            term: document_frequencies.get(term, 0) for term in query_terms
+        },
+        document_lengths=array(
+            "I", (document.document_length for document in index.documents)
+        ),
+    )
+
+
 def retrieve_bm25(
     index: BM25Index,
     query: str,
     *,
     top_k: int,
+    query_cache: BM25QueryCache | None = None,
 ) -> tuple[RetrievalHit, ...]:
     """Retrieve positive-scoring chunks with deterministic BM25 ranking.
 
@@ -336,39 +433,127 @@ def retrieve_bm25(
     if not query_terms:
         return ()
 
-    document_frequency = {
-        term: sum(
-            1
-            for document in index.documents
-            if any(
-                indexed_term == term for indexed_term, _ in document.term_frequencies
+    if query_cache is not None:
+        if query_cache.index_fingerprint != index.index_fingerprint:
+            raise ValueError("BM25 query cache does not match the loaded index")
+        missing_terms = query_terms.difference(query_cache.postings)
+        if missing_terms:
+            raise ValueError(
+                "BM25 query cache does not cover query terms: "
+                + ", ".join(sorted(missing_terms))
             )
-        )
-        for term in query_terms
-    }
-    average_length = index.summary.average_document_length
-    scored: list[tuple[float, BM25IndexedDocument]] = []
-    for document in index.documents:
-        frequencies = dict(document.term_frequencies)
-        score = 0.0
-        for term in query_terms:
-            term_frequency = frequencies.get(term, 0)
-            if term_frequency == 0:
-                continue
-            frequency = document_frequency[term]
-            idf = math.log(
-                1.0 + (len(index.documents) - frequency + 0.5) / (frequency + 0.5)
+        document_frequency = query_cache.document_frequencies
+        scored_by_ordinal: dict[int, float] = {}
+        average_length = index.summary.average_document_length
+        corpus_size = len(index.documents)
+        if _numpy is not None:
+            scores = _numpy.zeros(corpus_size, dtype=_numpy.float64)
+            document_lengths = _numpy.frombuffer(
+                query_cache.document_lengths,
+                dtype=_numpy.uint32,
+                count=corpus_size,
             )
-            length_ratio = (
-                document.document_length / average_length if average_length else 0.0
-            )
-            denominator = term_frequency + index.config.k1 * (
-                1.0 - index.config.b + index.config.b * length_ratio
-            )
-            score += idf * (term_frequency * (index.config.k1 + 1.0) / denominator)
-        if score > 0.0:
-            scored.append((score, document))
+            for term in sorted(query_terms):
+                frequency = document_frequency[term]
+                if frequency <= 0:
+                    continue
+                idf = math.log(
+                    1.0 + (corpus_size - frequency + 0.5) / (frequency + 0.5)
+                )
+                posting = query_cache.postings[term]
+                ordinals = _numpy.frombuffer(posting.ordinals, dtype=_numpy.uint32)
+                term_frequencies = _numpy.frombuffer(
+                    posting.term_frequencies,
+                    dtype=_numpy.uint32,
+                )
+                length_ratio = (
+                    document_lengths[ordinals] / average_length
+                    if average_length
+                    else 0.0
+                )
+                denominator = term_frequencies + index.config.k1 * (
+                    1.0 - index.config.b + index.config.b * length_ratio
+                )
+                scores[ordinals] += idf * (
+                    term_frequencies * (index.config.k1 + 1.0) / denominator
+                )
+            candidate_ordinals = _numpy.flatnonzero(scores > 0.0)
+            if len(candidate_ordinals) > top_k:
+                threshold = _numpy.partition(
+                    scores[candidate_ordinals], -top_k
+                )[-top_k]
+                candidate_ordinals = candidate_ordinals[
+                    scores[candidate_ordinals] >= threshold
+                ]
+            scored = [
+                (float(scores[ordinal]), index.documents[int(ordinal)])
+                for ordinal in candidate_ordinals
+            ]
+        else:
+            for term in sorted(query_terms):
+                frequency = document_frequency[term]
+                if frequency <= 0:
+                    continue
+                idf = math.log(
+                    1.0 + (corpus_size - frequency + 0.5) / (frequency + 0.5)
+                )
+                posting = query_cache.postings[term]
+                for ordinal, term_frequency in zip(
+                    posting.ordinals,
+                    posting.term_frequencies,
+                    strict=True,
+                ):
+                    document = index.documents[ordinal]
+                    length_ratio = (
+                        document.document_length / average_length
+                        if average_length
+                        else 0.0
+                    )
+                    denominator = term_frequency + index.config.k1 * (
+                        1.0 - index.config.b + index.config.b * length_ratio
+                    )
+                    scored_by_ordinal[ordinal] = scored_by_ordinal.get(
+                        ordinal, 0.0
+                    ) + idf * (
+                        term_frequency * (index.config.k1 + 1.0) / denominator
+                    )
+            scored = [
+                (score, index.documents[ordinal])
+                for ordinal, score in scored_by_ordinal.items()
+                if score > 0.0
+            ]
+    else:
+        document_frequency = dict(index.document_frequencies)
+        average_length = index.summary.average_document_length
+        scored = []
+        for document in index.documents:
+            frequencies = dict(document.term_frequencies)
+            score = 0.0
+            for term in sorted(query_terms):
+                term_frequency = frequencies.get(term, 0)
+                if term_frequency == 0:
+                    continue
+                frequency = document_frequency[term]
+                idf = math.log(
+                    1.0
+                    + (len(index.documents) - frequency + 0.5) / (frequency + 0.5)
+                )
+                length_ratio = (
+                    document.document_length / average_length if average_length else 0.0
+                )
+                denominator = term_frequency + index.config.k1 * (
+                    1.0 - index.config.b + index.config.b * length_ratio
+                )
+                score += idf * (term_frequency * (index.config.k1 + 1.0) / denominator)
+            if score > 0.0:
+                scored.append((score, document))
 
+    if len(scored) > top_k:
+        scored = heapq.nsmallest(
+            top_k,
+            scored,
+            key=lambda item: (-item[0], item[1].chunk_id),
+        )
     scored.sort(key=lambda item: (-item[0], item[1].chunk_id))
     return tuple(
         RetrievalHit(
@@ -555,10 +740,11 @@ def read_bm25_index(
         return _empty_result("miss", resolved_path, fingerprint, "index_missing")
 
     try:
-        lines = resolved_path.read_text(encoding="utf-8").splitlines()
-        if not lines:
-            raise ValueError("index is empty")
-        metadata = json.loads(lines[0])
+        with resolved_path.open("r", encoding="utf-8", newline="") as handle:
+            metadata_line = handle.readline()
+            if not metadata_line:
+                raise ValueError("index is empty")
+            metadata = json.loads(metadata_line)
         if not isinstance(metadata, dict):
             raise ValueError("metadata record must be an object")
         if metadata.get("record_type") != "metadata":
@@ -593,11 +779,18 @@ def read_bm25_index(
         )
 
         documents: list[BM25IndexedDocument] = []
-        for line_number, line in enumerate(lines[1:], start=2):
-            record = json.loads(line)
-            if not isinstance(record, dict) or record.get("record_type") != "document":
-                raise ValueError(f"line {line_number} is not a document record")
-            documents.append(BM25IndexedDocument.from_dict(record.get("document")))
+        with resolved_path.open("r", encoding="utf-8", newline="") as handle:
+            handle.readline()
+            for line_number, line in enumerate(handle, start=2):
+                if not line.strip():
+                    raise ValueError(f"line {line_number} is blank")
+                record = json.loads(line)
+                if (
+                    not isinstance(record, dict)
+                    or record.get("record_type") != "document"
+                ):
+                    raise ValueError(f"line {line_number} is not a document record")
+                documents.append(BM25IndexedDocument.from_dict(record.get("document")))
         ordered_documents = tuple(documents)
         if ordered_documents != tuple(
             sorted(ordered_documents, key=lambda document: document.ordinal)

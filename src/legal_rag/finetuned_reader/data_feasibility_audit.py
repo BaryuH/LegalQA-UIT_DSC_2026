@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import math
-import re
-import unicodedata
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -27,6 +26,11 @@ from .b2_freeze import (
     load_b2_freeze_fingerprint,
     require_complete_b2_freeze,
 )
+from .split_remediation import (
+    TrainingOverlapExclusion,
+    derive_train_overlap_exclusions,
+    normalize_question_text,
+)
 
 AUDIT_SCHEMA_VERSION = "ftr03.data-feasibility.v1"
 DEFAULT_AUDIT_DIR = Path("artifacts/finetuned_reader_audit")
@@ -40,7 +44,6 @@ TRAINING_ALLOWED_SPLITS: frozenset[SplitName] = frozenset({"train"})
 # Local diagnostic only until FTR-04 locks a tokenizer and max_seq_length.
 PROVISIONAL_MAX_SEQ_TOKENS = 4096
 LOW_OVERLAP_THRESHOLD = 0.05
-_WHITESPACE = re.compile(r"\s+")
 _FORBIDDEN_INDEX_KEYS = frozenset(
     {
         "answer",
@@ -163,6 +166,8 @@ class AuditResult:
     b2_freeze: dict[str, Any]
     splits: dict[str, dict[str, Any]]
     cross_split: dict[str, Any]
+    training_remediation: dict[str, Any]
+    training_exclusions: tuple[TrainingOverlapExclusion, ...]
     retrieval: dict[str, Any]
     fit: dict[str, Any]
     leakage: dict[str, Any]
@@ -178,19 +183,13 @@ class AuditResult:
             "b2_freeze": self.b2_freeze,
             "splits": self.splits,
             "cross_split": self.cross_split,
+            "training_remediation": self.training_remediation,
             "retrieval": self.retrieval,
             "fit": self.fit,
             "leakage": self.leakage,
             "source_integrity": self.source_integrity,
             "per_case_count": len(self.per_case),
         }
-
-
-def normalize_question_text(text: str) -> str:
-    """NFC + whitespace collapse + casefold for duplicate diagnostics only."""
-
-    normalized = unicodedata.normalize("NFC", text)
-    return _WHITESPACE.sub(" ", normalized).strip().casefold()
 
 
 def _percentile(sorted_values: Sequence[int], fraction: float) -> float | None:
@@ -403,9 +402,7 @@ def cross_split_overlaps(splits: Mapping[str, SplitAudit]) -> dict[str, Any]:
         return frozenset({left, right}) in forbidden_pair_sets
 
     forbidden_id_hits = {
-        pair: ids
-        for pair, ids in id_overlaps.items()
-        if _is_forbidden(pair) and ids
+        pair: ids for pair, ids in id_overlaps.items() if _is_forbidden(pair) and ids
     }
     forbidden_question_hits = {
         pair: values
@@ -431,6 +428,62 @@ def cross_split_overlaps(splits: Mapping[str, SplitAudit]) -> dict[str, Any]:
         "forbidden_overlap_total": sum(len(v) for v in forbidden_id_hits.values())
         + sum(len(v) for v in forbidden_question_hits.values()),
     }
+
+
+def training_overlap_remediation(
+    splits: Mapping[str, SplitAudit],
+    *,
+    overlap_policy: Literal["fail", "exclude_and_record"],
+    remediation_id: str | None,
+) -> tuple[dict[str, Any], tuple[TrainingOverlapExclusion, ...]]:
+    """Assess the effective train set without rewriting any source split."""
+
+    if overlap_policy == "exclude_and_record" and not remediation_id:
+        raise DataFeasibilityAuditError(
+            "exclude_and_record requires a non-blank remediation_id"
+        )
+    train = splits.get("train")
+    train_questions = (
+        train.questions_by_id if train is not None and train.status == "present" else {}
+    )
+    comparisons = {
+        split: audit.questions_by_id
+        for split, audit in splits.items()
+        if split != "train" and audit.status == "present"
+    }
+    exclusions = derive_train_overlap_exclusions(train_questions, comparisons)
+    reason_counts = Counter(
+        reason for exclusion in exclusions for reason in exclusion.reasons
+    )
+    source_train_count = len(train_questions)
+    excluded_count = len(exclusions)
+    effective_train_count = (
+        source_train_count - excluded_count
+        if overlap_policy == "exclude_and_record"
+        else source_train_count
+    )
+    remaining_overlap_cases = (
+        0 if overlap_policy == "exclude_and_record" else excluded_count
+    )
+    return (
+        {
+            "policy": overlap_policy,
+            "remediation_id": remediation_id,
+            "source_train_count": source_train_count,
+            "source_train_overlap_case_count": excluded_count,
+            "exclusion_reason_counts": dict(sorted(reason_counts.items())),
+            "effective_train_count": effective_train_count,
+            "effective_train_to_nontrain_overlap_case_count": remaining_overlap_cases,
+            "status": (
+                "remediated"
+                if overlap_policy == "exclude_and_record" and excluded_count
+                else "clean"
+                if not excluded_count
+                else "blocked"
+            ),
+        },
+        exclusions,
+    )
 
 
 def _contains_answer(haystack: str, answer: str) -> bool:
@@ -496,11 +549,7 @@ def audit_training_path_policy(
     """Training builders may only consume the train split."""
 
     disallowed = sorted(
-        {
-            split
-            for split in candidate_splits
-            if split not in TRAINING_ALLOWED_SPLITS
-        }
+        {split for split in candidate_splits if split not in TRAINING_ALLOWED_SPLITS}
     )
     return {
         "allowed_splits": sorted(TRAINING_ALLOWED_SPLITS),
@@ -608,9 +657,7 @@ def _retrieve_case(
         prompt_tokens = _estimate_prompt_tokens(query, packed, prompt_builder)
         combined = prompt_tokens + target_tokens
         # Fit policy: question+target must fit; evidence already packed under budget.
-        scaffolding_and_target = (
-            len(tokenize_legal_text(query)) + target_tokens + 32
-        )
+        scaffolding_and_target = len(tokenize_legal_text(query)) + target_tokens + 32
         if scaffolding_and_target > max_seq_tokens:
             fit_status = "TARGET_DOES_NOT_FIT"
             fits = False
@@ -813,6 +860,8 @@ def run_data_feasibility_audit(
     config: ProjectConfig | None = None,
     prompt_builder: PromptBuilder | None = None,
     training_candidate_splits: Sequence[SplitName] = ("train",),
+    overlap_policy: Literal["fail", "exclude_and_record"] = "fail",
+    overlap_remediation_id: str | None = None,
     max_seq_tokens: int = PROVISIONAL_MAX_SEQ_TOKENS,
     require_complete_freeze: bool = False,
 ) -> AuditResult:
@@ -848,6 +897,25 @@ def run_data_feasibility_audit(
         )
 
     overlaps = cross_split_overlaps(split_audits)
+    training_remediation, training_exclusions = training_overlap_remediation(
+        split_audits,
+        overlap_policy=overlap_policy,
+        remediation_id=overlap_remediation_id,
+    )
+    nontraining_overlap_total = sum(
+        value
+        for pair, value in overlaps["forbidden_id_overlap_counts"].items()
+        if "train" not in pair.split("__")
+    ) + sum(
+        value
+        for pair, value in overlaps[
+            "forbidden_normalized_question_overlap_counts"
+        ].items()
+        if "train" not in pair.split("__")
+    )
+    training_remediation["unremediated_nontraining_overlap_total"] = (
+        nontraining_overlap_total
+    )
     integrity = _source_integrity(root)
 
     retrieval_summary: dict[str, Any]
@@ -939,8 +1007,12 @@ def run_data_feasibility_audit(
     ):
         hard_stop_reasons.append("all available train answers are blank")
 
-    if overlaps["forbidden_overlap_total"] > 0:
-        hard_stop_reasons.append("forbidden cross-split overlaps detected")
+    if training_remediation["effective_train_to_nontrain_overlap_case_count"] > 0:
+        hard_stop_reasons.append("effective train split still has cross-split overlaps")
+    if training_remediation["effective_train_count"] <= 0:
+        hard_stop_reasons.append(
+            "effective train split is empty after overlap remediation"
+        )
     if integrity.get("status") != "verified":
         hard_stop_reasons.append("source data integrity verification failed")
     if freeze.index_fingerprint == UNRESOLVED or freeze.status != "complete":
@@ -971,6 +1043,8 @@ def run_data_feasibility_audit(
         b2_freeze=freeze_info,
         splits={name: audit.public_dict() for name, audit in split_audits.items()},
         cross_split=overlaps,
+        training_remediation=training_remediation,
+        training_exclusions=training_exclusions,
         retrieval=retrieval_summary,
         fit=fit_section,
         leakage=leakage,
@@ -990,6 +1064,7 @@ def write_audit_artifacts(
     summary_path = directory / "summary.json"
     per_case_path = directory / "per_case.jsonl"
     leakage_path = directory / "leakage_report.json"
+    exclusions_path = directory / "training_exclusions.jsonl"
 
     summary_path.write_text(
         json.dumps(result.summary_dict(), ensure_ascii=False, indent=2, sort_keys=True)
@@ -1008,19 +1083,101 @@ def write_audit_artifacts(
         json.dumps(result.leakage, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    exclusions_path.write_text(
+        "".join(
+            json.dumps(item.as_dict(), ensure_ascii=False, sort_keys=True) + "\n"
+            for item in result.training_exclusions
+        ),
+        encoding="utf-8",
+    )
     return {
         "summary": summary_path,
         "per_case": per_case_path,
         "leakage_report": leakage_path,
+        "training_exclusions": exclusions_path,
     }
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry for the repository audit."""
 
-    del argv  # reserved for future flags; keep deterministic defaults
     root = Path(__file__).resolve().parents[3]
-    result = run_data_feasibility_audit(root)
+    parser = argparse.ArgumentParser(
+        description="Read-only FTR-03 data feasibility and leakage audit."
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path("configs/finetuned_reader_train.yaml"),
+        help="Generative training profile defining the overlap remediation policy.",
+    )
+    parser.add_argument(
+        "--with-retrieval",
+        action="store_true",
+        help="Explicitly run the expensive frozen-B2 retrieval diagnostics.",
+    )
+    args = parser.parse_args(argv)
+    try:
+        training_config = load_config(root / args.config)
+        settings = training_config.finetuned_reader
+        if settings is None or training_config.data.split != "train":
+            raise DataFeasibilityAuditError(
+                "FTR-03 requires a generative training config with data.split='train'"
+            )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+
+    retrieval_kwargs: dict[str, Any] = {}
+    retrieval_error: str | None = None
+    try:
+        # The CLI is the explicit, potentially expensive path. Unit callers keep
+        # the injectable read-only API and may provide a fixture index instead.
+        if args.with_retrieval:
+            from ..pipeline import prepare_bm25_index_from_config
+
+            preparation = prepare_bm25_index_from_config(
+                root / DEFAULT_FROZEN_CONFIG_REL,
+                repo_root=root,
+                rebuild_index=False,
+            )
+            retrieval_kwargs = {
+                "index": preparation.index,
+                "chunks": {chunk.chunk_id: chunk for chunk in preparation.chunks},
+                "documents": preparation.documents,
+                "config": preparation.config,
+                "prompt_builder": PromptBuilder.from_config(
+                    preparation.config.prompts,
+                    prompt_dir=root / "configs" / "prompts",
+                ),
+            }
+    except Exception as exc:
+        # The audit remains useful for schema/leakage checks when B2 assets are
+        # unavailable; the blocked status is retained and never hidden.
+        retrieval_kwargs = {}
+        retrieval_error = f"{type(exc).__name__}: {exc}"
+    result = run_data_feasibility_audit(
+        root,
+        overlap_policy=settings.overlap_policy,
+        overlap_remediation_id=settings.overlap_remediation_id,
+        **retrieval_kwargs,
+    )
+    if not args.with_retrieval:
+        result = replace(
+            result,
+            retrieval={
+                "status": "not_run",
+                "reason": "Use --with-retrieval for the expensive frozen-B2 audit",
+            },
+            fit={
+                "status": "not_run",
+                "reason": "Tokenizer/evidence fit is assessed in FTR-05/FTR-06",
+            },
+        )
+    if retrieval_error is not None:
+        result = replace(
+            result,
+            retrieval={**result.retrieval, "error": retrieval_error},
+        )
     paths = write_audit_artifacts(result, root / DEFAULT_AUDIT_DIR)
     print(
         json.dumps(
@@ -1057,6 +1214,7 @@ __all__ = [
     "normalize_question_text",
     "run_data_feasibility_audit",
     "run_retrieval_support_audit",
+    "training_overlap_remediation",
     "write_audit_artifacts",
 ]
 

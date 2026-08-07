@@ -40,17 +40,32 @@ def test_frozen_config_matches_approved_hybrid_rag_hash() -> None:
 
 
 def test_fingerprint_snapshot_matches_builder(freeze) -> None:
-    rebuilt = build_b2_freeze_fingerprint(REPO_ROOT)
+    rebuilt = build_b2_freeze_fingerprint(
+        REPO_ROOT,
+        chunk_cache_fingerprint=freeze.chunk_cache_fingerprint,
+        index_fingerprint=freeze.index_fingerprint,
+        representative_run_path=freeze.representative_run.get("path"),
+    )
     assert freeze.config_hash == rebuilt.config_hash
     assert freeze.prompt_hash == rebuilt.prompt_hash
     assert freeze.evidence_top_k == rebuilt.evidence_top_k
     assert freeze.rough_top_n == rebuilt.rough_top_n
     assert freeze.max_total_chars == rebuilt.max_total_chars
     assert freeze.max_chunks_per_document == rebuilt.max_chunks_per_document
-    assert freeze.index_fingerprint == UNRESOLVED
-    assert freeze.chunk_cache_fingerprint == UNRESOLVED
-    assert freeze.status == "config_locked_corpus_pending"
-    assert freeze.representative_run["status"] == UNRESOLVED
+    if freeze.status == "complete":
+        assert freeze.chunk_cache_fingerprint != UNRESOLVED
+        assert freeze.index_fingerprint != UNRESOLVED
+        assert freeze.representative_run["status"] == "recorded"
+        assert rebuilt.status == "complete"
+    else:
+        assert freeze.status == "config_locked_corpus_pending"
+
+
+def test_complete_freeze_passes_when_snapshot_is_complete(freeze) -> None:
+    if freeze.status != "complete":
+        pytest.skip("B2 freeze snapshot is not complete in this checkout")
+    require_complete_b2_freeze(freeze)
+    validate_against_b2_freeze(freeze.control_identity(), freeze)
 
 
 def test_exact_match_passes(freeze) -> None:
@@ -116,9 +131,20 @@ def test_changed_evidence_budget_fails(freeze) -> None:
         validate_against_b2_freeze(candidate, freeze)
 
 
-def test_incomplete_freeze_blocks_ftr_build(freeze) -> None:
+def test_incomplete_freeze_blocks_ftr_build() -> None:
+    incomplete = replace(
+        load_b2_freeze_fingerprint(REPO_ROOT),
+        status="config_locked_corpus_pending",
+        chunk_cache_fingerprint=UNRESOLVED,
+        index_fingerprint=UNRESOLVED,
+        representative_run={
+            "status": UNRESOLVED,
+            "path": None,
+            "reason": "synthetic incomplete fixture",
+        },
+    )
     with pytest.raises(B2FreezeIncompleteError, match="index_fingerprint"):
-        require_complete_b2_freeze(freeze)
+        require_complete_b2_freeze(incomplete)
 
 
 def test_complete_freeze_allows_ftr_when_corpus_resolved() -> None:

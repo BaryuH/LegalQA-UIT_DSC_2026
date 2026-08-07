@@ -11,7 +11,7 @@ from scripts import selfcheck
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_selfcheck_runs_all_twelve_steps_offline() -> None:
+def test_selfcheck_runs_all_thirteen_steps_offline() -> None:
     completed = subprocess.run(
         [sys.executable, "scripts/selfcheck.py"],
         cwd=REPO_ROOT,
@@ -21,10 +21,10 @@ def test_selfcheck_runs_all_twelve_steps_offline() -> None:
     )
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert "SELF-CHECK PASS: 12/12 checks" in completed.stdout
+    assert "SELF-CHECK PASS: 13/13 checks" in completed.stdout
     assert "SELF-CHECK GOLD" not in completed.stdout
-    for number in range(1, 13):
-        assert f"[{number}/12]" in completed.stdout
+    for number in range(1, 14):
+        assert f"[{number}/13]" in completed.stdout
 
 
 def test_selfcheck_is_fail_fast_and_returns_nonzero(monkeypatch, capsys) -> None:
@@ -37,7 +37,7 @@ def test_selfcheck_is_fail_fast_and_returns_nonzero(monkeypatch, capsys) -> None
         nonlocal later_called
         later_called = True
 
-    later_checks = tuple((f"later-{index}", later) for index in range(11))
+    later_checks = tuple((f"later-{index}", later) for index in range(12))
     monkeypatch.setattr(
         selfcheck,
         "_build_checks",
@@ -52,7 +52,7 @@ def test_selfcheck_is_fail_fast_and_returns_nonzero(monkeypatch, capsys) -> None
 def test_selfcheck_rejects_incomplete_check_registry(monkeypatch) -> None:
     monkeypatch.setattr(selfcheck, "_build_checks", lambda root, workspace: ())
 
-    with pytest.raises(selfcheck.SelfCheckError, match="Expected 12 checks"):
+    with pytest.raises(selfcheck.SelfCheckError, match="Expected 13 checks"):
         selfcheck.run_selfcheck(REPO_ROOT)
 
 

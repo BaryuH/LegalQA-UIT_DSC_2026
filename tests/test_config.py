@@ -48,6 +48,7 @@ def test_profiles_load_with_all_required_sections(profile_name: str) -> None:
         "runtime",
         "submission",
         "reader",
+        "finetuned_reader",
     }
     assert not config.data.data_dir.is_absolute()
     assert config.submission.format == "object_by_question_id"
@@ -76,6 +77,32 @@ def test_reader_profiles_are_isolated_and_share_checkpoint_settings() -> None:
     assert bm25_reader.retrieval.strategy == "none"
     assert direct_reader.reranker.enabled is False
     assert bm25_reader.reranker.enabled is False
+
+
+def test_generative_finetuned_reader_profile_is_distinct_from_extractive() -> None:
+    config = load_config(CONFIG_DIR / "finetuned_reader_generative.yaml")
+
+    assert config.project.profile == "finetuned_reader"
+    assert config.reader is None
+    assert config.finetuned_reader is not None
+    assert config.finetuned_reader.required is True
+    assert config.retrieval.strategy == "bm25_rerank"
+
+
+def test_generative_overlap_remediation_requires_an_explicit_identifier() -> None:
+    payload = _profile_payload("finetuned_reader_generative")
+    finetuned_reader = payload["finetuned_reader"]
+    assert isinstance(finetuned_reader, dict)
+    finetuned_reader["overlap_policy"] = "exclude_and_record"
+    finetuned_reader["overlap_remediation_id"] = None
+
+    with pytest.raises(ValidationError, match="requires.*overlap_remediation_id"):
+        ProjectConfig.model_validate(payload)
+
+    finetuned_reader["overlap_remediation_id"] = "ftr03-test-remediation"
+    resolved = ProjectConfig.model_validate(payload)
+    assert resolved.finetuned_reader is not None
+    assert resolved.finetuned_reader.overlap_policy == "exclude_and_record"
 
 
 def test_default_profile_is_a_valid_mock_profile() -> None:

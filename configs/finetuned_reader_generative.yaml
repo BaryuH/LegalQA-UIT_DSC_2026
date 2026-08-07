@@ -1,0 +1,117 @@
+# Generative SFT reader profile. Local base/checkpoint paths remain unresolved
+# until FTR-04/FTR-08 produce a validated checkpoint manifest.
+project:
+  name: legal-rag
+  profile: finetuned_reader
+  python_version: "3.11"
+data:
+  data_dir: data
+  question_path: data/warmup.json
+  selected_contexts_path: data/selected-contexts.zip
+  split: warmup
+  split_policy: warmup_evaluation
+chunking:
+  max_chars: 1200
+  overlap_chars: 200
+  min_chars: 100
+  version: legal-chunker-v1
+retrieval:
+  strategy: bm25_rerank
+  rough_top_n: 12
+  k1: 1.5
+  b: 0.75
+reranker:
+  enabled: true
+  required: false
+  provider: sentence_transformers
+  model: BAAI/bge-m3
+  device: auto
+  batch_size: 8
+  max_length: 512
+evidence:
+  evidence_top_k: 4
+  max_total_chars: 4000
+  max_chunks_per_document: 2
+generation:
+  provider: mock
+  model: finetuned_reader_backend
+  temperature: 0.0
+  max_output_chars: 1200
+  retries: 0
+prompts:
+  direct_version: direct-v1
+  rag_version: rag-v1
+evaluation:
+  enabled: true
+  reference_access: approved_evaluation
+  primary_metric: meteor
+  secondary_metric: rouge_l
+runtime:
+  cache_dir: cache
+  outputs_dir: outputs
+  artifacts_dir: artifacts
+  fail_fast: true
+  seed: 42
+submission:
+  enabled: true
+  format: object_by_question_id
+  answer_field: answer
+  output_filename: submission.zip
+  inner_filename: submission.json
+  encoding: utf-8
+  ensure_ascii: false
+  forbid_extra_fields: true
+  deterministic_order: dataset
+  require_full_coverage: true
+  reject_extra_ids: true
+  reject_duplicate_ids: true
+  reject_non_string_answers: true
+  reject_empty_answers: false
+finetuned_reader:
+  enabled: true
+  required: true
+  type: generative_sft_reader
+  dataset_version: finetuned-reader-v1
+  train_prompt_path: configs/prompts/finetuned_reader_train_v1.txt
+  inference_prompt_path: configs/prompts/finetuned_reader_infer_v1.txt
+  checkpoint_path: checkpoints/finetuned_reader/<run_id>
+  checkpoint_manifest_path: checkpoints/finetuned_reader/<run_id>/checkpoint_manifest.json
+  max_new_tokens: 512
+  overlap_policy: fail
+  stop_sequences: []
+  model:
+    # Server-side Transformers checkpoint directory; not the Ollama model tag.
+    base_model: models/finetuned_reader/qwen3.5-4b
+    revision: UNRESOLVED
+    tokenizer: models/finetuned_reader/qwen3.5-4b
+    loader: auto
+    context_length: 4096
+    dtype: auto
+    load_in_4bit: false
+    trust_remote_code: false
+    local_files_only: true
+  lora:
+    enabled: true
+    adapter_type: lora
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    target_modules: []
+    bias: none
+  training:
+    seed: 42
+    max_seq_length: 4096
+    epochs: 2
+    learning_rate: 0.0002
+    train_batch_size: 1
+    eval_batch_size: 1
+    gradient_accumulation_steps: 16
+    warmup_ratio: 0.03
+    weight_decay: 0.0
+    max_grad_norm: 1.0
+    logging_steps: 10
+    packing: false
+    gradient_checkpointing: false
+  output:
+    dataset_root: artifacts/finetuned_reader/datasets
+    checkpoint_root: checkpoints/finetuned_reader

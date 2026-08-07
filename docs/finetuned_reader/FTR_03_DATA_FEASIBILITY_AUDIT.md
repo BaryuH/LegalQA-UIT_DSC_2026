@@ -1,132 +1,97 @@
 # FTR-03 — Data Feasibility and Leakage Audit
 
-**Task:** FTR-03 — Audit LegalQACompetition fine-tuning data feasibility  
-**Date:** 2026-08-04  
-**Scope:** read-only audit against frozen B2 control; no training examples; no
-training; no source-data modification  
-**Status:** **HARD_STOP**
+**Date:** 2026-08-07
+**Status:** **PASS for the profile-scoped effective training split**
+**Scope:** read-only source-data audit and derived SFT eligibility; no source-data writes, no SFT dataset, and no model training
 
 ## Verdict
 
-Fine-tuning cannot proceed on the current checkout. `data/train.json` is absent
-(no train gold answers), and frozen B2 corpus/index fingerprints remain
-`UNRESOLVED` because `selected-contexts.zip` is missing. Warm-up schema quality
-looks clean (500/500 IDs, no blanks/duplicates), leakage policy checks that can
-run without the corpus pass, and the source data manifest is unchanged.
+The source release has raw cross-split collisions, so it must not be consumed
+as an unfiltered training split. The train-only `finetuned_reader` profile now
+uses the explicit remediation decision
+`ftr03-train-overlap-exclusion-v1`: derive and exclude every train record that
+shares an ID or Unicode-NFC/whitespace/casefolded question with warmup, public,
+or private. Source JSON files remain untouched.
 
-## Artifacts
+The resulting effective train split has **6,609** overlap-safe cases and
+**zero** overlap cases with the currently available non-training splits. The
+dataset builder will additionally remove 14 remaining normalized duplicates
+within train before retrieval, leaving at most 6,595 examples before any
+explicit retrieval/prompt failures. This unlocks derived SFT dataset
+construction under the frozen B2 control. It does not authorize a
+canonical fine-tune until FTR-04 resolves the local base model, PEFT stack, and
+hardware/dtype plan.
 
-| Path | Contents |
+## Observed source and derived split
+
+| Item | Count / status |
+|---|---:|
+| Source train records | 7,000 |
+| Source train cases excluded | 391 |
+| Overlap-safe train records before intra-train deduplication | 6,609 |
+| Maximum records after deterministic intra-train deduplication | 6,595 |
+| Effective train-to-nontraining overlap cases | 0 |
+| Raw forbidden findings | 855 |
+| Remaining warmup/public raw findings | 80 (warning; not training inputs) |
+| Private source file | absent; re-audit before it is added |
+
+The 855 raw findings preserve both dimensions of the audit and must not be
+misrepresented as zero: 387 train/warmup shared IDs, 387 train/warmup shared
+normalized questions, 40 warmup/public shared IDs, 40 warmup/public shared
+normalized questions, and one train/public shared normalized question.
+
+The 391 excluded train IDs are recorded without question or answer text in
+`artifacts/finetuned_reader_audit/training_exclusions.jsonl`. Reason counts are
+387 `id_overlap:warmup`, 390 `normalized_question_overlap:warmup`, and one
+`normalized_question_overlap:public`; a train duplicate is also excluded when
+its normalized question matches a non-training split.
+
+## Controls
+
+- `configs/finetuned_reader_train.yaml` selects
+  `overlap_policy: exclude_and_record` and names the remediation ID.
+- `overlap_policy: fail` remains available and rejects a build when any train
+  exclusion would be required. An identifier is mandatory for the exclusion
+  policy, preventing a silent policy change.
+- `build_sft_dataset_from_config()` accepts only `data.split: train`, computes
+  the same exclusions from the current read-only split files, and records the
+  policy, remediation ID, and exclusion hash in the dataset manifest.
+- The audit normalizer is Unicode NFC plus whitespace collapse and `casefold`;
+  source IDs and source text are never normalized or rewritten.
+- Public/private answers remain blocked at the question-loading boundary;
+  gold answers are used only in the train SFT boundary.
+
+## Artifacts and commands
+
+| Artifact | Purpose |
 |---|---|
-| `artifacts/finetuned_reader_audit/summary.json` | Split, overlap, retrieval/fit, leakage, integrity |
-| `artifacts/finetuned_reader_audit/per_case.jsonl` | Per-case retrieval diagnostics (empty; corpus blocked) |
-| `artifacts/finetuned_reader_audit/leakage_report.json` | Targeted leakage checks |
-| `src/legal_rag/finetuned_reader/data_feasibility_audit.py` | Read-only auditor |
-| `tests/test_ftr03_data_feasibility_audit.py` | Acceptance tests |
+| `artifacts/finetuned_reader_audit/summary.json` | Raw findings, effective-split remediation, leakage, and integrity status |
+| `artifacts/finetuned_reader_audit/training_exclusions.jsonl` | Deterministic case ID and reason records only |
+| `artifacts/finetuned_reader_audit/leakage_report.json` | Reference-access and train-only policy results |
 
-Re-run:
-
-```bash
+```powershell
+$env:PYTHONPATH = "src"
 python -m legal_rag.finetuned_reader.data_feasibility_audit
+python scripts/verify_data_manifest.py
 ```
 
-## Split availability
+Use `--with-retrieval` only when intentionally running the expensive frozen-B2
+retrieval diagnostic. Its normal no-flag status is explicitly `not_run`; it is
+not treated as a hidden pass.
 
-| Split | Path | Status | Records |
-|---|---|---|---|
-| `train` | `data/train.json` | **missing** | 0 |
-| `warmup` | `data/warmup.json` | present | 500 |
-| `public` | `data/public-official.json` | **missing** | 0 |
-| `private` | `data/private-official.json` | **missing** | 0 |
+## Exit gate
 
-## Warm-up schema (only present competition question file)
-
-| Check | Result |
+| Gate | Status |
 |---|---|
-| Schema | ID-keyed UTF-8 JSON map; `question: str`, `answer: str` |
-| Record / unique ID count | 500 / 500 |
-| Duplicate IDs | 0 |
-| Blank questions / answers | 0 / 0 |
-| Missing answers | 0 |
-| Exact duplicate questions | 0 |
-| Normalized duplicate questions | 0 |
-| Duplicate QA pairs | 0 |
-| Question chars | min 21, mean 85.6, max 193, p50 83, p90 123 |
-| Answer chars | min 176, mean 1556.2, max 8089, p50 1373, p90 2499 |
-| Question tokens (`tokenize_legal_text`) | min 6, mean 20.4, max 45 |
-| Answer tokens | min 41, mean 380.8, max 2014 |
+| Train answers and source integrity | PASS |
+| Frozen B2 control | PASS |
+| Raw cross-split findings recorded | PASS |
+| Effective train-to-nontraining overlap = 0 | PASS |
+| Public/private answer access blocked | PASS |
+| Train-only dataset boundary | PASS |
+| Full retrieval/fit diagnostic | Deferred explicitly to FTR-05/FTR-06 |
+| Local model, PEFT, hardware/dtype approval | BLOCKED in FTR-04 |
 
-## Cross-split overlaps
-
-Only `warmup` is present, so ID and normalized-question overlaps across
-train/warmup/public/private are **0**. Forbidden-overlap total: **0** (vacuous
-until other splits arrive).
-
-## Retrieval / evidence / fit (frozen B2)
-
-| Item | Status |
-|---|---|
-| Frozen config | `configs/frozen/hybrid_rag_b2.yaml` (`config_hash` locked) |
-| Competition BM25 index | **blocked** (`selected-contexts.zip` missing) |
-| Zero-evidence rate | `null` (not computable) |
-| Substring / overlap diagnostics | `null` (not computable) |
-| Evidence / prompt token distributions | `null` (not computable) |
-| Prompt+target fit rate | `null` (provisional max_seq=4096 local token proxy pending FTR-04) |
-| `per_case.jsonl` rows | 0 |
-
-Fixture tests still exercise question-only BM25 retrieval + evidence packing under
-frozen `rough_top_n=12` / `evidence_top_k=4` / char budget, without building SFT
-examples.
-
-## Leakage checks
-
-| Check | Result |
-|---|---|
-| Gold never enters retrieval query | PASS on fixtures; competition run N/A (no index) |
-| Gold never enters index/chunk metadata | PASS on fixtures; competition skipped (no index) |
-| Public/private answer load blocked | **PASS** (`QuestionLoadError`) |
-| Training paths train-only | **PASS** (policy allows only `train`) |
-| Overall leakage policy | **PASS** for runnable checks |
-
-## Source integrity
-
-| Item | Value |
-|---|---|
-| Manifest verification | verified (1 source file) |
-| `data_manifest_hash` | `939bbd241742ec67a9aded4dfc524b44bcf50aefe018aeff7aab7bf02ffc6e8b` |
-| `data/warmup.json` SHA256 | `0b416328977471c8baca70050dff04d1108a263ca6562be13f80fb3dd64c0c17` |
-| Source data modified | **no** |
-
-## Hard Stop Gate
-
-Triggered:
-
-1. No train answers (`data/train.json` missing).
-2. Frozen B2 corpus/index fingerprints unresolved (retrieval control incomplete).
-
-Not triggered (yet): public/private mixed into train; unresolved split overlaps;
-gold-dependent retrieval query; majority fit failure after evidence budget
-(unmeasured without corpus).
-
-## Exit Gate
-
-| Check | Result |
-|---|---|
-| Duplicate IDs = 0 (present splits) | PASS (warmup) |
-| Forbidden overlap = 0 | PASS (vacuous) |
-| Blank training answers | N/A (no train file) |
-| Gold-in-query tests | PASS (fixtures) |
-| Gold-in-index tests | PASS (fixtures) |
-| Private/public training access blocked | PASS |
-| Prompt+target fit rate reported | reported as `null` / blocked |
-| Zero-evidence rate reported | reported as `null` / blocked |
-| Source hashes unchanged | PASS |
-| Audit artifacts deterministic | PASS |
-
-## Handoff
-
-- **Phase:** FTR-03  
-- **Status:** HARD_STOP — do not start FTR-04/FTR-05 until train answers and a
-  complete B2 freeze (contexts + index fingerprints) exist  
-- **Next:** obtain read-only `data/train.json` and `selected-contexts.zip`, refresh
-  FTR-02 fingerprints, re-run this audit
+Any future change to train, warmup, public, or private sources must rerun this
+audit. A changed exclusion set requires a new remediation decision and a new
+dataset fingerprint; it must not reuse a prior dataset or checkpoint.

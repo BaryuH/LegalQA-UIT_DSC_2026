@@ -17,6 +17,7 @@ from legal_rag.finetuned_reader.data_feasibility_audit import (
     normalize_question_text,
     run_data_feasibility_audit,
     run_retrieval_support_audit,
+    training_overlap_remediation,
     write_audit_artifacts,
 )
 from legal_rag.generation import PromptBuilder
@@ -140,6 +141,41 @@ def test_cross_split_overlap(split_dir: Path) -> None:
     )
     assert overlaps["normalized_question_overlap_counts"]["public__train"] == 1
     assert overlaps["forbidden_overlap_total"] >= 1
+
+
+def test_overlap_remediation_excludes_every_matching_train_duplicate(
+    split_dir: Path,
+) -> None:
+    train = audit_split_file(
+        split_dir / "train.json", split="train", include_answers=True
+    )
+    _write_questions(
+        split_dir / "warmup.json",
+        {
+            "w1": {
+                "question": train.questions_by_id["t1"],
+                "answer": "Warmup cÃ¢u tráº£ lá»i phÃ¡p lÃ½.",
+            }
+        },
+    )
+    splits = {
+        "train": train,
+        "warmup": audit_split_file(
+            split_dir / "warmup.json", split="warmup", include_answers=True
+        ),
+    }
+
+    report, exclusions = training_overlap_remediation(
+        splits,
+        overlap_policy="exclude_and_record",
+        remediation_id="fixture-remediation-v1",
+    )
+
+    assert report["status"] == "remediated"
+    assert report["effective_train_count"] == 1
+    assert report["effective_train_to_nontrain_overlap_case_count"] == 0
+    assert [item.case_id for item in exclusions] == ["t1"]
+    assert exclusions[0].reasons == ("normalized_question_overlap:warmup",)
 
 
 def test_utf8_vietnamese_normalization() -> None:
@@ -299,12 +335,34 @@ def test_write_artifacts_deterministic(tmp_path: Path) -> None:
     assert paths_a["leakage_report"].read_text(encoding="utf-8") == paths_b[
         "leakage_report"
     ].read_text(encoding="utf-8")
+    assert paths_a["training_exclusions"].read_text(encoding="utf-8") == paths_b[
+        "training_exclusions"
+    ].read_text(encoding="utf-8")
 
 
-def test_repository_audit_hard_stops_until_b2_corpus_is_complete() -> None:
+def test_repository_audit_hard_stops_on_observed_cross_split_overlap() -> None:
     result = run_data_feasibility_audit(REPO_ROOT)
     assert result.hard_stop is True
     assert result.splits["warmup"]["status"] == "present"
     assert result.splits["train"]["status"] == "present"
     assert result.retrieval["status"] in {"blocked", "partial"}
-    assert any("frozen B2" in reason for reason in result.hard_stop_reasons)
+    assert any("cross-split overlaps" in reason for reason in result.hard_stop_reasons)
+
+
+def test_repository_audit_passes_with_approved_effective_train_remediation() -> None:
+    result = run_data_feasibility_audit(
+        REPO_ROOT,
+        overlap_policy="exclude_and_record",
+        overlap_remediation_id="ftr03-train-overlap-exclusion-v1",
+    )
+
+    assert result.status == "pass"
+    assert result.hard_stop is False
+    assert result.cross_split["forbidden_overlap_total"] == 855
+    assert result.training_remediation["source_train_overlap_case_count"] == 391
+    assert result.training_remediation["effective_train_count"] == 6609
+    assert (
+        result.training_remediation["effective_train_to_nontrain_overlap_case_count"]
+        == 0
+    )
+    assert result.training_remediation["unremediated_nontraining_overlap_total"] == 80

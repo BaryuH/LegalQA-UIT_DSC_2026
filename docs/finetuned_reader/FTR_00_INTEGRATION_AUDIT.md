@@ -1,9 +1,20 @@
 # FTR-00 Integration Audit
 
 **Task:** Audit LegalQACompetition for a generative `finetuned_reader`  
-**Date:** 2026-08-04  
+**Date:** 2026-08-06
 **Scope:** read-only repository audit; no code or source data implementation  
 **Status:** **BLOCKED**
+
+## Refresh note — 2026-08-07
+
+The generative `finetuned_reader` implementation has been transferred to this
+`codex/16_baseline` worktree. FTR-03 now passes for the profile-scoped
+effective train split: 391 overlapping train cases are derived-excluded and
+recorded, leaving 6,609 overlap-safe cases. The raw 855 findings remain
+visible in the audit artifacts, and the source data is unchanged. The runtime
+package remains under `src/legal_rag/finetuned_reader` so existing imports and
+CLI routes stay stable. FTR-04 still blocks canonical training until the local
+causal model, PEFT stack, and hardware/dtype plan are resolved.
 
 ## Executive summary
 
@@ -13,12 +24,20 @@ and an auxiliary profile also named `finetuned_reader`. The latter is an
 **extractive SQuAD-style reader**, not the generative fine-tuned reader required
 by this task.
 
+The source-data release is now present for train/public/context work:
+`data/train.json` (7,000 records), `data/warmup.json` (500),
+`data/public-official.json` (1,000), and `data/selected-contexts.zip` (8,512
+documents). `data/private-official.json` is still absent. The FTR-02 B2 freeze
+now has config, prompt, chunk-cache, BM25-index, and representative-run
+fingerprints, but the current FTR-03 audit detects forbidden cross-split
+overlap and the report/artifacts have not yet been refreshed for this release.
+
 Offline infrastructure is substantially present: `python scripts/selfcheck.py`
-passes 12/12 checks and `python scripts/verify_data_manifest.py` passes for one
-source file. The full test run is not green: **243 passed, 1 failed**, in the
-pre-existing split-registry test suite. Real B2 and generative fine-tuning are
-not runnable because the selected-context corpus, official train/public/private
-files, trainable checkpoint, and PEFT training stack are absent.
+passes 12/12 checks and `python scripts/verify_data_manifest.py` verifies four
+source files. The full test run is not green: **272 passed, 1 failed** because
+`tests/test_ftr03_data_feasibility_audit.py` still asserts the old incomplete-B2
+state. Generative fine-tuning is not runnable: there is no causal-LM checkpoint,
+SFT dataset, trainer/collator, or PEFT training stack.
 
 ## 1. Repository map: files and real symbols
 
@@ -223,28 +242,28 @@ registry naming changes required to avoid ambiguity.
 | B2 config | **PASS as declared** | `configs/hybrid_rag.yaml` is strict and internally validated. |
 | BM25/chunk fingerprints | **PASS in code** | `ChunkCacheFingerprint` and `BM25IndexFingerprint`; strict cache/index validation. |
 | Reranker contract | **PASS offline** | mock/no-op/semantic adapters and explicit fallback metadata. |
-| Real selected-context corpus | **BLOCKED** | `selected-contexts.zip` is absent. |
-| Real B2 run | **BLOCKED** | source manifest currently covers only `data/warmup.json`; context loader cannot run. |
-| Canonical freeze artifact | **MISSING** | No frozen B2 snapshot/config hash artifact dedicated to FTR exists. |
-| Representative real B2 artifact | **MISSING** | No real B2 run is available to freeze. |
+| Real selected-context corpus | **PASS** | `data/selected-contexts.zip` is present; source manifest verifies it. |
+| Real B2 run | **PASS (representative only)** | `outputs/ftr02_representative_b2_warmup/` contains a 1-case mock Hybrid-RAG run with retrieval/config fingerprints. |
+| Canonical freeze artifact | **PASS** | `configs/frozen/hybrid_rag_b2.yaml` and `artifacts/b2_freeze/fingerprint.json` have complete identities. |
+| Representative real B2 artifact | **PASS (limited)** | Artifact is reproducible as a representative warm-up control, but metrics are `not_evaluated` and it is not an official benchmark. |
 
-Consequently, B2 is **implementation-ready for a future freeze**, but not
-ready as the empirical control for FTR training. FTR must not build examples
-until B2 has a real, reproducible run and its retrieval/evidence fingerprints
-are frozen.
+Consequently, B2 is **frozen as a control**, but FTR must not build examples
+until FTR-03 has refreshed its data/leakage report and verified retrieval
+support against the frozen chunk/index fingerprints.
 
 ## 3. Data and split readiness
 
 ### Observed source
 
-- `data/warmup.json` exists, is an ID-keyed UTF-8 JSON map, and contains 500
-  records with `question` and `answer`.
-- `artifacts/data-baseline/manifest.json` covers one source file:
-  `data/warmup.json`, SHA256
-  `0b416328977471c8baca70050dff04d1108a263ca6562be13f80fb3dd64c0c17`.
-- Manifest verification passed.
-- `data/selected-contexts.zip`, root `selected-contexts.zip`, `train.json`,
-  `public-official.json`, and `private-official.json` are absent.
+- `data/train.json` exists as an ID-keyed UTF-8 JSON map with 7,000 records and
+  non-blank answers.
+- `data/warmup.json` exists with 500 answered records.
+- `data/public-official.json` exists with 1,000 answer-free records.
+- `data/selected-contexts.zip` exists and is included in the source manifest;
+  the current B2 freeze records its context-content hash.
+- `data/private-official.json` is absent.
+- `artifacts/data-baseline/manifest.json` verifies four source files; source
+  data remains read-only.
 
 ### Split enforcement
 
@@ -257,15 +276,20 @@ The executable registry permits:
 - `private`: final inference/submission only; no reference access.
 
 `load_inference_questions()` removes answers before inference. This is the
-correct boundary for FTR retrieval and generation. However, no actual train
-split is available, so SFT feasibility cannot be established.
+correct boundary for FTR retrieval and generation. The current read-only
+feasibility audit finds **387 train/warmup ID overlaps, 40 public/warmup ID
+overlaps, and 1 normalized-question train/public overlap**; its declared
+`forbidden_overlap_total` is **855**. `private` remains unavailable, so the
+full split policy cannot yet be certified.
 
 ### Data/split result
 
-**Not ready for FTR-03.** The repository has policy and a warm-up fixture, but
-not the required train questions/answers, selected legal contexts, or official
-split files. Cross-split overlap, answer length/fit, evidence support, and
-leakage audits cannot yet be performed on competition data.
+**FTR-03 requires refresh and is currently HARD_STOP.** The required train
+questions/answers and selected legal contexts are present, but forbidden
+cross-split overlap must be resolved or explicitly explained by the approved
+split contract. The private split is still missing. The committed FTR-03
+report and audit artifacts were generated before the new data release and must
+not be treated as current evidence.
 
 ## 4. Model and hardware readiness
 
@@ -288,24 +312,27 @@ runtime tag in `configs/qwen35_ollama.yaml`; it is **not evidence of a
 trainable Transformers checkpoint**. `BAAI/bge-m3` is only a reranker
 candidate, not an FTR base model.
 
-**Model/hardware status: BLOCKED.** CPU-only hardware may support a tiny mocked
-or very small local smoke test, but no QLoRA/LoRA strategy can be approved until
-an exact causal model, revision, tokenizer, PEFT target modules, dependency
-versions, and memory budget are identified. No model should be downloaded during
-this audit.
+**Model/hardware status: BLOCKED.** The current environment is Python 3.13.12,
+Windows 11, `torch 2.12.0+cpu`, with CUDA unavailable. `transformers 5.12.1`
+and `sentence-transformers 5.6.0` are installed, but `peft`, `trl`,
+`accelerate`, `bitsandbytes`, and `datasets` are absent. CPU-only hardware may
+support a tiny mocked or very small local smoke test, but no QLoRA/LoRA strategy
+can be approved until an exact causal model, revision, tokenizer, PEFT target
+modules, dependency versions, and memory budget are identified. No model should
+be downloaded during this audit.
 
 ## 5. Integration plan
 
-1. **FTR-01 — contract:** define the generative profile separately from the
-   existing extractive reader; input is question plus `PackedEvidence`, target
-   is train-only gold prose, loss is answer-only, and no inference fallback to
-   the base model.
-2. **FTR-02 — B2 freeze:** obtain selected contexts, run real B2, freeze config,
-   chunk/index fingerprints, prompt hash, evidence budget, reranker identity,
-   and decoding controls.
-3. **FTR-03 — data feasibility:** inspect actual train/validation/public/private
-   schemas, answer availability, overlap, blank fields, prompt/target fit, and
-   question-only retrieval. Attach gold only after evidence is built.
+1. **FTR-01 — contract: PASS (docs only).** The generative profile is defined
+   separately from the extractive reader; input is question plus `PackedEvidence`,
+   target is train-only gold prose, loss is answer-only, and inference has no
+   base-only fallback.
+2. **FTR-02 — B2 freeze: PASS (control frozen).** Selected contexts are indexed;
+   config, chunk/index fingerprints, prompt hash, evidence budget, reranker
+   identity, decoding controls, and a representative run are recorded.
+3. **FTR-03 — data feasibility: BLOCKED.** Refresh the audit against the current
+   files, resolve the detected cross-split overlap, obtain/confirm private data,
+   and run question-only retrieval support checks against the frozen index.
 4. **FTR-04 — model gate:** select an exact Transformers causal checkpoint and
    revision; probe tokenizer/context length, adapter target modules, CPU/GPU
    capability, and compatible `torch`/`transformers`/`peft`/`trl`/`accelerate`
@@ -329,10 +356,16 @@ this audit.
 
 ## 6. Files to create, modify, and leave untouched
 
-### Create in later phases
+### Already created
 
 - `docs/finetuned_reader/FTR_CONTRACT.md`
-- frozen B2 config/fingerprint and representative-run documentation
+- `docs/finetuned_reader/FTR_02_B2_FREEZE.md`
+- `configs/frozen/hybrid_rag_b2.yaml`
+- `artifacts/b2_freeze/fingerprint.json`
+- `outputs/ftr02_representative_b2_warmup/`
+
+### Create in later phases
+
 - FTR data-feasibility and model/hardware decision reports
 - generative SFT dataset builder, manifest, tokenizer/collator, trainer,
   checkpoint validator, and Transformers causal generator modules
@@ -382,14 +415,17 @@ and gold-leakage tests. `scripts/selfcheck.py` covers 12 offline checks.
 ### Current test result
 
 - `python scripts/selfcheck.py`: **PASS, 12/12**.
-- `python scripts/verify_data_manifest.py`: **PASS, 1 source file**.
+- `python scripts/verify_data_manifest.py`: **PASS, 4 source files**.
 - `python -m compileall -q src`: **PASS**.
-- `pytest -q`: **FAIL, 243 passed, 1 failed**.
+- `mypy src`: **PASS, 47 source files**.
+- `pytest -q`: **FAIL, 272 passed, 1 failed**.
 - Failure:
-  `tests/test_split_registry.py::test_non_warmup_profiles_cannot_enable_evaluator_references[private]`.
-  The test expects an error message matching `reference_access`; the current
-  validator raises `Private split must disallow evaluator reference access`.
-  This is an existing uncommitted repository change and was not modified here.
+  `tests/test_ftr03_data_feasibility_audit.py::test_repository_audit_hard_stops_until_b2_corpus_is_complete`.
+  The test still expects the old `UNRESOLVED` B2 freeze, while the current
+  fingerprint is complete. FTR-02 targeted tests pass: **12 passed**.
+- `ruff check .`: **FAIL**, import ordering and line length in the uncommitted
+  `scripts/refresh_b2_freeze.py`.
+- `ruff format --check .`: **FAIL**, three current FTR files would be reformatted.
 
 ### Missing FTR tests
 
@@ -416,14 +452,18 @@ and gold-leakage tests. `scripts/selfcheck.py` covers 12 offline checks.
 
 ### Critical
 
-- **Missing competition train/context data:** no proof that valid SFT examples
-  or grounded evidence can be built.
+- **Split contamination:** the current audit reports forbidden train/warmup and
+  public/warmup ID overlaps plus one normalized-question train/public overlap;
+  this invalidates automatic FTR-03 completion until reviewed.
+- **Incomplete official split release:** `data/private-official.json` is absent,
+  so private split governance cannot be fully verified.
 - **No trainable causal checkpoint:** the only named `finetuned_reader`
   checkpoint path belongs to an absent extractive QA profile.
 - **Training stack absent:** PEFT/TRL/Accelerate/bitsandbytes/datasets are not
   installed; no approved LoRA/QLoRA path exists.
-- **Canonical B2 not empirically frozen:** FTR could confound generator gains
-  with retrieval/evidence changes.
+- **Generative implementation absent:** the existing reader path is extractive;
+  no SFT dataset, answer-only collator, trainer, checkpoint validator, or
+  generative inference route exists.
 
 ### High
 
@@ -434,8 +474,9 @@ and gold-leakage tests. `scripts/selfcheck.py` covers 12 offline checks.
   compatibility matrix.
 - Existing name `finetuned_reader` maps to extractive behavior and can cause
   accidental method/config collision.
-- Full regression is currently red due to the split-registry assertion
-  mismatch.
+- Full regression is currently red because one FTR-03 test still asserts the
+  old incomplete-B2 state; Ruff also fails on the current uncommitted FTR-02
+  refresh files.
 
 ### Medium
 
@@ -461,32 +502,31 @@ and gold-leakage tests. `scripts/selfcheck.py` covers 12 offline checks.
 
 ## 9. Hard blockers and decision
 
-The following are hard blockers for FTR-01 implementation beyond contract-only
-documentation, and especially for FTR-03 onward:
+The following are hard blockers for FTR-03 onward:
 
-1. Actual `train.json` with approved gold-answer use is absent.
-2. Actual selected legal-context corpus is absent; therefore real B2 cannot
-   produce the evidence control.
-3. Official public/private files and their exact schemas are absent.
-4. No trainable causal HF checkpoint, exact revision, tokenizer, adapter, or
+1. Forbidden cross-split overlap must be resolved or approved by the split
+   contract before SFT examples are built.
+2. `data/private-official.json` and its exact schema are not available.
+3. No trainable causal HF checkpoint, exact revision, tokenizer, adapter, or
    license provenance is available locally.
-5. PEFT training dependencies and a compatible training environment are absent.
+4. PEFT training dependencies and a compatible training environment are absent.
+5. The generative FTR implementation does not exist yet.
 6. Official evaluator semantics remain unresolved.
-7. The full regression suite is currently failing.
+7. The full regression suite and Ruff checks are currently failing.
 
-**FTR-00 decision: BLOCKED.** Do not implement generative fine-tuning or select
-`finetuned_reader` as a competition method. The next safe action is to resolve
-the data/context and model/hardware gates, then rerun FTR-00 evidence checks
-before FTR-01/FTR-02.
+**FTR-00 decision: BLOCKED.** FTR-01 documentation and FTR-02 control freeze
+are complete, but do not start FTR-04/FTR-05 or select `finetuned_reader` as a
+competition method. First refresh FTR-03 against the current data and frozen
+index, resolve the split findings, then run the model/hardware gate.
 
 ## Handoff
 
-- **Files inspected:** repository instructions, contracts, configs, actual
+- **Files inspected:** repository instructions, contracts, configs, current
+  train/warmup/public/context data manifests, frozen B2 artifacts, actual
   Direct/BM25/Hybrid/retrieval/reranker/evidence/generation/evaluation/
   artifact/submission/reader modules, tests, manifest, and runtime environment.
-- **Files created:** `docs/finetuned_reader/FTR_00_INTEGRATION_AUDIT.md`.
+- **File updated:** `docs/finetuned_reader/FTR_00_INTEGRATION_AUDIT.md`.
 - **Code/data modified by this task:** no.
-- **Source manifest:** verified before report creation; source data remains
-  read-only.
-- **Next phase:** resolve blockers; then FTR-01 contract and FTR-02 canonical
-  B2 freeze.
+- **Source manifest:** verified for four files; source data remains read-only.
+- **Next phase:** refresh FTR-03 data feasibility/leakage audit against the
+  complete B2 freeze, after resolving or approving the detected split overlaps.

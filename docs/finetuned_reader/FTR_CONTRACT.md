@@ -246,9 +246,8 @@ Canonical control config (FTR-02 freeze):
 
 **UNRESOLVED (corpus-dependent after FTR-02):**
 
-- Chunk-cache fingerprint, BM25 index fingerprint, context content hash, and
-  representative B2 run path remain `UNRESOLVED` until `selected-contexts.zip`
-  is available and the freeze fingerprint is refreshed.
+- None for B2 freeze identity. Chunk-cache and index fingerprints are recorded in
+  `artifacts/b2_freeze/fingerprint.json` (`status: complete`).
 
 ---
 

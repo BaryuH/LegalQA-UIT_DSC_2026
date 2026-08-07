@@ -1,6 +1,6 @@
 {
   "bm25_index_schema_version": "c4.bm25-index.v1",
-  "chunk_cache_fingerprint": "UNRESOLVED",
+  "chunk_cache_fingerprint": "42cf5cd120bb57810bbd52621befc61cb6caeec2efeada31c5fb5a4ddaa44615",
   "chunk_cache_schema_version": "c3.chunk-cache.v1",
   "chunking": {
     "max_chars": 1200,
@@ -32,7 +32,7 @@
     "retries": 0,
     "temperature": 0.0
   },
-  "index_fingerprint": "UNRESOLVED",
+  "index_fingerprint": "dcd8c655f43894f3fcae2d32b7befdb43debe3b7174de96e45a243f5e5faac56",
   "normalization_version": "retrieval-normalization-v1",
   "prompt": {
     "name": "rag",
@@ -41,9 +41,9 @@
     "version": "rag-v1"
   },
   "representative_run": {
-    "path": null,
-    "reason": "representative Hybrid-RAG run artifact not yet recorded",
-    "status": "UNRESOLVED"
+    "path": "outputs/ftr02_representative_b2_warmup",
+    "reason": null,
+    "status": "recorded"
   },
   "reranker": {
     "batch_size": 8,
@@ -63,5 +63,5 @@
   },
   "schema_version": "ftr02.b2_freeze.v1",
   "source_config_path": "configs/hybrid_rag.yaml",
-  "status": "config_locked_corpus_pending"
+  "status": "complete"
 }

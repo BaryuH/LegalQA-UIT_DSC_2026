@@ -8,7 +8,8 @@ answer/reference fields.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping, Sequence
+import json
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -44,9 +45,12 @@ from .questions import load_inference_questions
 from .retrieval import (
     BM25Config,
     BM25Index,
+    BM25QueryCache,
     Reranker,
     RerankResult,
+    build_bm25_query_cache,
     create_reranker,
+    load_bm25_index,
     load_or_build_bm25_index,
     retrieve_bm25,
 )
@@ -59,7 +63,15 @@ from .schemas import (
     Prediction,
     RetrievalHit,
 )
-from .text import ChunkingConfig, build_chunk_cache
+from .text import (
+    NORMALIZATION_VERSION,
+    ChunkCacheFingerprint,
+    ChunkingConfig,
+    build_chunk_cache,
+)
+from .text import (
+    cache_path as chunk_cache_path,
+)
 
 PipelineMethod = Literal["direct", "bm25_rag", "hybrid_rag"]
 CaseErrorType = Literal["prompt", "retrieval", "provider", "generation", "runtime"]
@@ -100,6 +112,96 @@ class BM25Preparation:
     index: BM25Index
     manifest_hash: str
     chunk_cache_fingerprint: str
+    chunk_lookup: Mapping[str, LegalChunk] | None = None
+
+
+class _LazyChunkLookup(Mapping[str, LegalChunk]):
+    """Resolve only retrieved chunks from the fingerprinted JSONL cache."""
+
+    def __init__(
+        self,
+        index: BM25Index,
+        cache_file: Path,
+    ) -> None:
+        if not cache_file.is_file():
+            raise PipelineError(f"Chunk cache unavailable: {cache_file}")
+        self._cache_file = cache_file
+        self._documents = {
+            document.chunk_id: document for document in index.documents
+        }
+        self._offsets: list[int] = []
+        with cache_file.open("r", encoding="utf-8", newline="") as handle:
+            ordinal = 0
+            while True:
+                offset = handle.tell()
+                line = handle.readline()
+                if not line:
+                    break
+                if not line.strip():
+                    raise PipelineError(
+                        f"Chunk cache contains a blank record at line {ordinal + 1}"
+                    )
+                record = json.loads(line)
+                if not isinstance(record, dict) or record.get("record_type") != "chunk":
+                    ordinal += 1
+                    continue
+                chunk = record.get("chunk")
+                if not isinstance(chunk, dict):
+                    raise PipelineError(
+                        f"Chunk cache record {ordinal + 1} has no chunk object"
+                    )
+                chunk_id = chunk.get("chunk_id")
+                if not isinstance(chunk_id, str):
+                    raise PipelineError(
+                        f"Chunk cache record {ordinal + 1} has no chunk ID"
+                    )
+                self._offsets.append(offset)
+                expected = index.documents[len(self._offsets) - 1].chunk_id
+                if chunk_id != expected:
+                    raise PipelineError(
+                        f"Chunk cache order mismatch at chunk {len(self._offsets) - 1}"
+                    )
+                ordinal += 1
+        if len(self._offsets) != len(index.documents):
+            raise PipelineError(
+                "Chunk cache count does not match the loaded BM25 index: "
+                f"{len(self._offsets)} != {len(index.documents)}"
+            )
+        self._values: dict[str, LegalChunk] = {}
+
+    def __getitem__(self, key: str) -> LegalChunk:
+        document = self._documents.get(key)
+        if document is None:
+            raise KeyError(key)
+        cached = self._values.get(key)
+        if cached is not None:
+            return cached
+        with self._cache_file.open("r", encoding="utf-8", newline="") as handle:
+            handle.seek(self._offsets[document.ordinal])
+            record = json.loads(handle.readline())
+        if not isinstance(record, dict):
+            raise PipelineError(f"Chunk cache record for {key!r} is not an object")
+        chunk = LegalChunk.model_validate(record.get("chunk"))
+        if chunk.chunk_id != key:
+            raise PipelineError(
+                f"Chunk cache lookup returned the wrong chunk for {key!r}"
+            )
+        self._values[key] = chunk
+        return chunk
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._documents)
+
+    def __len__(self) -> int:
+        return len(self._documents)
+
+
+def _chunk_mapping(preparation: BM25Preparation) -> Mapping[str, LegalChunk]:
+    """Return the eager or lazy chunk view attached to a preparation."""
+
+    if preparation.chunk_lookup is not None:
+        return preparation.chunk_lookup
+    return {chunk.chunk_id: chunk for chunk in preparation.chunks}
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,7 +242,7 @@ def inspect_bm25_retrieval(
     if requested_top_k <= 0:
         raise ValueError("Retrieval top_k must be greater than zero")
 
-    chunks = {chunk.chunk_id: chunk for chunk in preparation.chunks}
+    chunks = _chunk_mapping(preparation)
     hits = retrieve_bm25(preparation.index, question, top_k=requested_top_k)
     rows: list[RetrievalInspectionRow] = []
     for hit in hits:
@@ -357,6 +459,7 @@ def _run_pipeline(
     chunks: Mapping[str, LegalChunk] | None = None,
     documents: Mapping[str, LegalDocument] | None = None,
     index: BM25Index | None = None,
+    query_cache: BM25QueryCache | None = None,
     prompt_builder: PromptBuilder | None = None,
     client: LLMClient | None = None,
     reranker: Reranker | None = None,
@@ -418,6 +521,7 @@ def _run_pipeline(
                     index,
                     question.question,
                     top_k=config.retrieval.rough_top_n,
+                    query_cache=query_cache,
                 )
                 if not raw_hits:
                     raise PipelineError("No positive BM25 hits for question")
@@ -826,6 +930,7 @@ def run_bm25_rag(
     index: BM25Index,
     config: ProjectConfig,
     *,
+    query_cache: BM25QueryCache | None = None,
     documents: Mapping[str, LegalDocument] | None = None,
     prompt_builder: PromptBuilder | None = None,
     client: LLMClient | None = None,
@@ -847,6 +952,7 @@ def run_bm25_rag(
         chunks=chunks,
         documents=documents,
         index=index,
+        query_cache=query_cache,
         prompt_builder=prompt_builder,
         client=client,
         output_dir=output_dir,
@@ -864,6 +970,7 @@ def run_hybrid_rag(
     index: BM25Index,
     config: ProjectConfig,
     *,
+    query_cache: BM25QueryCache | None = None,
     documents: Mapping[str, LegalDocument] | None = None,
     prompt_builder: PromptBuilder | None = None,
     client: LLMClient | None = None,
@@ -886,6 +993,7 @@ def run_hybrid_rag(
         chunks=chunks,
         documents=documents,
         index=index,
+        query_cache=query_cache,
         prompt_builder=prompt_builder,
         client=client,
         reranker=reranker,
@@ -942,6 +1050,7 @@ def prepare_bm25_index_from_config(
     *,
     repo_root: str | Path | None = None,
     rebuild_index: bool = False,
+    lazy_chunks: bool = False,
 ) -> BM25Preparation:
     """Validate sources and load/build one fingerprinted BM25 index."""
 
@@ -952,6 +1061,38 @@ def prepare_bm25_index_from_config(
         )
     root = Path(repo_root or Path(__file__).resolve().parents[2]).resolve()
     manifest_hash = _manifest_hash(root)
+    if lazy_chunks:
+        chunking = _chunking_from_config(config)
+        chunk_fingerprint = ChunkCacheFingerprint.from_config(
+            manifest_hash,
+            chunking,
+            NORMALIZATION_VERSION,
+        )
+        index_result = load_bm25_index(
+            root / config.runtime.cache_dir,
+            chunk_fingerprint,
+            BM25Config(k1=config.retrieval.k1, b=config.retrieval.b),
+            data_root=root / config.data.data_dir,
+        )
+        if index_result.index is None:
+            raise PipelineError(f"BM25 index unavailable: {index_result.reason}")
+        lazy_lookup = _LazyChunkLookup(
+            index_result.index,
+            chunk_cache_path(
+                root / config.runtime.cache_dir,
+                chunk_fingerprint,
+                data_root=root / config.data.data_dir,
+            ),
+        )
+        return BM25Preparation(
+            config=config,
+            chunks=(),
+            documents={},
+            index=index_result.index,
+            manifest_hash=manifest_hash,
+            chunk_cache_fingerprint=chunk_fingerprint.cache_fingerprint,
+            chunk_lookup=lazy_lookup,
+        )
     documents_tuple = load_selected_contexts(root / config.data.selected_contexts_path)
     documents = {document.id: document for document in documents_tuple}
     chunk_cache = build_chunk_cache(
@@ -992,10 +1133,12 @@ def run_bm25_rag_from_config(
 ) -> RunResult:
     """Load validated sources/indexes and run B1 with explicit rebuild policy."""
 
+    config = load_config(config_path)
     preparation = prepare_bm25_index_from_config(
         config_path,
         repo_root=repo_root,
         rebuild_index=rebuild_index,
+        lazy_chunks=config.data.split == "public",
     )
     config = preparation.config
     root = Path(repo_root or Path(__file__).resolve().parents[2]).resolve()
@@ -1004,14 +1147,19 @@ def run_bm25_rag_from_config(
         split=config.data.split,
     )
     selected = views if limit is None else views[:limit]
+    query_cache = build_bm25_query_cache(
+        preparation.index,
+        (question.question for question in selected),
+    )
     selected_output = (
         root / config.runtime.outputs_dir if output_dir is None else Path(output_dir)
     )
     return run_bm25_rag(
         selected,
-        {chunk.chunk_id: chunk for chunk in preparation.chunks},
+        _chunk_mapping(preparation),
         preparation.index,
         config,
+        query_cache=query_cache,
         documents=preparation.documents,
         output_dir=selected_output,
         run_id=run_id,
@@ -1032,10 +1180,12 @@ def run_hybrid_rag_from_config(
 ) -> RunResult:
     """Load validated sources/indexes and run B2 with explicit rebuild policy."""
 
+    config = load_config(config_path)
     preparation = prepare_bm25_index_from_config(
         config_path,
         repo_root=repo_root,
         rebuild_index=rebuild_index,
+        lazy_chunks=config.data.split == "public",
     )
     config = preparation.config
     if config.retrieval.strategy != "bm25_rerank":
@@ -1048,14 +1198,19 @@ def run_hybrid_rag_from_config(
         split=config.data.split,
     )
     selected = views if limit is None else views[:limit]
+    query_cache = build_bm25_query_cache(
+        preparation.index,
+        (question.question for question in selected),
+    )
     selected_output = (
         root / config.runtime.outputs_dir if output_dir is None else Path(output_dir)
     )
     return run_hybrid_rag(
         selected,
-        {chunk.chunk_id: chunk for chunk in preparation.chunks},
+        _chunk_mapping(preparation),
         preparation.index,
         config,
+        query_cache=query_cache,
         documents=preparation.documents,
         output_dir=selected_output,
         run_id=run_id,

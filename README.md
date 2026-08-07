@@ -1,5 +1,27 @@
 # Vietnamese Legal-RAG-QA
 
+## Generative finetuned_reader transfer
+
+The generative `finetuned_reader` profile is integrated on branch
+`codex/16_baseline`. Its runtime remains under
+`src/legal_rag/finetuned_reader`; train/inference configs, prompts, FTR phase
+documents, and acceptance tests are included in this worktree. FTR-03 produces
+6,609 overlap-safe train cases after recording 391 exclusions. Real training
+is server-ready but still requires the FTR-04 local model/PEFT/CUDA gate.
+
+On the training server, stage a Transformers-format Qwen3.5 checkpoint under
+`models/finetuned_reader/qwen3.5-4b`, resolve `revision` and
+`lora.target_modules`, then run:
+
+```bash
+python scripts/preflight_finetuned_reader.py --config configs/finetuned_reader_train.yaml
+python scripts/train_finetuned_reader.py --config configs/finetuned_reader_train.yaml --run-id qwen35-4b-ftr-v1
+```
+
+The Ollama tag `qwen3.5:4b` is not a substitute for the Transformers
+checkpoint. The runner is local-only and fail-closed; it does not download
+weights or silently fall back to another reader.
+
 Baseline nghiên cứu cho bài toán hỏi đáp pháp luật Việt Nam: nhận một câu hỏi,
 truy xuất các đoạn văn bản pháp lý phù hợp, rồi sinh câu trả lời có grounding.
 Repository hiện đã có pipeline Direct, BM25-RAG và Hybrid-RAG, cùng các ranh giới

@@ -41,6 +41,10 @@ RerankerProvider = Literal["none", "mock", "sentence_transformers"]
 RerankerDevice = Literal["auto", "cpu", "cuda"]
 ReaderMode = Literal["original_context", "train_context_bm25"]
 ReaderDevice = Literal["auto", "cpu", "cuda"]
+FineTunedDType = Literal["auto", "float32", "float16", "bfloat16"]
+FineTunedAdapterType = Literal["lora", "qlora"]
+FineTunedAdapterBias = Literal["none", "all", "lora_only"]
+FineTunedOverlapPolicy = Literal["fail", "exclude_and_record"]
 SubmissionFormat = Literal["object_by_question_id"]
 SubmissionOrder = Literal["dataset"]
 
@@ -51,8 +55,8 @@ _SECRET_KEY_MARKERS = (
     "password",
     "passwd",
     "secret",
-    "token",
 )
+_SECRET_EXACT_KEYS = frozenset({"token"})
 _REDACTED = "<redacted>"
 
 
@@ -63,7 +67,10 @@ def _normalized_key(value: object) -> str:
 
 
 def _is_secret_key(value: object) -> bool:
-    return any(marker in _normalized_key(value) for marker in _SECRET_KEY_MARKERS)
+    normalized = _normalized_key(value)
+    return normalized in _SECRET_EXACT_KEYS or any(
+        marker in normalized for marker in _SECRET_KEY_MARKERS
+    )
 
 
 def redact_secrets(value: object) -> object:
@@ -288,6 +295,127 @@ class ReaderSection(ConfigSection):
         return self
 
 
+class FineTunedModelSection(ConfigSection):
+    """Exact local Transformers identity for the generative reader."""
+
+    base_model: NonBlankText
+    revision: NonBlankText
+    tokenizer: NonBlankText
+    loader: Literal["auto", "causal_lm", "multimodal_lm"] = "auto"
+    context_length: int = Field(gt=0)
+    dtype: FineTunedDType = "auto"
+    load_in_4bit: bool = False
+    trust_remote_code: bool = False
+    local_files_only: Literal[True] = True
+    license: NonBlankText | None = None
+
+
+class FineTunedLoRASection(ConfigSection):
+    """LoRA/QLoRA adapter settings; empty targets remain an explicit blocker."""
+
+    enabled: Literal[True] = True
+    adapter_type: FineTunedAdapterType = "lora"
+    r: int = Field(gt=0)
+    alpha: float = Field(gt=0)
+    dropout: float = Field(ge=0.0, lt=1.0)
+    target_modules: tuple[NonBlankText, ...] = ()
+    bias: FineTunedAdapterBias = "none"
+
+
+class FineTunedTrainingSection(ConfigSection):
+    """Deterministic SFT hyperparameters with answer-only-loss defaults."""
+
+    seed: int = Field(ge=0)
+    max_seq_length: int = Field(gt=0)
+    epochs: int = Field(gt=0)
+    learning_rate: float = Field(gt=0)
+    train_batch_size: int = Field(gt=0)
+    eval_batch_size: int = Field(gt=0)
+    gradient_accumulation_steps: int = Field(gt=0)
+    warmup_ratio: float = Field(ge=0.0, lt=1.0)
+    weight_decay: float = Field(ge=0.0)
+    max_grad_norm: float = Field(gt=0)
+    logging_steps: int = Field(gt=0)
+    packing: Literal[False] = False
+    gradient_checkpointing: bool = False
+
+
+class FineTunedOutputSection(ConfigSection):
+    """Repository-relative output roots for datasets and checkpoints."""
+
+    dataset_root: Path
+    checkpoint_root: Path
+
+    @field_validator("dataset_root", "checkpoint_root", mode="before")
+    @classmethod
+    def validate_relative_paths(cls, value: object) -> Path:
+        return _validate_relative_path(value)
+
+
+class FineTunedReaderSection(ConfigSection):
+    """Generative SFT reader contract, isolated from the extractive reader."""
+
+    enabled: Literal[True] = True
+    required: Literal[True] = True
+    type: Literal["generative_sft_reader"] = "generative_sft_reader"
+    dataset_version: NonBlankText
+    train_prompt_path: Path
+    inference_prompt_path: Path
+    checkpoint_path: Path
+    checkpoint_manifest_path: Path
+    max_new_tokens: int = Field(gt=0)
+    overlap_policy: FineTunedOverlapPolicy = "fail"
+    overlap_remediation_id: NonBlankText | None = None
+    stop_sequences: tuple[str, ...] = ()
+    model: FineTunedModelSection
+    lora: FineTunedLoRASection
+    training: FineTunedTrainingSection
+    output: FineTunedOutputSection
+
+    @field_validator(
+        "train_prompt_path",
+        "inference_prompt_path",
+        "checkpoint_path",
+        "checkpoint_manifest_path",
+        mode="before",
+    )
+    @classmethod
+    def validate_relative_paths(cls, value: object) -> Path:
+        return _validate_relative_path(value)
+
+    @field_validator("stop_sequences")
+    @classmethod
+    def validate_stop_sequences(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not item.strip() for item in value):
+            raise ValueError("finetuned_reader.stop_sequences must not contain blanks")
+        return value
+
+    @model_validator(mode="after")
+    def validate_sequence_budget(self) -> Self:
+        if self.max_new_tokens >= self.training.max_seq_length:
+            raise ValueError(
+                "finetuned_reader.max_new_tokens must be smaller than "
+                "training.max_seq_length"
+            )
+        if self.model.load_in_4bit and self.lora.adapter_type != "qlora":
+            raise ValueError(
+                "load_in_4bit requires finetuned_reader.lora.adapter_type=qlora"
+            )
+        if (
+            self.overlap_policy == "exclude_and_record"
+            and self.overlap_remediation_id is None
+        ):
+            raise ValueError(
+                "exclude_and_record requires finetuned_reader.overlap_remediation_id"
+            )
+        if self.overlap_policy == "fail" and self.overlap_remediation_id is not None:
+            raise ValueError(
+                "overlap_remediation_id is only valid with overlap_policy="
+                "exclude_and_record"
+            )
+        return self
+
+
 class ProjectConfig(ConfigSection):
     """Complete profile with validation, redaction, path resolution, and identity."""
 
@@ -303,6 +431,7 @@ class ProjectConfig(ConfigSection):
     runtime: RuntimeSection
     submission: SubmissionSection
     reader: ReaderSection | None = None
+    finetuned_reader: FineTunedReaderSection | None = None
 
     @model_validator(mode="after")
     def validate_profile_invariants(self) -> Self:
@@ -357,6 +486,28 @@ class ProjectConfig(ConfigSection):
                 raise ValueError(
                     "Reader profiles must not reuse the Legal-RAG retrieval stack"
                 )
+
+        is_generative_profile = self.project.profile == "finetuned_reader"
+        if is_generative_profile != (
+            self.finetuned_reader is not None and self.finetuned_reader.enabled
+        ):
+            raise ValueError(
+                "Generative finetuned_reader requires "
+                "finetuned_reader.enabled=true and non-generative profiles must "
+                "omit that section"
+            )
+        if self.finetuned_reader is not None and not is_generative_profile:
+            raise ValueError("Non-generative profiles must omit finetuned_reader")
+        if is_generative_profile:
+            if self.reader is not None:
+                raise ValueError(
+                    "Generative finetuned_reader must not use reader settings"
+                )
+            if self.retrieval.strategy != "bm25_rerank" or not self.reranker.enabled:
+                raise ValueError(
+                    "Generative finetuned_reader must use the frozen BM25+reranker "
+                    "retrieval contract"
+                )
         return self
 
     @property
@@ -392,7 +543,13 @@ class ProjectConfig(ConfigSection):
     def redacted_dict(self) -> dict[str, Any]:
         """Serialize the validated profile while redacting secret-shaped keys."""
 
-        redacted = redact_secrets(self.model_dump(mode="json"))
+        payload = self.model_dump(mode="json")
+        # Preserve hashes of pre-FTR profiles when the optional generative
+        # section is absent; adding a new optional section must not drift the
+        # frozen B2 control identity.
+        if payload.get("finetuned_reader") is None:
+            payload.pop("finetuned_reader")
+        redacted = redact_secrets(payload)
         if not isinstance(redacted, dict):  # pragma: no cover - structural guard
             raise TypeError("Configuration serialization must produce a mapping")
         return redacted
@@ -422,6 +579,12 @@ class ProjectConfig(ConfigSection):
                 "checkpoint_path",
                 "checkpoint_manifest_path",
             ),
+            "finetuned_reader": (
+                "train_prompt_path",
+                "inference_prompt_path",
+                "checkpoint_path",
+                "checkpoint_manifest_path",
+            ),
         }
         for section_name, field_names in path_fields.items():
             section = resolved.get(section_name)
@@ -440,6 +603,20 @@ class ProjectConfig(ConfigSection):
                         f"Resolved path escapes repository root: {section[field_name]}"
                     ) from exc
                 section[field_name] = candidate.as_posix()
+        generative = resolved.get("finetuned_reader")
+        if isinstance(generative, dict):
+            output = generative.get("output")
+            if isinstance(output, dict):
+                for field_name in ("dataset_root", "checkpoint_root"):
+                    candidate = (root / str(output[field_name])).resolve()
+                    try:
+                        candidate.relative_to(root)
+                    except ValueError as exc:
+                        raise ValueError(
+                            "Resolved path escapes repository root: "
+                            f"{output[field_name]}"
+                        ) from exc
+                    output[field_name] = candidate.as_posix()
         return resolved
 
 

@@ -14,6 +14,7 @@ import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, TypeAlias
 
 
@@ -23,7 +24,7 @@ class SelfCheckError(RuntimeError):
 
 CheckAction: TypeAlias = Callable[[], None]
 CheckSpec: TypeAlias = tuple[str, CheckAction]
-_EXPECTED_CHECK_COUNT = 12
+_EXPECTED_CHECK_COUNT = 13
 
 
 def _require(condition: bool, message: str) -> None:
@@ -88,7 +89,10 @@ def _check_evaluator_golden() -> None:
         (InputRecord(id="golden-1", answer="Legal answer 37."),),
         (InputRecord(id="golden-1", answer="Legal answer 37."),),
     )
-    _require(report.artifact["metrics"]["meteor"] == 1.0, "METEOR golden failed")
+    _require(
+        report.artifact["metrics"]["meteor"] == 1.0,
+        "METEOR golden failed",
+    )
     _require(report.artifact["metrics"]["rouge_l"] == 1.0, "ROUGE-L golden failed")
 
 
@@ -340,6 +344,120 @@ def _check_mock_hybrid(root: Path, workspace: Path) -> None:
     )
 
 
+def _check_mock_finetuned_reader(root: Path, workspace: Path) -> None:
+    from legal_rag.config import load_config
+    from legal_rag.finetuned_reader import (
+        FineTunedReaderGenerator,
+        FrozenRetrievalResult,
+        GenerativePromptBuilder,
+        ValidatedCheckpoint,
+        run_finetuned_reader,
+    )
+    from legal_rag.schemas import InferenceQuestion, PackedEvidence, RetrievalHit
+
+    config = load_config(root / "configs" / "finetuned_reader_generative.yaml")
+    settings = config.finetuned_reader
+    _require(settings is not None, "generative finetuned_reader config is incomplete")
+    prompt_builder = GenerativePromptBuilder.from_files(
+        root / settings.train_prompt_path,
+        root / settings.inference_prompt_path,
+        version=settings.dataset_version,
+    )
+    evidence = PackedEvidence(
+        included_ids=("selfcheck-a",),
+        included_hits=(
+            RetrievalHit(
+                chunk_id="selfcheck-a",
+                document_id="selfcheck-a-doc",
+                source_path="selfcheck-contexts.zip",
+                source_member="context_selfcheck-a-doc.json",
+                rank=1,
+                bm25_score=1.0,
+            ),
+        ),
+        rendered_text="[1] Article 37 annual leave legal rule.",
+    )
+    retrieval = FrozenRetrievalResult(
+        evidence=evidence,
+        query_sha256="selfcheck-query-hash",
+        retrieval_hits=("selfcheck-a",),
+        reranker={"used": False, "model": "selfcheck"},
+    )
+
+    class _Retriever:
+        preparation = SimpleNamespace(
+            index=SimpleNamespace(index_fingerprint="selfcheck-index")
+        )
+
+        def retrieve(self, question: InferenceQuestion) -> FrozenRetrievalResult:
+            _require(
+                type(question) is InferenceQuestion,
+                "generative self-check passed a non-inference question",
+            )
+            return retrieval
+
+    class _Backend:
+        model = "selfcheck-causal"
+        model_version = "selfcheck-revision"
+
+        def generate(
+            self,
+            prompt: str,
+            *,
+            max_new_tokens: int,
+            stop_sequences: tuple[str, ...],
+        ) -> str:
+            _require("SELF-CHECK GOLD" not in prompt, "gold reached causal prompt")
+            _require(max_new_tokens > 0, "invalid self-check generation budget")
+            _require(not stop_sequences, "unexpected self-check stop sequence")
+            return "Self-check generated answer."
+
+    manifest = {
+        "base_model": "selfcheck-causal",
+        "base_revision": "selfcheck-revision",
+        "tokenizer": "selfcheck-tokenizer",
+        "profile": "finetuned_reader",
+        "type": "generative_sft_reader",
+        "adapter_path": "adapter",
+        "adapter_hash": "selfcheck-adapter-hash",
+        "dataset_manifest_hash": "selfcheck-dataset-hash",
+        "retrieval_config_hash": "selfcheck-retrieval-hash",
+        "index_fingerprint": "selfcheck-index",
+        "prompt_hash": "selfcheck-prompt-hash",
+    }
+    checkpoint = ValidatedCheckpoint(
+        checkpoint_dir=workspace / "selfcheck-checkpoint",
+        manifest_path=workspace / "selfcheck-checkpoint-manifest.json",
+        manifest=manifest,
+        manifest_hash="selfcheck-checkpoint-hash",
+        adapter_hash="selfcheck-adapter-hash",
+    )
+    result = run_finetuned_reader(
+        (
+            InferenceQuestion(
+                id="selfcheck-finetuned-reader",
+                question="What is the annual leave legal rule?",
+                split="warmup",
+            ),
+        ),
+        config=config,
+        retriever=_Retriever(),
+        generator=FineTunedReaderGenerator(
+            backend=_Backend(),
+            prompt_builder=prompt_builder,
+            checkpoint=checkpoint,
+            max_new_tokens=settings.max_new_tokens,
+        ),
+        output_dir=workspace / "finetuned-reader-output",
+        run_id="selfcheck-finetuned-reader",
+    )
+    _assert_inference_artifact(
+        result,
+        "SELF-CHECK GOLD MUST NEVER ENTER INFERENCE ARTIFACT",
+        method="finetuned_reader",
+    )
+
+
 def _check_submission(workspace: Path) -> None:
     from zipfile import ZipFile
 
@@ -405,6 +523,10 @@ def _build_checks(root: Path, workspace: Path) -> tuple[CheckSpec, ...]:
         ("Mock E2E Direct", lambda: _check_mock_direct(root, workspace)),
         ("Mock E2E BM25-RAG", lambda: _check_mock_bm25(root, workspace)),
         ("Mock E2E Hybrid-RAG", lambda: _check_mock_hybrid(root, workspace)),
+        (
+            "Mock E2E generative finetuned_reader",
+            lambda: _check_mock_finetuned_reader(root, workspace),
+        ),
         ("submission validation", lambda: _check_submission(workspace)),
         ("package import", _check_package_import),
     )

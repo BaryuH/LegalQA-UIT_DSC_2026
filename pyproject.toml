@@ -29,6 +29,17 @@ reader = [
     "transformers>=4.36,<5.0",
     "sentencepiece>=0.1.99",
 ]
+finetuned-reader = [
+    # Optional local LoRA/QLoRA training/runtime; base/offline installs remain unchanged.
+    "torch>=2.0",
+    # Qwen3.5 requires the current Transformers model implementation (v5+).
+    "transformers>=5.0,<6.0",
+    "peft>=0.12,<1.0",
+    "accelerate>=0.30,<2.0",
+    "sentencepiece>=0.1.99",
+    # Qwen3.5's AutoProcessor imports image-processing support even for text-only use.
+    "Pillow>=10.0",
+]
 
 [project.scripts]
 legal-rag = "legal_rag.cli:main"

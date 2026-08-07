@@ -15,7 +15,12 @@ from legal_rag.pipeline import (
     run_bm25_rag,
 )
 from legal_rag.questions import inference_view, load_questions
-from legal_rag.retrieval import BM25Config, build_bm25_index, retrieve_bm25
+from legal_rag.retrieval import (
+    BM25Config,
+    build_bm25_index,
+    build_bm25_query_cache,
+    retrieve_bm25,
+)
 from legal_rag.schemas import LegalChunk, LegalDocument, LegalQuestion
 
 
@@ -100,6 +105,20 @@ def test_legal_code_query_and_stable_ties_are_deterministic(tmp_path: Path) -> N
     assert [hit.chunk_id for hit in code_hits] == ["chunk-z"]
     assert [hit.chunk_id for hit in tie_hits] == ["chunk-a", "chunk-b"]
     assert [hit.rank for hit in tie_hits] == [1, 2]
+
+
+def test_query_cache_preserves_bm25_ranking(tmp_path: Path) -> None:
+    index = _index(tmp_path)
+    queries = ("153/2020/NĐ-CP", "mức 1000 đồng")
+    query_cache = build_bm25_query_cache(index, queries)
+
+    for query in queries:
+        uncached = retrieve_bm25(index, query, top_k=10)
+        cached = retrieve_bm25(index, query, top_k=10, query_cache=query_cache)
+        assert [hit.chunk_id for hit in cached] == [hit.chunk_id for hit in uncached]
+        assert [hit.bm25_score for hit in cached] == pytest.approx(
+            [hit.bm25_score for hit in uncached]
+        )
 
 
 def test_empty_query_and_top_k_larger_than_corpus_are_explicit_and_safe(

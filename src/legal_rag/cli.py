@@ -10,6 +10,11 @@ from zipfile import ZipFile
 
 from .config import load_config
 from .data_validation import validate_data, write_validation_report
+from .finetuned_reader import (
+    FineTunedReaderPipelineError,
+    FineTunedReaderRunResult,
+    run_finetuned_reader_from_config,
+)
 from .pipeline import (
     PipelineError,
     PipelineRunError,
@@ -335,6 +340,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "mock": "direct",
                 "bm25-rag": "bm25_rag",
                 "hybrid-rag": "hybrid_rag",
+                "finetuned_reader": "finetuned_reader",
                 "finetuned-reader": "finetuned_reader",
                 "tuned-bm25-reader": "tuned_bm25_reader",
             }.get(config.project.profile)
@@ -348,7 +354,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"Method {args.method!r} does not match profile "
                     f"{config.project.profile!r}"
                 )
-            result: RunResult | ReaderRunResult
+            result: RunResult | ReaderRunResult | FineTunedReaderRunResult
             if selected_method == "bm25_rag":
                 result = run_bm25_rag_from_config(
                     args.config,
@@ -367,6 +373,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             elif selected_method == "direct":
                 result = run_direct_from_config(
+                    args.config,
+                    limit=args.limit,
+                    output_dir=args.output_dir,
+                    run_id=args.run_id,
+                )
+            elif (
+                selected_method == "finetuned_reader"
+                and config.project.profile == "finetuned_reader"
+            ):
+                if args.rebuild_index:
+                    raise FineTunedReaderPipelineError(
+                        "Generative finetuned_reader must use the frozen B2 index; "
+                        "rebuild is not applicable"
+                    )
+                result = run_finetuned_reader_from_config(
                     args.config,
                     limit=args.limit,
                     output_dir=args.output_dir,
@@ -404,6 +425,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             OSError,
             ValueError,
             PipelineError,
+            FineTunedReaderPipelineError,
             ReaderPipelineError,
             ReaderUnavailableError,
         ) as exc:

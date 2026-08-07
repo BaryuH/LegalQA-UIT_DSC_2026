@@ -1,0 +1,31 @@
+# FTR-04 decision record. Do not replace UNRESOLVED values by guesses.
+profile: finetuned_reader
+status: blocked
+requested_model:
+  ollama_tag: qwen3.5:4b
+  recommended_transformers_id: Qwen/Qwen3.5-4B-Base
+  transformers_path: models/finetuned_reader/qwen3.5-4b
+hardware:
+  platform: windows
+  device: cpu
+  cuda_available: false
+  qlora_approved: false
+model:
+  base_model: models/finetuned_reader/qwen3.5-4b
+  base_revision: UNRESOLVED
+  tokenizer: models/finetuned_reader/qwen3.5-4b
+  loader: auto
+  context_length: UNRESOLVED
+  license: UNRESOLVED
+  local_files_only: true
+  target_modules: []
+dependencies:
+  torch: installed
+  transformers: installed
+  peft: missing
+  accelerate: missing
+  bitsandbytes: missing
+decision:
+  train_authorized: false
+  inference_authorized: false
+  reason: "No exact local causal checkpoint, revision, tokenizer, adapter target modules, or approved training stack"
