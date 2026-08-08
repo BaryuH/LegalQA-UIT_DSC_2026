@@ -259,6 +259,23 @@ def test_dataset_cache_reuses_only_matching_complete_artifact(tmp_path: Path) ->
     )
 
 
+def test_cached_jsonl_preserves_unicode_line_separator_inside_record(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "train.jsonl"
+    path.write_text(
+        dataset_module._jsonl(
+            [{"case_id": "t1", "target_answer": "Dòng một\u2028Dòng hai"}]
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    records = dataset_module._read_jsonl_records(path)
+
+    assert records == [{"case_id": "t1", "target_answer": "Dòng một\u2028Dòng hai"}]
+
+
 def test_train_cli_overrides_preserve_effective_batch_size() -> None:
     config = load_config(REPO_ROOT / "configs" / "finetuned_reader_train.yaml")
 

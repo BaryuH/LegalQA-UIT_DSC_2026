@@ -241,11 +241,27 @@ def _dataset_output_dir(root: Path, settings: Any, *, max_examples: int | None) 
 
 
 def _read_jsonl_records(path: Path) -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-        records = [json.loads(line) for line in lines if line.strip()]
-    except (OSError, json.JSONDecodeError) as exc:
-        raise DatasetBuildError(f"Cached dataset JSONL is invalid: {path}") from exc
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise DatasetBuildError(
+                        f"Cached dataset JSONL is invalid at physical line "
+                        f"{line_number}: {path}"
+                    ) from exc
+                if not isinstance(record, dict):
+                    raise DatasetBuildError(
+                        "Cached dataset JSONL must contain objects at physical line "
+                        f"{line_number}: {path}"
+                    )
+                records.append(record)
+    except OSError as exc:
+        raise DatasetBuildError(f"Cached dataset JSONL cannot be read: {path}") from exc
     if not all(isinstance(record, dict) for record in records):
         raise DatasetBuildError(f"Cached dataset JSONL must contain objects: {path}")
     return records
