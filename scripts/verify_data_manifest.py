@@ -6,16 +6,17 @@ import argparse
 import hashlib
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 SOURCE_DIRECTORIES = ("data",)
 SOURCE_FILES = ("selected-contexts.zip",)
 EXCLUDED_DIRECTORY_NAMES = {"cache", "output", "outputs"}
 DEFAULT_MANIFEST_PATH = Path("artifacts/data-baseline/manifest.json")
+TEXT_SOURCE_SUFFIXES = frozenset({".csv", ".json", ".jsonl", ".tsv", ".txt"})
 
 
 class ManifestVerificationError(RuntimeError):
@@ -40,12 +41,36 @@ def _is_excluded(path: Path, repo_root: Path) -> bool:
     return any(part.casefold() in EXCLUDED_DIRECTORY_NAMES for part in relative_parts)
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
+def _canonical_source_chunks(path: Path) -> Iterator[bytes]:
+    """Yield source bytes using LF line endings for known text-source formats."""
+
     with path.open("rb") as file_handle:
+        if path.suffix.casefold() not in TEXT_SOURCE_SUFFIXES:
+            yield from iter(lambda: file_handle.read(1024 * 1024), b"")
+            return
+
+        pending_carriage_return = False
         for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+            if pending_carriage_return:
+                chunk = b"\r" + chunk
+                pending_carriage_return = False
+            if chunk.endswith(b"\r"):
+                chunk = chunk[:-1]
+                pending_carriage_return = True
+            yield chunk.replace(b"\r\n", b"\n")
+        if pending_carriage_return:
+            yield b"\r"
+
+
+def _source_fingerprint(path: Path) -> tuple[int, str]:
+    """Return canonical byte size and SHA256 without mutating source data."""
+
+    digest = hashlib.sha256()
+    size = 0
+    for chunk in _canonical_source_chunks(path):
+        digest.update(chunk)
+        size += len(chunk)
+    return size, digest.hexdigest()
 
 
 def _source_paths(repo_root: Path) -> list[Path]:
@@ -73,14 +98,16 @@ def build_manifest(repo_root: Path) -> dict[str, Any]:
     """Build deterministic manifest content without writing any file."""
 
     resolved_root = repo_root.resolve()
-    entries = [
-        ManifestEntry(
-            path=_relative_path(path, resolved_root),
-            size=path.stat().st_size,
-            sha256=_sha256(path),
+    entries = []
+    for path in _source_paths(resolved_root):
+        size, sha256 = _source_fingerprint(path)
+        entries.append(
+            ManifestEntry(
+                path=_relative_path(path, resolved_root),
+                size=size,
+                sha256=sha256,
+            )
         )
-        for path in _source_paths(resolved_root)
-    ]
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "source_paths": [*SOURCE_DIRECTORIES, *SOURCE_FILES],

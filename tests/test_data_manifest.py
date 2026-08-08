@@ -59,3 +59,32 @@ def test_manifest_detects_missing_extra_and_hash_mismatch(
     (fixture_root / "data" / "a-source.txt").write_bytes(b"changed fixture\n")
     with pytest.raises(ManifestVerificationError, match="size/hash mismatches"):
         verify_manifest(fixture_root, manifest_path)
+
+
+def test_manifest_normalizes_text_line_endings_without_rewriting_source(
+    fixture_root: Path,
+) -> None:
+    manifest_path = fixture_root / "artifacts" / "manifest.json"
+    source = fixture_root / "data" / "a-source.txt"
+    source.write_bytes(b"first\r\nsecond\r\n")
+    write_manifest(fixture_root, manifest_path)
+
+    source.write_bytes(b"first\nsecond\n")
+    assert verify_manifest(fixture_root, manifest_path) == 3
+
+    source.write_bytes(b"first\nchanged\n")
+    with pytest.raises(ManifestVerificationError, match="size/hash mismatches"):
+        verify_manifest(fixture_root, manifest_path)
+
+
+def test_manifest_keeps_binary_line_endings_byte_sensitive(
+    fixture_root: Path,
+) -> None:
+    manifest_path = fixture_root / "artifacts" / "manifest.json"
+    archive = fixture_root / "selected-contexts.zip"
+    archive.write_bytes(b"archive\r\ncontents")
+    write_manifest(fixture_root, manifest_path)
+
+    archive.write_bytes(b"archive\ncontents")
+    with pytest.raises(ManifestVerificationError, match="size/hash mismatches"):
+        verify_manifest(fixture_root, manifest_path)

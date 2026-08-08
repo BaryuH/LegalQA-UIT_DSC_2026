@@ -10,7 +10,8 @@ python scripts/verify_data_manifest.py
 
 The command must pass before any experiment starts. It verifies the deterministic
 SHA256 manifest at `artifacts/data-baseline/manifest.json` and fails with a non-zero
-exit code when a source file is missing, extra, or has a different size/SHA256.
+exit code when a source file is missing, extra, or has a different canonical
+size/SHA256.
 
 The current source scope is:
 
@@ -19,9 +20,12 @@ The current source scope is:
 - the root-level `selected-contexts.zip` when it exists as a separate copy.
 
 Paths containing `cache/`, `output/`, or `outputs/` are excluded from hashing. The
-manifest stores each included file's repository-relative POSIX path, byte size, and
-lowercase SHA256 digest. Hashing reads files in binary chunks and never copies,
-extracts, normalizes, or rewrites source data or archives.
+manifest stores each included file's repository-relative POSIX path, canonical byte
+size, and lowercase SHA256 digest. For text-source suffixes (`.json`, `.jsonl`,
+`.txt`, `.csv`, `.tsv`), hashing canonicalizes CRLF to LF in memory only, so a Git
+checkout on Windows or Linux produces the same manifest identity. Binary files,
+including ZIP archives, remain byte-sensitive. Hashing never copies, extracts,
+normalizes, or rewrites source data or archives.
 
 ## Per-run artifact contract
 

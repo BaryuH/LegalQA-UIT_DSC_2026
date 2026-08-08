@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source_paths": [
     "data",
     "selected-contexts.zip"
@@ -22,8 +22,8 @@
     },
     {
       "path": "data/warmup.json",
-      "size": 1135881,
-      "sha256": "0b416328977471c8baca70050dff04d1108a263ca6562be13f80fb3dd64c0c17"
+      "size": 1133880,
+      "sha256": "b824e4f18bd9181c021498a28e402b7374d6d559f2ff28caa4120a9d932f82c5"
     }
   ]
 }
