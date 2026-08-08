@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import random
+import sys
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -262,7 +263,7 @@ def _tokenized_batches(
     batch_size: int,
     torch: Any,
     seed: int,
-) -> tuple[Any, int]:
+) -> tuple[Any, int, int]:
     tokenized = []
     for example in examples:
         try:
@@ -307,7 +308,8 @@ def _tokenized_batches(
         collate_fn=collate,
         generator=generator,
     )
-    return loader, len(tokenized)
+    repacked_count = sum(example.evidence_repacked for example in tokenized)
+    return loader, len(tokenized), repacked_count
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:
@@ -386,7 +388,7 @@ def run_real_sft(
         root / settings.inference_prompt_path,
         version=settings.dataset_version,
     )
-    loader, tokenized_count = _tokenized_batches(
+    loader, tokenized_count, token_budget_repacked_count = _tokenized_batches(
         examples=examples,
         tokenizer=tokenizer,
         prompt_builder=prompt_builder,
@@ -394,6 +396,14 @@ def run_real_sft(
         batch_size=settings.training.train_batch_size,
         torch=torch,
         seed=settings.training.seed,
+    )
+    print(
+        "TRAINING_DATA "
+        f"examples={tokenized_count} "
+        f"evidence_repacked={token_budget_repacked_count} "
+        f"max_seq_length={settings.training.max_seq_length}",
+        file=sys.stderr,
+        flush=True,
     )
 
     optimizer = torch.optim.AdamW(
@@ -508,6 +518,8 @@ def run_real_sft(
         "retrieval_config_hash": dataset_result.manifest["retrieval_config_hash"],
         "seed": settings.training.seed,
         "target_modules": list(settings.lora.target_modules),
+        "token_budget_repacked_count": token_budget_repacked_count,
+        "training_max_seq_length": settings.training.max_seq_length,
         "tokenizer": str(settings.model.tokenizer),
         "tokenizer_path": "tokenizer",
         "type": "generative_sft_reader",
@@ -533,6 +545,7 @@ def run_real_sft(
             "run_id": selected_run_id,
             "stack": stack.as_dict(),
             "status": "completed",
+            "token_budget_repacked_count": token_budget_repacked_count,
             "total_parameters": total_parameters,
             "trainable_parameters": trainable_parameters,
         },

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unicodedata import normalize
@@ -126,6 +127,34 @@ def test_collator_never_silently_truncates_target() -> None:
         assert exc.reason_code == "TARGET_DOES_NOT_FIT"
     else:  # pragma: no cover - assertion branch
         raise AssertionError("Expected explicit target-fit failure")
+
+
+def test_collator_repacks_evidence_but_preserves_full_target() -> None:
+    base_example = _example()
+    example = replace(
+        base_example,
+        evidence=replace(
+            base_example.evidence,
+            rendered_text=base_example.evidence.rendered_text * 20,
+        ),
+    )
+    full_target_ids = _Tokenizer().encode(
+        example.target_answer, add_special_tokens=False
+    )
+
+    tokenized = tokenize_sft_example(
+        example,
+        tokenizer=_Tokenizer(),
+        prompt_builder=_prompt_builder(),
+        max_seq_length=len(full_target_ids) + 100,
+    )
+
+    supervised_ids = tuple(label for label in tokenized.labels if label != -100)
+    assert tokenized.evidence_repacked is True
+    assert tokenized.original_prompt_token_count is not None
+    assert tokenized.prompt_token_count < tokenized.original_prompt_token_count
+    assert supervised_ids == tuple(full_target_ids) + (_Tokenizer.eos_token_id,)
+    assert len(tokenized.input_ids) <= len(full_target_ids) + 100
 
 
 def test_sft_builder_attaches_gold_after_question_only_retrieval() -> None:
