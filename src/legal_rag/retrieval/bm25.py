@@ -9,9 +9,10 @@ import os
 import tempfile
 from array import array
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
+from importlib import import_module
 from pathlib import Path
 from typing import Any, Literal
 
@@ -24,12 +25,14 @@ from ..text.normalize import tokenize_legal_text
 try:  # Optional acceleration; the exact Python path remains the compatibility path.
     import numpy as _numpy
 except ImportError:  # pragma: no cover - exercised only in minimal installations
-    _numpy = None
+    _numpy = None  # type: ignore[assignment]
 
 BM25_INDEX_SCHEMA_VERSION = "c4.bm25-index.v1"
 BM25_INDEX_VERSION = "legal-bm25-v1"
+BM25_CUDA_SCORER_VERSION = "legal-bm25-cuda-v1-fp32"
 IndexStatus = Literal["hit", "miss", "stale"]
 IndexLoadPolicy = Literal["strict", "auto_rebuild"]
+BM25Backend = Literal["cpu", "cuda"]
 
 
 class BM25IndexError(RuntimeError):
@@ -46,6 +49,10 @@ class BM25IndexMissingError(BM25IndexError):
 
 class BM25IndexStaleError(BM25IndexError):
     """Raised when an index cannot satisfy its expected fingerprint."""
+
+
+class BM25CudaUnavailableError(BM25IndexError):
+    """Raised when an explicitly requested CUDA BM25 backend is unavailable."""
 
 
 def _sha256_json(value: object) -> str:
@@ -325,8 +332,8 @@ class BM25IndexResult:
 class BM25PostingList:
     """Compact ordinal/term-frequency postings for one query term."""
 
-    ordinals: Sequence[int]
-    term_frequencies: Sequence[int]
+    ordinals: array[int]
+    term_frequencies: array[int]
 
     def __post_init__(self) -> None:
         if len(self.ordinals) != len(self.term_frequencies):
@@ -344,7 +351,7 @@ class BM25QueryCache:
     index_fingerprint: str
     postings: Mapping[str, BM25PostingList]
     document_frequencies: Mapping[str, int]
-    document_lengths: Sequence[int]
+    document_lengths: array[int]
 
     def __post_init__(self) -> None:
         if not isinstance(self.index_fingerprint, str) or not self.index_fingerprint:
@@ -361,6 +368,36 @@ class BM25QueryCache:
                 raise ValueError("BM25 query cache ordinals must be non-negative")
         if any(length < 0 for length in self.document_lengths):
             raise ValueError("BM25 query cache document lengths must be non-negative")
+
+
+@dataclass(frozen=True, slots=True)
+class BM25CudaQueryCache:
+    """CUDA-resident derived postings for one immutable :class:`BM25QueryCache`.
+
+    This is derived state only: the persisted BM25 index remains byte-identical and
+    the backend never contains question answers or references.
+    """
+
+    index_fingerprint: str
+    device: str
+    document_lengths: Any
+    postings: Mapping[str, tuple[Any, Any]]
+
+
+def _require_cuda_torch() -> Any:
+    """Load PyTorch lazily and fail closed when CUDA scoring was requested."""
+
+    try:
+        torch = import_module("torch")
+    except ImportError as exc:  # pragma: no cover - depends on optional runtime
+        raise BM25CudaUnavailableError(
+            "BM25 CUDA backend requires the optional 'torch' package"
+        ) from exc
+    if not torch.cuda.is_available():
+        raise BM25CudaUnavailableError(
+            "BM25 CUDA backend was requested but torch.cuda.is_available() is false"
+        )
+    return torch
 
 
 def build_bm25_query_cache(
@@ -410,12 +447,114 @@ def build_bm25_query_cache(
     )
 
 
+def build_bm25_cuda_query_cache(
+    query_cache: BM25QueryCache,
+    *,
+    device: str = "cuda",
+) -> BM25CudaQueryCache:
+    """Transfer one derived query cache to CUDA once for repeated exact scoring.
+
+    CUDA uses the explicitly versioned float32 scorer for RTX-class throughput.
+    Dataset manifests bind this backend version so its output is never confused
+    with the compatibility CPU scorer.
+    """
+
+    torch = _require_cuda_torch()
+    resolved_device = torch.device(device)
+    if resolved_device.type != "cuda":
+        raise ValueError("BM25 CUDA cache device must resolve to a CUDA device")
+    return BM25CudaQueryCache(
+        index_fingerprint=query_cache.index_fingerprint,
+        device=str(resolved_device),
+        document_lengths=torch.tensor(
+            list(query_cache.document_lengths),
+            dtype=torch.float32,
+            device=resolved_device,
+        ),
+        postings={
+            term: (
+                torch.tensor(
+                    list(posting.ordinals), dtype=torch.long, device=resolved_device
+                ),
+                torch.tensor(
+                    list(posting.term_frequencies),
+                    dtype=torch.float32,
+                    device=resolved_device,
+                ),
+            )
+            for term, posting in query_cache.postings.items()
+        },
+    )
+
+
+def _retrieve_bm25_cuda(
+    index: BM25Index,
+    *,
+    query_terms: set[str],
+    top_k: int,
+    query_cache: BM25QueryCache,
+    cuda_query_cache: BM25CudaQueryCache,
+) -> list[tuple[float, BM25IndexedDocument]]:
+    """Score one query using CUDA-resident postings and deterministic CPU ordering."""
+
+    if cuda_query_cache.index_fingerprint != index.index_fingerprint:
+        raise ValueError("BM25 CUDA query cache does not match the loaded index")
+    missing_terms = query_terms.difference(cuda_query_cache.postings)
+    if missing_terms:
+        raise ValueError(
+            "BM25 CUDA query cache does not cover query terms: "
+            + ", ".join(sorted(missing_terms))
+        )
+    torch = _require_cuda_torch()
+    corpus_size = len(index.documents)
+    scores = torch.zeros(
+        corpus_size, dtype=torch.float32, device=cuda_query_cache.device
+    )
+    average_length = index.summary.average_document_length
+    for term in sorted(query_terms):
+        frequency = query_cache.document_frequencies[term]
+        if frequency <= 0:
+            continue
+        idf = math.log(1.0 + (corpus_size - frequency + 0.5) / (frequency + 0.5))
+        ordinals, term_frequencies = cuda_query_cache.postings[term]
+        length_ratio = (
+            cuda_query_cache.document_lengths[ordinals] / average_length
+            if average_length
+            else 0.0
+        )
+        denominator = term_frequencies + index.config.k1 * (
+            1.0 - index.config.b + index.config.b * length_ratio
+        )
+        scores.index_add_(
+            0,
+            ordinals,
+            idf * (term_frequencies * (index.config.k1 + 1.0) / denominator),
+        )
+    candidate_ordinals = torch.nonzero(scores > 0.0, as_tuple=False).flatten()
+    if candidate_ordinals.numel() == 0:
+        return []
+    if candidate_ordinals.numel() > top_k:
+        threshold = torch.topk(scores[candidate_ordinals], top_k).values[-1]
+        candidate_ordinals = torch.nonzero(
+            scores >= threshold, as_tuple=False
+        ).flatten()
+    candidate_scores = scores[candidate_ordinals].cpu().tolist()
+    return [
+        (float(score), index.documents[int(ordinal)])
+        for ordinal, score in zip(
+            candidate_ordinals.cpu().tolist(), candidate_scores, strict=True
+        )
+    ]
+
+
 def retrieve_bm25(
     index: BM25Index,
     query: str,
     *,
     top_k: int,
     query_cache: BM25QueryCache | None = None,
+    backend: BM25Backend = "cpu",
+    cuda_query_cache: BM25CudaQueryCache | None = None,
 ) -> tuple[RetrievalHit, ...]:
     """Retrieve positive-scoring chunks with deterministic BM25 ranking.
 
@@ -428,12 +567,33 @@ def retrieve_bm25(
         raise ValueError("BM25 query must be a non-blank string")
     if top_k <= 0:
         raise ValueError("top_k must be greater than zero")
+    if backend not in {"cpu", "cuda"}:
+        raise ValueError("BM25 backend must be 'cpu' or 'cuda'")
 
     query_terms = set(tokenize_legal_text(query))
     if not query_terms:
         return ()
 
-    if query_cache is not None:
+    if backend == "cuda":
+        if query_cache is None:
+            query_cache = build_bm25_query_cache(index, (query,))
+        if cuda_query_cache is None:
+            cuda_query_cache = build_bm25_cuda_query_cache(query_cache)
+        try:
+            scored = _retrieve_bm25_cuda(
+                index,
+                query_terms=query_terms,
+                top_k=top_k,
+                query_cache=query_cache,
+                cuda_query_cache=cuda_query_cache,
+            )
+        except BM25CudaUnavailableError:
+            raise
+        except RuntimeError as exc:
+            raise BM25CudaUnavailableError(
+                f"BM25 CUDA scoring failed: {type(exc).__name__}: {exc}"
+            ) from exc
+    elif query_cache is not None:
         if query_cache.index_fingerprint != index.index_fingerprint:
             raise ValueError("BM25 query cache does not match the loaded index")
         missing_terms = query_terms.difference(query_cache.postings)
@@ -479,9 +639,7 @@ def retrieve_bm25(
                 )
             candidate_ordinals = _numpy.flatnonzero(scores > 0.0)
             if len(candidate_ordinals) > top_k:
-                threshold = _numpy.partition(
-                    scores[candidate_ordinals], -top_k
-                )[-top_k]
+                threshold = _numpy.partition(scores[candidate_ordinals], -top_k)[-top_k]
                 candidate_ordinals = candidate_ordinals[
                     scores[candidate_ordinals] >= threshold
                 ]
@@ -514,9 +672,7 @@ def retrieve_bm25(
                     )
                     scored_by_ordinal[ordinal] = scored_by_ordinal.get(
                         ordinal, 0.0
-                    ) + idf * (
-                        term_frequency * (index.config.k1 + 1.0) / denominator
-                    )
+                    ) + idf * (term_frequency * (index.config.k1 + 1.0) / denominator)
             scored = [
                 (score, index.documents[ordinal])
                 for ordinal, score in scored_by_ordinal.items()
@@ -535,16 +691,17 @@ def retrieve_bm25(
                     continue
                 frequency = document_frequency[term]
                 idf = math.log(
-                    1.0
-                    + (len(index.documents) - frequency + 0.5) / (frequency + 0.5)
+                    1.0 + (len(index.documents) - frequency + 0.5) / (frequency + 0.5)
                 )
-                length_ratio = (
+                document_length_ratio = (
                     document.document_length / average_length if average_length else 0.0
                 )
-                denominator = term_frequency + index.config.k1 * (
-                    1.0 - index.config.b + index.config.b * length_ratio
+                document_denominator = term_frequency + index.config.k1 * (
+                    1.0 - index.config.b + index.config.b * document_length_ratio
                 )
-                score += idf * (term_frequency * (index.config.k1 + 1.0) / denominator)
+                score += idf * (
+                    term_frequency * (index.config.k1 + 1.0) / document_denominator
+                )
             if score > 0.0:
                 scored.append((score, document))
 

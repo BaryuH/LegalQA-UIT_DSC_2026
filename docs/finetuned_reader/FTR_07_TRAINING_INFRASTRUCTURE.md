@@ -44,9 +44,34 @@ python scripts/train_finetuned_reader.py \
   --config configs/finetuned_reader_train.yaml \
   --run-id qwen35-4b-ftr-smoke-b2 \
   --max-examples 8 \
+  --bm25-backend cuda \
   --train-batch-size 2 \
   --gradient-accumulation-steps 8
 ```
+
+For the full GPU-first run, omit `--max-examples`:
+
+```bash
+python scripts/train_finetuned_reader.py \
+  --config configs/finetuned_reader_train.yaml \
+  --run-id qwen35-4b-ftr-full-b2-01 \
+  --bm25-backend cuda \
+  --train-batch-size 2 \
+  --gradient-accumulation-steps 8
+```
+
+The runner now builds the dataset before loading Qwen. It scans the persisted
+BM25 index once to build a query-vocabulary postings cache, transfers that
+derived cache to CUDA, and scores every training query with the explicitly
+versioned `legal-bm25-cuda-v1-fp32` backend. CUDA is strict: if PyTorch cannot
+use CUDA, the run stops instead of falling back to CPU. Progress is emitted as
+`DATASET_BUILD` records every 100 source cases. After the dataset artifact is
+complete, retrieval objects are released, the CUDA allocator cache is cleared,
+and only then are Qwen weights and LoRA loaded for SFT.
+
+`bm25_backend` and its scorer version are bound into the dataset manifest and
+cache identity. Therefore CPU- and CUDA-built datasets cannot be silently
+interchanged even though both consume the same frozen B2 index.
 
 The runner refuses to overwrite an existing run directory and records
 dataset/B2/prompt/model provenance, loader, dtype, and adapter hash in

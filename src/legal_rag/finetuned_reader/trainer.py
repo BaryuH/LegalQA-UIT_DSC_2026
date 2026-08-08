@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import math
@@ -343,8 +344,6 @@ def run_real_sft(
             "Real SFT requires CUDA; CPU is reserved for smoke tests and preflight"
         )
 
-    torch, transformers, LoraConfig, TaskType, get_peft_model = _load_runtime()
-    _seed_everything(torch, settings.training.seed)
     selected_run_id = run_id or datetime.now(UTC).strftime("ftr-%Y%m%d-%H%M%S")
     checkpoint_dir = root / settings.output.checkpoint_root / selected_run_id
     if checkpoint_dir.exists():
@@ -352,6 +351,19 @@ def run_real_sft(
             f"Refusing to overwrite checkpoint directory: {checkpoint_dir}"
         )
 
+    # Dataset construction owns the GPU first.  Qwen is intentionally loaded only
+    # after BM25-CUDA/reranker state has been released, avoiding idle model VRAM.
+    dataset_result: DatasetBuildResult = build_sft_dataset_from_config(
+        config, repo_root=root, max_examples=max_examples
+    )
+    examples = dataset_result.examples
+    if max_examples is not None:
+        examples = examples[:max_examples]
+
+    torch, transformers, LoraConfig, TaskType, get_peft_model = _load_runtime()
+    gc.collect()
+    torch.cuda.empty_cache()
+    _seed_everything(torch, settings.training.seed)
     model, tokenizer, dtype, model_loader = _load_model_and_tokenizer(
         root=root,
         torch=torch,
@@ -369,12 +381,6 @@ def run_real_sft(
     trainable_parameters, total_parameters = _trainable_parameter_counts(model)
     if trainable_parameters == 0:
         raise RealTrainingError("LoRA produced zero trainable parameters")
-    dataset_result: DatasetBuildResult = build_sft_dataset_from_config(
-        config, repo_root=root, max_examples=max_examples
-    )
-    examples = dataset_result.examples
-    if max_examples is not None:
-        examples = examples[:max_examples]
     prompt_builder = GenerativePromptBuilder.from_files(
         root / settings.train_prompt_path,
         root / settings.inference_prompt_path,

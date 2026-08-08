@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,18 @@ from ..evidence import deduplicate_retrieved_chunks, pack_evidence
 from ..generation.prompts import PromptBuilder
 from ..pipeline import BM25Preparation, prepare_bm25_index_from_config
 from ..questions import load_questions
-from ..retrieval import Reranker, create_reranker, retrieve_bm25
+from ..retrieval import (
+    BM25_CUDA_SCORER_VERSION,
+    BM25Backend,
+    BM25CudaQueryCache,
+    BM25CudaUnavailableError,
+    BM25QueryCache,
+    Reranker,
+    build_bm25_cuda_query_cache,
+    build_bm25_query_cache,
+    create_reranker,
+    retrieve_bm25,
+)
 from ..schemas import InferenceQuestion, LegalQuestion, PackedEvidence
 from .b2_freeze import (
     B2FreezeFingerprint,
@@ -67,14 +79,24 @@ class FrozenB2EvidenceRetriever:
         preparation: BM25Preparation,
         freeze: B2FreezeFingerprint,
         reranker: Reranker,
+        *,
+        bm25_backend: BM25Backend = "cpu",
     ) -> None:
         self.preparation = preparation
         self.freeze = freeze
         self.reranker = reranker
+        self.bm25_backend = bm25_backend
+        self.query_cache: BM25QueryCache | None = None
+        self.cuda_query_cache: BM25CudaQueryCache | None = None
         self._chunks = {chunk.chunk_id: chunk for chunk in preparation.chunks}
 
     @classmethod
-    def from_repo(cls, repo_root: str | Path) -> FrozenB2EvidenceRetriever:
+    def from_repo(
+        cls,
+        repo_root: str | Path,
+        *,
+        bm25_backend: BM25Backend = "cpu",
+    ) -> FrozenB2EvidenceRetriever:
         root = Path(repo_root).resolve()
         freeze = load_b2_freeze_fingerprint(root)
         require_complete_b2_freeze(freeze)
@@ -95,7 +117,32 @@ class FrozenB2EvidenceRetriever:
         )
         validate_against_b2_freeze(identity, freeze)
         reranker = create_reranker(preparation.config.reranker)
-        return cls(preparation, freeze, reranker)
+        return cls(
+            preparation,
+            freeze,
+            reranker,
+            bm25_backend=bm25_backend,
+        )
+
+    def prepare_queries(self, questions: Iterable[InferenceQuestion]) -> None:
+        """Build one corpus scan and optionally transfer its postings to CUDA."""
+
+        query_cache = build_bm25_query_cache(
+            self.preparation.index,
+            (question.question for question in questions),
+        )
+        self.query_cache = query_cache
+        if self.bm25_backend == "cuda":
+            try:
+                self.cuda_query_cache = build_bm25_cuda_query_cache(query_cache)
+            except BM25CudaUnavailableError as exc:
+                raise DatasetBuildError(str(exc)) from exc
+            except RuntimeError as exc:
+                raise DatasetBuildError(
+                    f"BM25 CUDA cache preparation failed: {type(exc).__name__}: {exc}"
+                ) from exc
+        else:
+            self.cuda_query_cache = None
 
     def retrieve(self, question: InferenceQuestion) -> FrozenRetrievalResult:
         """Retrieve using only the inference-safe question view."""
@@ -107,6 +154,9 @@ class FrozenB2EvidenceRetriever:
             self.preparation.index,
             query,
             top_k=self.freeze.rough_top_n,
+            query_cache=self.query_cache,
+            backend=self.bm25_backend,
+            cuda_query_cache=self.cuda_query_cache,
         )
         if not raw_hits:
             raise DatasetBuildError("No positive BM25 hits for question")
@@ -339,6 +389,7 @@ def build_sft_dataset(
     retrieval_config_hash: str,
     overlap_exclusions: Mapping[str, str] | None = None,
     max_examples: int | None = None,
+    progress_every: int | None = None,
 ) -> tuple[
     tuple[SFTExample, ...], tuple[ExcludedExample, ...], tuple[ExcludedExample, ...]
 ]:
@@ -351,7 +402,9 @@ def build_sft_dataset(
     if max_examples is not None and max_examples <= 0:
         raise ValueError("max_examples must be greater than zero")
     normalized_questions: dict[str, str] = {}
-    for case in sorted(cases, key=lambda item: item.id):
+    for processed_count, case in enumerate(
+        sorted(cases, key=lambda item: item.id), start=1
+    ):
         if case.id in selected_overlap_exclusions:
             excluded.append(
                 ExcludedExample(
@@ -409,6 +462,8 @@ def build_sft_dataset(
             )
             if max_examples is not None and len(examples) >= max_examples:
                 break
+        except BM25CudaUnavailableError as exc:
+            raise DatasetBuildError(str(exc)) from exc
         except Exception as exc:
             failures.append(
                 ExcludedExample(
@@ -418,7 +473,41 @@ def build_sft_dataset(
                     reason=f"{type(exc).__name__}: {exc}",
                 )
             )
+        if progress_every is not None and processed_count % progress_every == 0:
+            print(
+                "DATASET_BUILD "
+                f"processed={processed_count}/{len(cases)} "
+                f"examples={len(examples)} excluded={len(excluded)} "
+                f"failures={len(failures)} backend={retriever.bm25_backend}",
+                file=sys.stderr,
+                flush=True,
+            )
     return tuple(examples), tuple(excluded), tuple(failures)
+
+
+def _eligible_retrieval_questions(
+    cases: Sequence[LegalQuestion],
+    *,
+    overlap_exclusions: Mapping[str, str],
+    max_examples: int | None,
+) -> tuple[InferenceQuestion, ...]:
+    """Select the exact inference-safe prefix whose query terms need caching."""
+
+    selected: list[InferenceQuestion] = []
+    normalized_questions: set[str] = set()
+    for case in sorted(cases, key=lambda item: item.id):
+        if case.id in overlap_exclusions:
+            continue
+        if case.answer is None or not case.answer.strip():
+            continue
+        normalized = normalize_question_text(case.question)
+        if normalized in normalized_questions:
+            continue
+        normalized_questions.add(normalized)
+        selected.append(case.inference_view())
+        if max_examples is not None and len(selected) >= max_examples:
+            break
+    return tuple(selected)
 
 
 def write_dataset_artifacts(
@@ -507,7 +596,10 @@ def build_sft_dataset_from_config(
             "Cross-split overlap blocks dataset build; use an approved "
             "exclude_and_record policy only with a documented decision"
         )
-    retriever = FrozenB2EvidenceRetriever.from_repo(root)
+    retriever = FrozenB2EvidenceRetriever.from_repo(
+        root,
+        bm25_backend=settings.dataset_build.bm25_backend,
+    )
     prompt_builder = GenerativePromptBuilder.from_files(
         root / settings.train_prompt_path,
         root / settings.inference_prompt_path,
@@ -521,6 +613,12 @@ def build_sft_dataset_from_config(
         "overlap_policy": settings.overlap_policy,
         "overlap_remediation_id": settings.overlap_remediation_id,
         "profile": "finetuned_reader",
+        "bm25_backend": settings.dataset_build.bm25_backend,
+        "bm25_backend_version": (
+            BM25_CUDA_SCORER_VERSION
+            if settings.dataset_build.bm25_backend == "cuda"
+            else "legal-bm25-v1"
+        ),
         "source_train_hash": _hash_text(
             (root / config.data.question_path).read_text(encoding="utf-8")
         ),
@@ -549,6 +647,25 @@ def build_sft_dataset_from_config(
     )
     if cached is not None:
         return cached
+    retrieval_questions = _eligible_retrieval_questions(
+        cases,
+        overlap_exclusions=exclusions,
+        max_examples=max_examples,
+    )
+    print(
+        "DATASET_BUILD phase=prepare_query_cache "
+        f"backend={settings.dataset_build.bm25_backend} "
+        f"queries={len(retrieval_questions)}",
+        file=sys.stderr,
+        flush=True,
+    )
+    retriever.prepare_queries(retrieval_questions)
+    print(
+        "DATASET_BUILD phase=retrieve status=query_cache_ready "
+        f"backend={settings.dataset_build.bm25_backend}",
+        file=sys.stderr,
+        flush=True,
+    )
     examples, excluded, failures = build_sft_dataset(
         cases,
         retriever=retriever,
@@ -556,6 +673,7 @@ def build_sft_dataset_from_config(
         retrieval_config_hash=retriever.freeze.config_hash,
         overlap_exclusions=exclusions,
         max_examples=max_examples,
+        progress_every=settings.dataset_build.progress_every,
     )
     train_text = _jsonl([example.as_dict() for example in examples])
     manifest: dict[str, object] = {

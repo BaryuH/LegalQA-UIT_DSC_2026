@@ -18,15 +18,23 @@ def _apply_training_overrides(
     *,
     train_batch_size: int | None,
     gradient_accumulation_steps: int | None,
+    bm25_backend: str | None = None,
 ) -> ProjectConfig:
     """Return an in-memory config with validated runtime-only train overrides."""
 
-    if train_batch_size is None and gradient_accumulation_steps is None:
+    if (
+        train_batch_size is None
+        and gradient_accumulation_steps is None
+        and bm25_backend is None
+    ):
         return config
     payload = config.model_dump(mode="json")
     settings = payload.get("finetuned_reader")
     if not isinstance(settings, dict):
         raise ValueError("finetuned_reader settings are required for overrides")
+    dataset_build = settings.get("dataset_build")
+    if not isinstance(dataset_build, dict):
+        raise ValueError("finetuned_reader.dataset_build settings are required")
     training = settings.get("training")
     if not isinstance(training, dict):
         raise ValueError("finetuned_reader.training settings are required")
@@ -38,11 +46,16 @@ def _apply_training_overrides(
         if gradient_accumulation_steps <= 0:
             raise ValueError("--gradient-accumulation-steps must be greater than zero")
         training["gradient_accumulation_steps"] = gradient_accumulation_steps
+    if bm25_backend is not None:
+        if bm25_backend not in {"cpu", "cuda"}:
+            raise ValueError("--bm25-backend must be 'cpu' or 'cuda'")
+        dataset_build["bm25_backend"] = bm25_backend
     return ProjectConfig.model_validate(payload)
 
 
 def main(argv: list[str] | None = None) -> int:
     from legal_rag.config import load_config
+    from legal_rag.finetuned_reader.dataset import DatasetBuildError
     from legal_rag.finetuned_reader.trainer import RealTrainingError, run_real_sft
     from legal_rag.finetuned_reader.training import TrainingGateError
 
@@ -77,6 +90,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Override gradient accumulation without editing the config file.",
     )
+    parser.add_argument(
+        "--bm25-backend",
+        choices=("cpu", "cuda"),
+        default=None,
+        help="Use the explicit CPU or CUDA BM25 dataset-build backend.",
+    )
     args = parser.parse_args(argv)
     root = args.repo_root.resolve()
     config_path = args.config
@@ -88,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
             config,
             train_batch_size=args.train_batch_size,
             gradient_accumulation_steps=args.gradient_accumulation_steps,
+            bm25_backend=args.bm25_backend,
         )
         result = run_real_sft(
             config,
@@ -95,7 +115,13 @@ def main(argv: list[str] | None = None) -> int:
             run_id=args.run_id,
             max_examples=args.max_examples,
         )
-    except (OSError, ValueError, RealTrainingError, TrainingGateError) as exc:
+    except (
+        OSError,
+        ValueError,
+        DatasetBuildError,
+        RealTrainingError,
+        TrainingGateError,
+    ) as exc:
         print(f"TRAINING_BLOCKED: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))

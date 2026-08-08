@@ -13,9 +13,13 @@ from ..evidence import (
     pack_retrieved_evidence,
 )
 from .bm25 import (
+    BM25_CUDA_SCORER_VERSION,
     BM25_INDEX_SCHEMA_VERSION,
     BM25_INDEX_VERSION,
+    BM25Backend,
     BM25Config,
+    BM25CudaQueryCache,
+    BM25CudaUnavailableError,
     BM25Index,
     BM25IndexConflictError,
     BM25IndexedDocument,
@@ -30,6 +34,7 @@ from .bm25 import (
     IndexLoadPolicy,
     IndexStatus,
     bm25_cache_path,
+    build_bm25_cuda_query_cache,
     build_bm25_index,
     build_bm25_query_cache,
     load_bm25_index,
@@ -60,8 +65,12 @@ from .reranker import (
 
 __all__ = [
     "BM25Config",
+    "BM25Backend",
+    "BM25CudaQueryCache",
+    "BM25CudaUnavailableError",
     "BM25_INDEX_SCHEMA_VERSION",
     "BM25_INDEX_VERSION",
+    "BM25_CUDA_SCORER_VERSION",
     "BM25Index",
     "BM25IndexConflictError",
     "BM25IndexError",
@@ -77,6 +86,7 @@ __all__ = [
     "IndexStatus",
     "bm25_cache_path",
     "build_bm25_index",
+    "build_bm25_cuda_query_cache",
     "build_bm25_query_cache",
     "load_bm25_index",
     "load_or_build_bm25_index",

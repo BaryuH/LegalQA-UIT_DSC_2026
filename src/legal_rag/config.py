@@ -45,6 +45,7 @@ FineTunedDType = Literal["auto", "float32", "float16", "bfloat16"]
 FineTunedAdapterType = Literal["lora", "qlora"]
 FineTunedAdapterBias = Literal["none", "all", "lora_only"]
 FineTunedOverlapPolicy = Literal["fail", "exclude_and_record"]
+FineTunedBM25Backend = Literal["cpu", "cuda"]
 SubmissionFormat = Literal["object_by_question_id"]
 SubmissionOrder = Literal["dataset"]
 
@@ -340,6 +341,13 @@ class FineTunedTrainingSection(ConfigSection):
     gradient_checkpointing: bool = False
 
 
+class FineTunedDatasetBuildSection(ConfigSection):
+    """Execution controls for frozen-B2 SFT dataset construction."""
+
+    bm25_backend: FineTunedBM25Backend = "cpu"
+    progress_every: int = Field(gt=0, default=100)
+
+
 class FineTunedOutputSection(ConfigSection):
     """Repository-relative output roots for datasets and checkpoints."""
 
@@ -369,6 +377,9 @@ class FineTunedReaderSection(ConfigSection):
     stop_sequences: tuple[str, ...] = ()
     model: FineTunedModelSection
     lora: FineTunedLoRASection
+    dataset_build: FineTunedDatasetBuildSection = Field(
+        default_factory=FineTunedDatasetBuildSection
+    )
     training: FineTunedTrainingSection
     output: FineTunedOutputSection
 

@@ -17,10 +17,12 @@ from legal_rag.pipeline import (
 from legal_rag.questions import inference_view, load_questions
 from legal_rag.retrieval import (
     BM25Config,
+    BM25CudaUnavailableError,
     build_bm25_index,
     build_bm25_query_cache,
     retrieve_bm25,
 )
+from legal_rag.retrieval import bm25 as bm25_module
 from legal_rag.schemas import LegalChunk, LegalDocument, LegalQuestion
 
 
@@ -119,6 +121,48 @@ def test_query_cache_preserves_bm25_ranking(tmp_path: Path) -> None:
         assert [hit.bm25_score for hit in cached] == pytest.approx(
             [hit.bm25_score for hit in uncached]
         )
+
+
+def test_explicit_cuda_backend_fails_closed_without_cuda(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    index = _index(tmp_path)
+
+    class _UnavailableCuda:
+        @staticmethod
+        def is_available() -> bool:
+            return False
+
+    monkeypatch.setattr(
+        bm25_module,
+        "import_module",
+        lambda name: type("FakeTorch", (), {"cuda": _UnavailableCuda})(),
+    )
+    with pytest.raises(BM25CudaUnavailableError, match="is_available"):
+        retrieve_bm25(index, "mức phạt", top_k=3, backend="cuda")
+
+
+def test_cuda_backend_matches_cpu_top_k_when_available(tmp_path: Path) -> None:
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is not available in this test environment")
+    index = _index(tmp_path)
+    query = "mức 1000 đồng xử phạt"
+    query_cache = build_bm25_query_cache(index, (query,))
+
+    cpu_hits = retrieve_bm25(index, query, top_k=10, query_cache=query_cache)
+    cuda_hits = retrieve_bm25(
+        index,
+        query,
+        top_k=10,
+        query_cache=query_cache,
+        backend="cuda",
+    )
+
+    assert [hit.chunk_id for hit in cuda_hits] == [hit.chunk_id for hit in cpu_hits]
+    assert [hit.bm25_score for hit in cuda_hits] == pytest.approx(
+        [hit.bm25_score for hit in cpu_hits], rel=1e-5, abs=1e-6
+    )
 
 
 def test_empty_query_and_top_k_larger_than_corpus_are_explicit_and_safe(
