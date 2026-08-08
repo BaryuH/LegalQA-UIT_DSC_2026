@@ -10,6 +10,36 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
+from legal_rag.config import ProjectConfig  # noqa: E402
+
+
+def _apply_training_overrides(
+    config: ProjectConfig,
+    *,
+    train_batch_size: int | None,
+    gradient_accumulation_steps: int | None,
+) -> ProjectConfig:
+    """Return an in-memory config with validated runtime-only train overrides."""
+
+    if train_batch_size is None and gradient_accumulation_steps is None:
+        return config
+    payload = config.model_dump(mode="json")
+    settings = payload.get("finetuned_reader")
+    if not isinstance(settings, dict):
+        raise ValueError("finetuned_reader settings are required for overrides")
+    training = settings.get("training")
+    if not isinstance(training, dict):
+        raise ValueError("finetuned_reader.training settings are required")
+    if train_batch_size is not None:
+        if train_batch_size <= 0:
+            raise ValueError("--train-batch-size must be greater than zero")
+        training["train_batch_size"] = train_batch_size
+    if gradient_accumulation_steps is not None:
+        if gradient_accumulation_steps <= 0:
+            raise ValueError("--gradient-accumulation-steps must be greater than zero")
+        training["gradient_accumulation_steps"] = gradient_accumulation_steps
+    return ProjectConfig.model_validate(payload)
+
 
 def main(argv: list[str] | None = None) -> int:
     from legal_rag.config import load_config
@@ -35,6 +65,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Optional deterministic prefix for a server smoke run.",
     )
+    parser.add_argument(
+        "--train-batch-size",
+        type=int,
+        default=None,
+        help="Override train batch size without editing the config file.",
+    )
+    parser.add_argument(
+        "--gradient-accumulation-steps",
+        type=int,
+        default=None,
+        help="Override gradient accumulation without editing the config file.",
+    )
     args = parser.parse_args(argv)
     root = args.repo_root.resolve()
     config_path = args.config
@@ -42,6 +84,11 @@ def main(argv: list[str] | None = None) -> int:
         config_path = root / config_path
     try:
         config = load_config(config_path)
+        config = _apply_training_overrides(
+            config,
+            train_batch_size=args.train_batch_size,
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
+        )
         result = run_real_sft(
             config,
             repo_root=root,

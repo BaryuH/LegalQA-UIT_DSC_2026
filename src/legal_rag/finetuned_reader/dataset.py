@@ -8,6 +8,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from ..artifacts import fingerprint_json
 from ..config import ProjectConfig
@@ -180,6 +181,156 @@ def _hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _dataset_output_dir(root: Path, settings: Any, *, max_examples: int | None) -> Path:
+    dataset_root = Path(str(settings.output.dataset_root))
+    dataset_version = str(settings.dataset_version)
+    output_dir = root / dataset_root / dataset_version
+    if max_examples is not None:
+        return output_dir / f"smoke-{max_examples}"
+    return output_dir
+
+
+def _read_jsonl_records(path: Path) -> list[dict[str, object]]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        records = [json.loads(line) for line in lines if line.strip()]
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DatasetBuildError(f"Cached dataset JSONL is invalid: {path}") from exc
+    if not all(isinstance(record, dict) for record in records):
+        raise DatasetBuildError(f"Cached dataset JSONL must contain objects: {path}")
+    return records
+
+
+def _string_field(payload: Mapping[str, object], field_name: str) -> str:
+    value = payload.get(field_name)
+    if not isinstance(value, str):
+        raise DatasetBuildError(f"Cached dataset field must be a string: {field_name}")
+    return value
+
+
+def _string_tuple_field(
+    payload: Mapping[str, object], field_name: str
+) -> tuple[str, ...]:
+    value = payload.get(field_name)
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise DatasetBuildError(
+            f"Cached dataset field must be a list of strings: {field_name}"
+        )
+    return tuple(value)
+
+
+def _sft_example_from_dict(payload: Mapping[str, object]) -> SFTExample:
+    evidence_payload = payload.get("evidence")
+    if not isinstance(evidence_payload, dict):
+        raise DatasetBuildError("Cached SFT example must contain evidence object")
+    evidence = EvidenceRecord(
+        rendered_text=_string_field(evidence_payload, "rendered_text"),
+        chunk_ids=_string_tuple_field(evidence_payload, "chunk_ids"),
+        document_ids=_string_tuple_field(evidence_payload, "document_ids"),
+        retrieval_config_hash=_string_field(evidence_payload, "retrieval_config_hash"),
+        index_fingerprint=_string_field(evidence_payload, "index_fingerprint"),
+        packed_evidence_hash=_string_field(evidence_payload, "packed_evidence_hash"),
+    )
+    try:
+        return SFTExample(
+            example_id=_string_field(payload, "example_id"),
+            case_id=_string_field(payload, "case_id"),
+            question=_string_field(payload, "question"),
+            evidence=evidence,
+            target_answer=_string_field(payload, "target_answer"),
+            split=_string_field(payload, "split"),
+        )
+    except ValueError as exc:
+        raise DatasetBuildError(
+            "Cached SFT example violates the training contract"
+        ) from exc
+
+
+def _excluded_example_from_dict(payload: Mapping[str, object]) -> ExcludedExample:
+    return ExcludedExample(
+        case_id=_string_field(payload, "case_id"),
+        split=_string_field(payload, "split"),
+        reason_code=_string_field(payload, "reason_code"),
+        reason=_string_field(payload, "reason"),
+    )
+
+
+def _load_cached_dataset(
+    output_dir: Path,
+    *,
+    cache_identity: Mapping[str, object],
+    max_examples: int | None,
+) -> DatasetBuildResult | None:
+    """Load a complete, identity-matching dataset artifact without retrieval work."""
+
+    required_paths = (
+        output_dir / "train.jsonl",
+        output_dir / "excluded.jsonl",
+        output_dir / "retrieval_failures.jsonl",
+        output_dir / "dataset_manifest.json",
+        output_dir / "statistics.json",
+    )
+    present_paths = [path.exists() for path in required_paths]
+    if not any(present_paths):
+        return None
+    if not all(present_paths):
+        raise DatasetBuildError(f"Cached dataset is incomplete: {output_dir}")
+    try:
+        manifest = json.loads(
+            (output_dir / "dataset_manifest.json").read_text(encoding="utf-8")
+        )
+        statistics = json.loads(
+            (output_dir / "statistics.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DatasetBuildError(
+            f"Cached dataset metadata is invalid: {output_dir}"
+        ) from exc
+    if not isinstance(manifest, dict) or not isinstance(statistics, dict):
+        raise DatasetBuildError(
+            f"Cached dataset metadata must be objects: {output_dir}"
+        )
+    if any(
+        manifest.get(field_name) != value
+        for field_name, value in cache_identity.items()
+    ):
+        return None
+    cached_scope = manifest.get("dataset_scope", "full")
+    if cached_scope != ("full" if max_examples is None else "smoke"):
+        return None
+    if manifest.get("requested_max_examples") != max_examples:
+        return None
+
+    examples = tuple(
+        _sft_example_from_dict(record)
+        for record in _read_jsonl_records(output_dir / "train.jsonl")
+    )
+    excluded = tuple(
+        _excluded_example_from_dict(record)
+        for record in _read_jsonl_records(output_dir / "excluded.jsonl")
+    )
+    failures = tuple(
+        _excluded_example_from_dict(record)
+        for record in _read_jsonl_records(output_dir / "retrieval_failures.jsonl")
+    )
+    train_text = _jsonl([example.as_dict() for example in examples])
+    if (
+        manifest.get("examples_hash") != _hash_text(train_text)
+        or manifest.get("example_count") != len(examples)
+        or manifest.get("excluded_count") != len(excluded)
+        or manifest.get("retrieval_failure_count") != len(failures)
+        or statistics.get("train_jsonl_sha256") != _hash_text(train_text)
+    ):
+        raise DatasetBuildError(f"Cached dataset integrity check failed: {output_dir}")
+    return DatasetBuildResult(
+        output_dir=output_dir,
+        examples=examples,
+        excluded=excluded,
+        retrieval_failures=failures,
+        manifest=manifest,
+    )
+
+
 def build_sft_dataset(
     cases: Sequence[LegalQuestion],
     *,
@@ -187,6 +338,7 @@ def build_sft_dataset(
     prompt_builder: GenerativePromptBuilder,
     retrieval_config_hash: str,
     overlap_exclusions: Mapping[str, str] | None = None,
+    max_examples: int | None = None,
 ) -> tuple[
     tuple[SFTExample, ...], tuple[ExcludedExample, ...], tuple[ExcludedExample, ...]
 ]:
@@ -196,6 +348,8 @@ def build_sft_dataset(
     excluded: list[ExcludedExample] = []
     failures: list[ExcludedExample] = []
     selected_overlap_exclusions = overlap_exclusions or {}
+    if max_examples is not None and max_examples <= 0:
+        raise ValueError("max_examples must be greater than zero")
     normalized_questions: dict[str, str] = {}
     for case in sorted(cases, key=lambda item: item.id):
         if case.id in selected_overlap_exclusions:
@@ -253,6 +407,8 @@ def build_sft_dataset(
                     target_answer=case.answer,
                 )
             )
+            if max_examples is not None and len(examples) >= max_examples:
+                break
         except Exception as exc:
             failures.append(
                 ExcludedExample(
@@ -333,6 +489,7 @@ def build_sft_dataset_from_config(
     config: ProjectConfig,
     *,
     repo_root: str | Path,
+    max_examples: int | None = None,
 ) -> DatasetBuildResult:
     """Build the configured train-only dataset, failing closed on overlap policy."""
 
@@ -341,6 +498,8 @@ def build_sft_dataset_from_config(
         raise DatasetBuildError("Generative finetuned_reader settings are required")
     if config.data.split != "train":
         raise DatasetBuildError("SFT dataset construction requires data.split='train'")
+    if max_examples is not None and max_examples <= 0:
+        raise DatasetBuildError("max_examples must be greater than zero")
     root = Path(repo_root).resolve()
     exclusions = _cross_split_train_exclusions(config, root)
     if exclusions and settings.overlap_policy == "fail":
@@ -357,15 +516,7 @@ def build_sft_dataset_from_config(
     cases = load_questions(
         root / config.data.question_path, split="train", include_answers=True
     )
-    examples, excluded, failures = build_sft_dataset(
-        cases,
-        retriever=retriever,
-        prompt_builder=prompt_builder,
-        retrieval_config_hash=retriever.freeze.config_hash,
-        overlap_exclusions=exclusions,
-    )
-    train_text = _jsonl([example.as_dict() for example in examples])
-    manifest: dict[str, object] = {
+    cache_identity = {
         "dataset_version": settings.dataset_version,
         "overlap_policy": settings.overlap_policy,
         "overlap_remediation_id": settings.overlap_remediation_id,
@@ -374,10 +525,6 @@ def build_sft_dataset_from_config(
             (root / config.data.question_path).read_text(encoding="utf-8")
         ),
         "source_validation_hash": None,
-        "train_ids_hash": _hash_text(
-            "\n".join(example.case_id for example in examples)
-        ),
-        "validation_ids_hash": None,
         "retrieval_config_hash": retriever.freeze.config_hash,
         "index_fingerprint": retriever.preparation.index.index_fingerprint,
         "evidence_packer_hash": fingerprint_json(
@@ -385,8 +532,6 @@ def build_sft_dataset_from_config(
         ),
         "prompt_version": settings.dataset_version,
         "prompt_hash": prompt_builder.inference_sha256,
-        "example_count": len(examples),
-        "excluded_count": len(excluded),
         "cross_split_exclusions_hash": _hash_text(
             _jsonl(
                 [
@@ -395,11 +540,38 @@ def build_sft_dataset_from_config(
                 ]
             )
         ),
+    }
+    output_dir = _dataset_output_dir(root, settings, max_examples=max_examples)
+    cached = _load_cached_dataset(
+        output_dir,
+        cache_identity=cache_identity,
+        max_examples=max_examples,
+    )
+    if cached is not None:
+        return cached
+    examples, excluded, failures = build_sft_dataset(
+        cases,
+        retriever=retriever,
+        prompt_builder=prompt_builder,
+        retrieval_config_hash=retriever.freeze.config_hash,
+        overlap_exclusions=exclusions,
+        max_examples=max_examples,
+    )
+    train_text = _jsonl([example.as_dict() for example in examples])
+    manifest: dict[str, object] = {
+        **cache_identity,
+        "dataset_scope": "full" if max_examples is None else "smoke",
+        "requested_max_examples": max_examples,
+        "train_ids_hash": _hash_text(
+            "\n".join(example.case_id for example in examples)
+        ),
+        "validation_ids_hash": None,
+        "example_count": len(examples),
+        "excluded_count": len(excluded),
         "retrieval_failure_count": len(failures),
         "examples_hash": _hash_text(train_text),
         "created_at": None,
     }
-    output_dir = root / settings.output.dataset_root / settings.dataset_version
     write_dataset_artifacts(
         output_dir,
         examples=examples,

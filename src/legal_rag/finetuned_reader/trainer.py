@@ -370,7 +370,7 @@ def run_real_sft(
     if trainable_parameters == 0:
         raise RealTrainingError("LoRA produced zero trainable parameters")
     dataset_result: DatasetBuildResult = build_sft_dataset_from_config(
-        config, repo_root=root
+        config, repo_root=root, max_examples=max_examples
     )
     examples = dataset_result.examples
     if max_examples is not None:

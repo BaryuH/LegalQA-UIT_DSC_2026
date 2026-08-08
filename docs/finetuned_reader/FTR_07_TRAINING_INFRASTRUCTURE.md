@@ -28,8 +28,26 @@ python scripts/train_finetuned_reader.py `
   --run-id qwen35-4b-ftr-v1
 ```
 
-Use `--max-examples 8` for a bounded optimizer/CUDA smoke run. Dataset
-construction still validates/builds the complete FTR-03-remediated set first.
+Use `--max-examples 8` for a bounded optimizer/CUDA smoke run. It retrieves and
+tokenizes only the deterministic first eight eligible examples, and writes a
+separate `datasets/<version>/smoke-8/` artifact that a full run never reuses.
+Full training stores its complete 6,609-case derived dataset under
+`datasets/<version>/`; a later run reuses it only when source-train, overlap,
+B2 index, evidence-packer, and prompt fingerprints all match. A partial,
+corrupt, or mismatched dataset is never silently reused or overwritten.
+
+For a batch-two throughput smoke without editing the server config, preserve
+the effective batch size of 16 with:
+
+```bash
+python scripts/train_finetuned_reader.py \
+  --config configs/finetuned_reader_train.yaml \
+  --run-id qwen35-4b-ftr-smoke-b2 \
+  --max-examples 8 \
+  --train-batch-size 2 \
+  --gradient-accumulation-steps 8
+```
+
 The runner refuses to overwrite an existing run directory and records
 dataset/B2/prompt/model provenance, loader, dtype, and adapter hash in
 `checkpoint_manifest.json`. The current runner has no held-out validation

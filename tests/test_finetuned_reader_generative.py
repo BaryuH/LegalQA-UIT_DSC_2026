@@ -8,6 +8,7 @@ from unicodedata import normalize
 import pytest
 
 from legal_rag.config import ProjectConfig, load_config
+from legal_rag.finetuned_reader import dataset as dataset_module
 from legal_rag.finetuned_reader import trainer as trainer_module
 from legal_rag.finetuned_reader.checkpoint import (
     ValidatedCheckpoint,
@@ -36,6 +37,7 @@ from legal_rag.schemas import (
     PackedEvidence,
     RetrievalHit,
 )
+from scripts.train_finetuned_reader import _apply_training_overrides
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -177,6 +179,98 @@ def test_sft_builder_excludes_unicode_normalized_train_duplicate() -> None:
         ("t2", "DUPLICATE_NORMALIZED_QUESTION")
     ]
     assert not failures
+
+
+def test_sft_builder_smoke_limit_stops_after_requested_examples() -> None:
+    retriever = _FakeRetriever()
+    cases = tuple(
+        LegalQuestion(
+            id=f"t{index}",
+            question=f"Question {index}",
+            answer=f"Answer {index}",
+            split="train",
+        )
+        for index in range(1, 4)
+    )
+
+    examples, excluded, failures = build_sft_dataset(
+        cases,
+        retriever=retriever,  # type: ignore[arg-type]
+        prompt_builder=_prompt_builder(),
+        retrieval_config_hash="cfg",
+        max_examples=2,
+    )
+
+    assert [example.case_id for example in examples] == ["t1", "t2"]
+    assert [question.id for question in retriever.seen_questions] == ["t1", "t2"]
+    assert not excluded
+    assert not failures
+
+
+def test_dataset_cache_reuses_only_matching_complete_artifact(tmp_path: Path) -> None:
+    example = _example()
+    identity = {
+        "dataset_version": "ftr-test-v1",
+        "overlap_policy": "exclude_and_record",
+        "overlap_remediation_id": "test-remediation",
+        "profile": "finetuned_reader",
+        "source_train_hash": "train-hash",
+        "source_validation_hash": None,
+        "retrieval_config_hash": "cfg",
+        "index_fingerprint": "idx",
+        "evidence_packer_hash": "packer-hash",
+        "prompt_version": "ftr-test-v1",
+        "prompt_hash": "prompt-hash",
+        "cross_split_exclusions_hash": "exclusions-hash",
+    }
+    train_text = dataset_module._jsonl([example.as_dict()])
+    manifest = {
+        **identity,
+        "dataset_scope": "full",
+        "requested_max_examples": None,
+        "example_count": 1,
+        "excluded_count": 0,
+        "retrieval_failure_count": 0,
+        "examples_hash": dataset_module._hash_text(train_text),
+    }
+    dataset_module.write_dataset_artifacts(
+        tmp_path,
+        examples=(example,),
+        excluded=(),
+        retrieval_failures=(),
+        manifest=manifest,
+    )
+
+    cached = dataset_module._load_cached_dataset(
+        tmp_path,
+        cache_identity=identity,
+        max_examples=None,
+    )
+
+    assert cached is not None
+    assert cached.examples == (example,)
+    assert (
+        dataset_module._load_cached_dataset(
+            tmp_path,
+            cache_identity={**identity, "prompt_hash": "changed"},
+            max_examples=None,
+        )
+        is None
+    )
+
+
+def test_train_cli_overrides_preserve_effective_batch_size() -> None:
+    config = load_config(REPO_ROOT / "configs" / "finetuned_reader_train.yaml")
+
+    overridden = _apply_training_overrides(
+        config,
+        train_batch_size=2,
+        gradient_accumulation_steps=8,
+    )
+
+    assert overridden.finetuned_reader is not None
+    assert overridden.finetuned_reader.training.train_batch_size == 2
+    assert overridden.finetuned_reader.training.gradient_accumulation_steps == 8
 
 
 def test_repository_dataset_build_fails_closed_on_cross_split_overlap() -> None:
