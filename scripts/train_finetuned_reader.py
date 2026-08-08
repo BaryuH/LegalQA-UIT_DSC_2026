@@ -19,6 +19,8 @@ def _apply_training_overrides(
     train_batch_size: int | None,
     gradient_accumulation_steps: int | None,
     bm25_backend: str | None = None,
+    max_seq_length: int | None = None,
+    gradient_checkpointing: bool | None = None,
 ) -> ProjectConfig:
     """Return an in-memory config with validated runtime-only train overrides."""
 
@@ -26,6 +28,8 @@ def _apply_training_overrides(
         train_batch_size is None
         and gradient_accumulation_steps is None
         and bm25_backend is None
+        and max_seq_length is None
+        and gradient_checkpointing is None
     ):
         return config
     payload = config.model_dump(mode="json")
@@ -50,6 +54,12 @@ def _apply_training_overrides(
         if bm25_backend not in {"cpu", "cuda"}:
             raise ValueError("--bm25-backend must be 'cpu' or 'cuda'")
         dataset_build["bm25_backend"] = bm25_backend
+    if max_seq_length is not None:
+        if max_seq_length <= 0:
+            raise ValueError("--max-seq-length must be greater than zero")
+        training["max_seq_length"] = max_seq_length
+    if gradient_checkpointing is not None:
+        training["gradient_checkpointing"] = gradient_checkpointing
     return ProjectConfig.model_validate(payload)
 
 
@@ -96,6 +106,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Use the explicit CPU or CUDA BM25 dataset-build backend.",
     )
+    parser.add_argument(
+        "--max-seq-length",
+        type=int,
+        default=None,
+        help="Override the SFT sequence budget for this run.",
+    )
+    parser.add_argument(
+        "--gradient-checkpointing",
+        action="store_true",
+        default=None,
+        help="Enable activation checkpointing for lower CUDA memory use.",
+    )
     args = parser.parse_args(argv)
     root = args.repo_root.resolve()
     config_path = args.config
@@ -108,6 +130,8 @@ def main(argv: list[str] | None = None) -> int:
             train_batch_size=args.train_batch_size,
             gradient_accumulation_steps=args.gradient_accumulation_steps,
             bm25_backend=args.bm25_backend,
+            max_seq_length=args.max_seq_length,
+            gradient_checkpointing=args.gradient_checkpointing,
         )
         result = run_real_sft(
             config,

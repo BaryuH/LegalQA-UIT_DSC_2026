@@ -146,7 +146,7 @@ def _load_model_and_tokenizer(
     # this offline run and must not be interpreted as a Hub branch/subfolder.
     model_load_kwargs = dict(common_kwargs)
     if dtype is not None:
-        model_load_kwargs["torch_dtype"] = dtype
+        model_load_kwargs["dtype"] = dtype
 
     if settings.model.load_in_4bit:
         try:
@@ -411,7 +411,9 @@ def run_real_sft(
     )
     amp_dtype = dtype if dtype in {torch.float16, torch.bfloat16} else None
     use_amp = stack.device == "cuda" and amp_dtype is not None
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp and amp_dtype == torch.float16)
+    scaler = torch.amp.GradScaler(
+        "cuda", enabled=use_amp and amp_dtype == torch.float16
+    )
     model.train()
     optimizer.zero_grad(set_to_none=True)
     loss_history: list[dict[str, float | int]] = []
@@ -421,22 +423,37 @@ def run_real_sft(
     for epoch in range(settings.training.epochs):
         for batch_index, batch in enumerate(loader):
             batch = {key: value.to(stack.device) for key, value in batch.items()}
-            autocast_context = (
-                torch.autocast(device_type="cuda", dtype=amp_dtype)
-                if use_amp
-                else nullcontext()
-            )
-            with autocast_context:
-                output = model(**batch)
-                loss = output.loss
-            if not torch.isfinite(loss):
-                raise RealTrainingError("Training produced a non-finite loss")
-            final_loss = float(loss.detach().cpu())
-            scaled_loss = loss / settings.training.gradient_accumulation_steps
-            if scaler.is_enabled():
-                scaler.scale(scaled_loss).backward()
-            else:
-                scaled_loss.backward()
+            try:
+                autocast_context = (
+                    torch.autocast(device_type="cuda", dtype=amp_dtype)
+                    if use_amp
+                    else nullcontext()
+                )
+                with autocast_context:
+                    output = model(**batch)
+                    loss = output.loss
+                if not torch.isfinite(loss):
+                    raise RealTrainingError("Training produced a non-finite loss")
+                final_loss = float(loss.detach().cpu())
+                scaled_loss = loss / settings.training.gradient_accumulation_steps
+                if scaler.is_enabled():
+                    scaler.scale(scaled_loss).backward()
+                else:
+                    scaled_loss.backward()
+            except torch.OutOfMemoryError as exc:
+                sequence_width = int(batch["input_ids"].shape[-1])
+                torch.cuda.empty_cache()
+                raise RealTrainingError(
+                    "CUDA OOM during Qwen forward/backward: "
+                    f"micro_batch={settings.training.train_batch_size}, "
+                    f"sequence_width={sequence_width}, "
+                    "max_seq_length="
+                    f"{settings.training.max_seq_length}, "
+                    "gradient_checkpointing="
+                    f"{settings.training.gradient_checkpointing}. "
+                    "Retry explicitly with a smaller --max-seq-length and "
+                    "--gradient-checkpointing; no automatic fallback was applied."
+                ) from exc
             is_update = (
                 (batch_index + 1) % settings.training.gradient_accumulation_steps == 0
                 or batch_index + 1 == len(loader)

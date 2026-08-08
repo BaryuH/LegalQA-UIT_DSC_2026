@@ -54,10 +54,12 @@ For the full GPU-first run, omit `--max-examples`:
 ```bash
 python scripts/train_finetuned_reader.py \
   --config configs/finetuned_reader_train.yaml \
-  --run-id qwen35-4b-ftr-full-b2-01 \
+  --run-id qwen35-4b-ftr-full-gpu-b1-gc3072 \
   --bm25-backend cuda \
-  --train-batch-size 2 \
-  --gradient-accumulation-steps 8
+  --train-batch-size 1 \
+  --gradient-accumulation-steps 16 \
+  --max-seq-length 3072 \
+  --gradient-checkpointing
 ```
 
 The runner now builds the dataset before loading Qwen. It scans the persisted
@@ -68,6 +70,14 @@ use CUDA, the run stops instead of falling back to CPU. Progress is emitted as
 `DATASET_BUILD` records every 100 source cases. After the dataset artifact is
 complete, retrieval objects are released, the CUDA allocator cache is cleared,
 and only then are Qwen weights and LoRA loaded for SFT.
+
+The RTX 4090-safe starting point uses micro-batch one, effective batch 16,
+3,072 tokens, and gradient checkpointing. Qwen3.5's torch fallback for gated
+delta attention can exhaust 24 GiB at 4,096 tokens even with micro-batch one.
+The runner therefore reports the actual failing sequence width on CUDA OOM and
+never silently changes the requested training shape. If 3,072 tokens still
+fails on a particular stack, retry at 2,048; target answers remain protected
+from silent truncation by the tokenizer gate.
 
 `bm25_backend` and its scorer version are bound into the dataset manifest and
 cache identity. Therefore CPU- and CUDA-built datasets cannot be silently

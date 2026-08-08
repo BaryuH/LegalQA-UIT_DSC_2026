@@ -267,12 +267,16 @@ def test_train_cli_overrides_preserve_effective_batch_size() -> None:
         train_batch_size=2,
         gradient_accumulation_steps=8,
         bm25_backend="cuda",
+        max_seq_length=3072,
+        gradient_checkpointing=True,
     )
 
     assert overridden.finetuned_reader is not None
     assert overridden.finetuned_reader.training.train_batch_size == 2
     assert overridden.finetuned_reader.training.gradient_accumulation_steps == 8
     assert overridden.finetuned_reader.dataset_build.bm25_backend == "cuda"
+    assert overridden.finetuned_reader.training.max_seq_length == 3072
+    assert overridden.finetuned_reader.training.gradient_checkpointing is True
 
 
 def test_repository_dataset_build_fails_closed_on_cross_split_overlap() -> None:
