@@ -252,8 +252,11 @@ def run_finetuned_reader_from_config(
     root = Path(repo_root or Path(__file__).resolve().parents[3]).resolve()
     freeze = load_b2_freeze_fingerprint(root)
     require_complete_b2_freeze(freeze)
-    retriever = FrozenB2EvidenceRetriever.from_repo(root)
     settings = config.finetuned_reader
+    retriever = FrozenB2EvidenceRetriever.from_repo(
+        root,
+        bm25_backend=settings.dataset_build.bm25_backend,
+    )
     prompt_builder = GenerativePromptBuilder.from_files(
         root / settings.train_prompt_path,
         root / settings.inference_prompt_path,
