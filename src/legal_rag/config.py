@@ -45,6 +45,8 @@ FineTunedDType = Literal["auto", "float32", "float16", "bfloat16"]
 FineTunedAdapterType = Literal["lora", "qlora"]
 FineTunedAdapterBias = Literal["none", "all", "lora_only"]
 FineTunedOverlapPolicy = Literal["fail", "exclude_and_record"]
+BM25BackendSetting = Literal["auto", "cpu", "cuda"]
+# Backward-compatible name for the generative reader dataset section.
 FineTunedBM25Backend = Literal["cpu", "cuda"]
 SubmissionFormat = Literal["object_by_question_id"]
 SubmissionOrder = Literal["dataset"]
@@ -157,6 +159,7 @@ class RetrievalSection(ConfigSection):
     rough_top_n: int = Field(ge=1)
     k1: float = Field(gt=0, default=1.5)
     b: float = Field(ge=0.0, le=1.0, default=0.75)
+    bm25_backend: BM25BackendSetting = "auto"
 
 
 class RerankerSection(ConfigSection):
@@ -267,6 +270,7 @@ class ReaderSection(ConfigSection):
     checkpoint_path: Path
     checkpoint_manifest_path: Path
     device: ReaderDevice = "auto"
+    retrieval_backend: BM25BackendSetting = "auto"
     batch_size: int = Field(gt=0, default=8)
     max_seq_length: int = Field(gt=0, default=384)
     doc_stride: int = Field(ge=0, default=128)
@@ -555,6 +559,22 @@ class ProjectConfig(ConfigSection):
         """Serialize the validated profile while redacting secret-shaped keys."""
 
         payload = self.model_dump(mode="json")
+        # Runtime acceleration is not part of the frozen retrieval semantics.
+        # Preserve pre-GPU config hashes when the compatibility default was not
+        # explicitly declared in the source YAML.
+        retrieval_payload = payload.get("retrieval")
+        if (
+            isinstance(retrieval_payload, dict)
+            and "bm25_backend" not in self.retrieval.model_fields_set
+        ):
+            retrieval_payload.pop("bm25_backend", None)
+        reader_payload = payload.get("reader")
+        if (
+            isinstance(reader_payload, dict)
+            and self.reader is not None
+            and "retrieval_backend" not in self.reader.model_fields_set
+        ):
+            reader_payload.pop("retrieval_backend", None)
         # Preserve hashes of pre-FTR profiles when the optional generative
         # section is absent; adding a new optional section must not drift the
         # frozen B2 control identity.

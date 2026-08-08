@@ -70,6 +70,7 @@ reader:
   checkpoint_path: checkpoints/legal_qa_reader/best_model
   checkpoint_manifest_path: checkpoints/legal_qa_reader/checkpoint_manifest.json
   device: auto
+  retrieval_backend: auto
   batch_size: 8
   max_seq_length: 384
   doc_stride: 128

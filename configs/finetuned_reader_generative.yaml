@@ -79,6 +79,9 @@ finetuned_reader:
   max_new_tokens: 512
   overlap_policy: fail
   stop_sequences: []
+  dataset_build:
+    bm25_backend: cuda
+    progress_every: 100
   model:
     # Server-side Transformers checkpoint directory; not the Ollama model tag.
     base_model: models/finetuned_reader/qwen3.5-4b

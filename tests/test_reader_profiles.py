@@ -17,6 +17,7 @@ from legal_rag.reader import (
     load_reader_dataset,
     run_reader,
 )
+from legal_rag.retrieval import bm25 as bm25_module
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -147,6 +148,42 @@ def test_reader_typed_boundaries_reject_reference_bearing_cases(tmp_path: Path) 
             reader=MockExtractiveReader(_mock_span),
             output_dir=tmp_path,
         )
+
+
+def test_reader_cuda_backend_fails_closed_without_cuda(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _UnavailableCuda:
+        @staticmethod
+        def is_available() -> bool:
+            return False
+
+    monkeypatch.setattr(
+        bm25_module,
+        "import_module",
+        lambda name: type("FakeTorch", (), {"cuda": _UnavailableCuda})(),
+    )
+    with pytest.raises(RuntimeError, match="is_available"):
+        ReaderBM25Index(_train_cases(), backend="cuda")
+
+
+def test_reader_cuda_backend_matches_cpu_when_available() -> None:
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is not available in this test environment")
+
+    question = _inference_cases()[0].question
+    cpu_hits = ReaderBM25Index(_train_cases(), backend="cpu").search(
+        question, top_k=5
+    )
+    cuda_hits = ReaderBM25Index(_train_cases(), backend="cuda").search(
+        question, top_k=5
+    )
+
+    assert [hit.case_id for hit in cuda_hits] == [hit.case_id for hit in cpu_hits]
+    assert [hit.score for hit in cuda_hits] == pytest.approx(
+        [hit.score for hit in cpu_hits], rel=1e-9, abs=1e-9
+    )
 
 
 def test_reader_artifacts_have_no_gold_or_reference_answer(tmp_path: Path) -> None:

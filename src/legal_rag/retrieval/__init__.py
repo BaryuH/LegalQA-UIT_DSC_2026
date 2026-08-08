@@ -40,6 +40,7 @@ from .bm25 import (
     load_bm25_index,
     load_or_build_bm25_index,
     read_bm25_index,
+    resolve_bm25_backend,
     retrieve_bm25,
     write_bm25_index,
 )
@@ -92,6 +93,7 @@ __all__ = [
     "load_or_build_bm25_index",
     "read_bm25_index",
     "retrieve_bm25",
+    "resolve_bm25_backend",
     "write_bm25_index",
     "DEFAULT_RERANKER_BATCH_SIZE",
     "DEFAULT_RERANKER_MAX_LENGTH",

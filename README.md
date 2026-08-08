@@ -183,6 +183,9 @@ Config được validate, hash deterministic, chỉ cho relative paths và chặ
 Semantic reranker dùng model config-driven; candidate mặc định là `BAAI/bge-m3`,
 device hỗ trợ `auto`, `cpu`, `cuda`, có `batch_size`, revision/version và giới hạn
 truncation. Unit tests inject encoder giả nên không download model.
+BM25 legal retrieval và train-context reader retrieval có `bm25_backend`/
+`retrieval_backend` `auto`, `cpu`, `cuda`; `auto` chọn CUDA khi PyTorch thấy GPU,
+còn `cuda` fail-closed nếu CUDA không sẵn sàng. Run environment ghi backend đã resolve.
 
 Kiểm tra config:
 

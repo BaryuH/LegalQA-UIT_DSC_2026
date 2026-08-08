@@ -55,6 +55,20 @@ class BM25CudaUnavailableError(BM25IndexError):
     """Raised when an explicitly requested CUDA BM25 backend is unavailable."""
 
 
+def resolve_bm25_backend(backend: str) -> BM25Backend:
+    """Resolve an explicit or auto backend without silently changing requests."""
+
+    if backend in {"cpu", "cuda"}:
+        return backend  # type: ignore[return-value]
+    if backend != "auto":
+        raise ValueError("BM25 backend must be 'auto', 'cpu', or 'cuda'")
+    try:
+        torch = import_module("torch")
+    except ImportError:
+        return "cpu"
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 def _sha256_json(value: object) -> str:
     serialized = json.dumps(
         value,
@@ -1179,4 +1193,5 @@ __all__ = [
     "read_bm25_index",
     "write_bm25_index",
     "retrieve_bm25",
+    "resolve_bm25_backend",
 ]

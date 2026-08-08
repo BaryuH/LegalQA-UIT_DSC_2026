@@ -109,6 +109,7 @@ def run_reader(
             train_cases,
             k1=settings.k1,
             b=settings.b,
+            backend=settings.retrieval_backend,
         )
     elif train_cases:
         raise ReaderPipelineError(
@@ -218,6 +219,7 @@ def run_reader(
             "reader_model": reader.model,
             "reader_model_version": reader.model_version,
             "reader_device": settings.device,
+            "retrieval_backend": settings.retrieval_backend,
             "local_files_only": "true",
         }
     )
@@ -273,6 +275,7 @@ def run_reader(
             "model_version": reader.model_version,
             "same_reader_checkpoint_control": True,
             "retrieval_mode": settings.mode,
+            "retrieval_backend": settings.retrieval_backend,
             "reference_role": "none",
         },
     )

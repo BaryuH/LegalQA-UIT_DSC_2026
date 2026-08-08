@@ -50,10 +50,13 @@ Runtime validate directory, manifest và hash trước khi import/load model. Lo
 luôn dùng `local_files_only=true`; thiếu checkpoint, dependency, CUDA hoặc hash
 không khớp đều fail rõ ràng. Không fallback về base model và không download ngầm.
 
-Các tham số chung hiện được khóa qua config: `device`, `batch_size`,
+Các tham số chung hiện được khóa qua config: `device`, `retrieval_backend`, `batch_size`,
 `max_seq_length=384`, `doc_stride=128`, `max_answer_length=50`. Context dài được
 tokenizer chia overflow window với stride; span luôn được cắt theo raw character
 offset của context.
+
+`retrieval_backend: auto` dùng CUDA khi PyTorch có GPU; `retrieval_backend: cuda`
+fail-closed nếu CUDA không sẵn sàng và không fallback im lặng sang CPU.
 
 ## Retrieval and selection
 

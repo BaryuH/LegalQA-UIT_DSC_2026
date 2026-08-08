@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,15 +44,19 @@ from .generation import (
 )
 from .questions import load_inference_questions
 from .retrieval import (
+    BM25Backend,
     BM25Config,
+    BM25CudaQueryCache,
     BM25Index,
     BM25QueryCache,
     Reranker,
     RerankResult,
+    build_bm25_cuda_query_cache,
     build_bm25_query_cache,
     create_reranker,
     load_bm25_index,
     load_or_build_bm25_index,
+    resolve_bm25_backend,
     retrieve_bm25,
 )
 from .schemas import (
@@ -126,9 +131,7 @@ class _LazyChunkLookup(Mapping[str, LegalChunk]):
         if not cache_file.is_file():
             raise PipelineError(f"Chunk cache unavailable: {cache_file}")
         self._cache_file = cache_file
-        self._documents = {
-            document.chunk_id: document for document in index.documents
-        }
+        self._documents = {document.chunk_id: document for document in index.documents}
         self._offsets: list[int] = []
         with cache_file.open("r", encoding="utf-8", newline="") as handle:
             ordinal = 0
@@ -460,6 +463,8 @@ def _run_pipeline(
     documents: Mapping[str, LegalDocument] | None = None,
     index: BM25Index | None = None,
     query_cache: BM25QueryCache | None = None,
+    cuda_query_cache: BM25CudaQueryCache | None = None,
+    bm25_backend: BM25Backend = "cpu",
     prompt_builder: PromptBuilder | None = None,
     client: LLMClient | None = None,
     reranker: Reranker | None = None,
@@ -517,12 +522,25 @@ def _run_pipeline(
             if method in _RAG_METHODS:
                 assert index is not None
                 assert chunks is not None
-                raw_hits = retrieve_bm25(
-                    index,
-                    question.question,
-                    top_k=config.retrieval.rough_top_n,
-                    query_cache=query_cache,
-                )
+                if (
+                    bm25_backend == "cpu"
+                    and query_cache is None
+                    and cuda_query_cache is None
+                ):
+                    raw_hits = retrieve_bm25(
+                        index,
+                        question.question,
+                        top_k=config.retrieval.rough_top_n,
+                    )
+                else:
+                    raw_hits = retrieve_bm25(
+                        index,
+                        question.question,
+                        top_k=config.retrieval.rough_top_n,
+                        query_cache=query_cache,
+                        backend=bm25_backend,
+                        cuda_query_cache=cuda_query_cache,
+                    )
                 if not raw_hits:
                     raise PipelineError("No positive BM25 hits for question")
                 ordered_hits: Sequence[RetrievalHit] = raw_hits
@@ -747,6 +765,8 @@ def _run_pipeline(
             "max_output_chars": str(config.generation.max_output_chars),
         }
     )
+    if method in _RAG_METHODS:
+        environment["bm25_backend"] = bm25_backend
     if method == "hybrid_rag":
         assert selected_reranker is not None
         environment.update(
@@ -931,6 +951,8 @@ def run_bm25_rag(
     config: ProjectConfig,
     *,
     query_cache: BM25QueryCache | None = None,
+    cuda_query_cache: BM25CudaQueryCache | None = None,
+    bm25_backend: BM25Backend | None = None,
     documents: Mapping[str, LegalDocument] | None = None,
     prompt_builder: PromptBuilder | None = None,
     client: LLMClient | None = None,
@@ -953,6 +975,12 @@ def run_bm25_rag(
         documents=documents,
         index=index,
         query_cache=query_cache,
+        cuda_query_cache=cuda_query_cache,
+        bm25_backend=(
+            resolve_bm25_backend(
+                config.retrieval.bm25_backend if bm25_backend is None else bm25_backend
+            )
+        ),
         prompt_builder=prompt_builder,
         client=client,
         output_dir=output_dir,
@@ -971,6 +999,8 @@ def run_hybrid_rag(
     config: ProjectConfig,
     *,
     query_cache: BM25QueryCache | None = None,
+    cuda_query_cache: BM25CudaQueryCache | None = None,
+    bm25_backend: BM25Backend | None = None,
     documents: Mapping[str, LegalDocument] | None = None,
     prompt_builder: PromptBuilder | None = None,
     client: LLMClient | None = None,
@@ -994,6 +1024,12 @@ def run_hybrid_rag(
         documents=documents,
         index=index,
         query_cache=query_cache,
+        cuda_query_cache=cuda_query_cache,
+        bm25_backend=(
+            resolve_bm25_backend(
+                config.retrieval.bm25_backend if bm25_backend is None else bm25_backend
+            )
+        ),
         prompt_builder=prompt_builder,
         client=client,
         reranker=reranker,
@@ -1151,6 +1187,20 @@ def run_bm25_rag_from_config(
         preparation.index,
         (question.question for question in selected),
     )
+    resolved_backend = resolve_bm25_backend(config.retrieval.bm25_backend)
+    cuda_query_cache = None
+    if resolved_backend == "cuda":
+        print(
+            f"RETRIEVAL phase=prepare_query_cache backend=cuda queries={len(selected)}",
+            file=sys.stderr,
+            flush=True,
+        )
+        cuda_query_cache = build_bm25_cuda_query_cache(query_cache)
+        print(
+            "RETRIEVAL phase=query_cache_ready backend=cuda",
+            file=sys.stderr,
+            flush=True,
+        )
     selected_output = (
         root / config.runtime.outputs_dir if output_dir is None else Path(output_dir)
     )
@@ -1160,6 +1210,8 @@ def run_bm25_rag_from_config(
         preparation.index,
         config,
         query_cache=query_cache,
+        cuda_query_cache=cuda_query_cache,
+        bm25_backend=resolved_backend,
         documents=preparation.documents,
         output_dir=selected_output,
         run_id=run_id,
@@ -1202,6 +1254,20 @@ def run_hybrid_rag_from_config(
         preparation.index,
         (question.question for question in selected),
     )
+    resolved_backend = resolve_bm25_backend(config.retrieval.bm25_backend)
+    cuda_query_cache = None
+    if resolved_backend == "cuda":
+        print(
+            f"RETRIEVAL phase=prepare_query_cache backend=cuda queries={len(selected)}",
+            file=sys.stderr,
+            flush=True,
+        )
+        cuda_query_cache = build_bm25_cuda_query_cache(query_cache)
+        print(
+            "RETRIEVAL phase=query_cache_ready backend=cuda",
+            file=sys.stderr,
+            flush=True,
+        )
     selected_output = (
         root / config.runtime.outputs_dir if output_dir is None else Path(output_dir)
     )
@@ -1211,6 +1277,8 @@ def run_hybrid_rag_from_config(
         preparation.index,
         config,
         query_cache=query_cache,
+        cuda_query_cache=cuda_query_cache,
+        bm25_backend=resolved_backend,
         documents=preparation.documents,
         output_dir=selected_output,
         run_id=run_id,

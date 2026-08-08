@@ -83,6 +83,9 @@ finetuned_reader:
   overlap_policy: exclude_and_record
   overlap_remediation_id: ftr03-train-overlap-exclusion-v1
   stop_sequences: []
+  dataset_build:
+    bm25_backend: cuda
+    progress_every: 100
   model:
     # Server-side Transformers checkpoint directory. The Ollama qwen3.5:4b
     # artifact is not a trainable Transformers checkpoint.
