@@ -80,6 +80,25 @@ def test_builder_allows_empty_answer_but_never_coerces_answer() -> None:
     assert error.value.code == "SUBMISSION_ANSWER_NOT_STRING"
 
 
+def test_builder_accepts_reader_artifact_metadata_but_drops_it() -> None:
+    payload = build_submission_payload(
+        (
+            {
+                "id": "1",
+                "answer": "Answer",
+                "model": "qwen3.5-4b",
+                "model_version": "revision-1",
+                "confidence": 0.9,
+                "source_case_id": "source-1",
+                "source_origin": "original",
+            },
+        ),
+        ("1",),
+    )
+
+    assert payload == {"1": {"answer": "Answer"}}
+
+
 @pytest.mark.parametrize(
     ("predictions", "expected_code"),
     [

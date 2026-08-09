@@ -690,6 +690,14 @@ OFFICIAL_ZIP_FILENAME = "submission.zip"
 _OFFICIAL_PREDICTION_FIELDS = _PREDICTION_FIELDS | {
     "raw_answer",
     "cleaned_answer",
+    # Reader artifacts keep model/provenance metadata alongside the official
+    # ``id``/``answer`` pair. These fields are accepted only at the input
+    # boundary and are never copied into submission.json.
+    "model",
+    "model_version",
+    "confidence",
+    "source_case_id",
+    "source_origin",
 }
 
 
