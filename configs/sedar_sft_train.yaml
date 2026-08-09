@@ -26,7 +26,7 @@ reranker:
   required: false
   provider: sentence_transformers
   model: BAAI/bge-m3
-  device: auto
+  device: cuda
   batch_size: 8
   max_length: 512
 evidence:
@@ -82,7 +82,7 @@ finetuned_reader:
   overlap_remediation_id: ftr03-train-overlap-exclusion-v1
   stop_sequences: []
   dataset_build:
-    bm25_backend: cpu
+    bm25_backend: cuda
     progress_every: 100
   model:
     # Locked HF id from playbook; local path/revision unresolved until SS-04C.

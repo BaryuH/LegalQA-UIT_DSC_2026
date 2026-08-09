@@ -56,6 +56,8 @@ def test_sedar_config_loads_and_locks_qlora_defaults() -> None:
     assert config.finetuned_reader.model.load_in_4bit is True
     assert config.finetuned_reader.training.packing is False
     assert config.finetuned_reader.training.gradient_checkpointing is True
+    assert config.finetuned_reader.dataset_build.bm25_backend == "cuda"
+    assert config.reranker.device == "cuda"
 
 
 def test_sedar_example_contract_overlay() -> None:
