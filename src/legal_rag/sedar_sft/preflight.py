@@ -20,11 +20,21 @@ class CanonicalTrainPreflightError(RuntimeError):
 
 
 def _verify_source_manifest(repo_root: Path) -> None:
-    from scripts.verify_data_manifest import DEFAULT_MANIFEST_PATH, verify_manifest
+    from scripts.verify_data_manifest import (
+        DEFAULT_MANIFEST_PATH,
+        ManifestVerificationError,
+        verify_manifest,
+    )
 
-    code = verify_manifest(repo_root, DEFAULT_MANIFEST_PATH)
-    if code != 0:
-        raise CanonicalTrainPreflightError("source data manifest verification failed")
+    manifest_path = repo_root / DEFAULT_MANIFEST_PATH
+    try:
+        file_count = verify_manifest(repo_root, manifest_path)
+    except (ManifestVerificationError, OSError, ValueError) as exc:
+        raise CanonicalTrainPreflightError(str(exc)) from exc
+    if file_count <= 0:
+        raise CanonicalTrainPreflightError(
+            "source data manifest verification returned no files"
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -74,6 +74,15 @@ class TransformersCausalBackend:
             tokenizer_path = repo_root / tokenizer_path
         if not base_path.exists():
             raise GenerativeReaderError("Remote base model loading is disabled")
+        selected_device = (
+            "cuda"
+            if device == "auto" and torch.cuda.is_available()
+            else ("cpu" if device == "auto" else device)
+        )
+        if load_in_4bit and selected_device != "cuda":
+            raise GenerativeReaderError(
+                "QLoRA inference requires CUDA; CPU fallback is disabled"
+            )
         common_kwargs: dict[str, object] = {
             "local_files_only": True,
             "trust_remote_code": bool(manifest.get("trust_remote_code", False)),
@@ -82,12 +91,40 @@ class TransformersCausalBackend:
             common_kwargs["revision"] = revision
         model_kwargs = dict(common_kwargs)
         dtype_name = str(manifest.get("dtype", "auto"))
+        selected_dtype: Any | None = None
         if dtype_name == "float16":
-            model_kwargs["torch_dtype"] = torch.float16
+            selected_dtype = torch.float16
         elif dtype_name == "bfloat16":
-            model_kwargs["torch_dtype"] = torch.bfloat16
+            selected_dtype = torch.bfloat16
+        if selected_dtype is not None:
+            model_kwargs["dtype"] = selected_dtype
         if load_in_4bit:
-            model_kwargs["load_in_4bit"] = True
+            try:
+                from transformers import BitsAndBytesConfig
+            except ImportError as exc:
+                raise GenerativeReaderError(
+                    "QLoRA inference requires transformers BitsAndBytesConfig "
+                    "and bitsandbytes"
+                ) from exc
+            quantization = manifest.get("quantization")
+            quant_type = "nf4"
+            double_quant = True
+            compute_dtype = selected_dtype or torch.float16
+            if isinstance(quantization, dict):
+                quant_type = str(quantization.get("quant_type", quant_type))
+                double_quant = bool(quantization.get("double_quant", double_quant))
+                manifest_compute = quantization.get("compute_dtype")
+                if manifest_compute == "bfloat16":
+                    compute_dtype = torch.bfloat16
+                elif manifest_compute == "float16":
+                    compute_dtype = torch.float16
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=compute_dtype,
+                bnb_4bit_quant_type=quant_type,
+                bnb_4bit_use_double_quant=double_quant,
+            )
+            model_kwargs["device_map"] = {"": selected_device}
         loader = str(manifest.get("loader", "auto"))
         if loader == "auto":
             model_config = transformers.AutoConfig.from_pretrained(
@@ -125,10 +162,7 @@ class TransformersCausalBackend:
             manifest.get("adapter_path", "adapter")
         )
         model = peft.PeftModel.from_pretrained(base, adapter_path, is_trainable=False)
-        selected_device = (
-            "cuda" if device == "auto" and torch.cuda.is_available() else device
-        )
-        if selected_device in {"cpu", "cuda"}:
+        if not load_in_4bit and selected_device in {"cpu", "cuda"}:
             model.to(selected_device)
         model.eval()
         return cls(model, tokenizer, model_name=str(base_path), revision=revision)
@@ -143,12 +177,12 @@ class TransformersCausalBackend:
         tokenizer = self._tokenizer
         model = self._model
         encoded = tokenizer(prompt, return_tensors="pt")
-        encoded = {key: value.to(model.device) for key, value in encoded.items()}
+        input_device = next(model.parameters()).device
+        encoded = {key: value.to(input_device) for key, value in encoded.items()}
         output = model.generate(
             **encoded,
             max_new_tokens=max_new_tokens,
             do_sample=False,
-            temperature=0.0,
         )
         prompt_length = encoded["input_ids"].shape[-1]
         generated = output[0][prompt_length:]

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from legal_rag.schemas import PackedEvidence, RetrievalHit
 from legal_rag.sedar_sft.ablation import build_ablation_plan, write_ablation_plan
 from legal_rag.sedar_sft.analyzer import analyze_requirements
@@ -53,6 +55,22 @@ def test_ss08_preflight_blocks_without_gpu_auth() -> None:
     )
     assert report.status == "blocked"
     assert "gpu_execution_deferred_by_operator" in report.blockers
+
+
+def test_ss08_preflight_accepts_manifest_verify_file_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from legal_rag.sedar_sft import preflight as preflight_mod
+
+    def fake_verify(repo_root: Path, manifest_path: Path) -> int:
+        assert manifest_path == repo_root / "artifacts/data-baseline/manifest.json"
+        return 4
+
+    monkeypatch.setattr(
+        "scripts.verify_data_manifest.verify_manifest",
+        fake_verify,
+    )
+    preflight_mod._verify_source_manifest(REPO)
 
 
 def test_ss09_sedar_checkpoint_validator(tmp_path: Path) -> None:
