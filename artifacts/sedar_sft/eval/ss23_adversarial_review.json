@@ -1,0 +1,119 @@
+{
+  "schema_version": "sedar_sft.ss23.adversarial_review.v1",
+  "status": "pass_local_template",
+  "findings": [
+    {
+      "check_id": "python_310_used",
+      "severity": "High",
+      "description": "project accidentally using Python 3.10",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "system_python_polluted",
+      "severity": "High",
+      "description": "package installed into system Python",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "hf_cache_on_root",
+      "severity": "Critical",
+      "description": "model cache filling root disk",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "checkpoint_on_root",
+      "severity": "Critical",
+      "description": "checkpoint path on root disk",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "unexpected_cpu_fallback",
+      "severity": "Critical",
+      "description": "unexpected CPU fallback",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "bf16_without_probe",
+      "severity": "High",
+      "description": "BF16 config without verified support",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "silent_attention_fallback",
+      "severity": "High",
+      "description": "silent attention fallback",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "flashattn_import_hidden",
+      "severity": "High",
+      "description": "FlashAttention import failure hidden",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "gpu_occupied",
+      "severity": "Critical",
+      "description": "GPU already occupied",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "silent_oom_recovery",
+      "severity": "Critical",
+      "description": "OOM auto-recovery changed config silently",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "multiple_4b_copies",
+      "severity": "Critical",
+      "description": "multiple 4B copies loaded simultaneously",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "reranker_resident_during_train",
+      "severity": "High",
+      "description": "reranker left resident during training",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "retrieval_during_training",
+      "severity": "Critical",
+      "description": "on-the-fly retrieval during training",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "dataloader_starving_gpu",
+      "severity": "Medium",
+      "description": "DataLoader starving GPU",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "non_nvme_cache",
+      "severity": "High",
+      "description": "non-NVMe training cache despite available NVMe",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    },
+    {
+      "check_id": "missing_vram_telemetry",
+      "severity": "High",
+      "description": "telemetry missing peak VRAM/throughput",
+      "status": "deferred_server",
+      "evidence": "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+    }
+  ],
+  "unresolved_critical_or_high": []
+}

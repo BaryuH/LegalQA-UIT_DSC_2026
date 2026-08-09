@@ -1,0 +1,44 @@
+{
+  "schema_version": "sedar_sft.ss02.reranker_device_benchmark.v1",
+  "task": "SS-02",
+  "date": "2026-08-08",
+  "status": "cpu_canonical_pass_gpu_hold",
+  "rule": {
+    "cuda_allowed_for_dataset_build": true,
+    "requires_byte_or_fingerprint_equivalence_to_frozen_b2": true,
+    "gpu_path_canonical_only_if_equivalent": true
+  },
+  "frozen_b2": {
+    "frozen_config_path": "configs/frozen/hybrid_rag_b2.yaml",
+    "fingerprint_path": "artifacts/b2_freeze/fingerprint.json",
+    "status": "complete",
+    "config_hash": "8ac601b8dcd4352ef1fc7f6fa6b27b4585b887ada77922e59baf9ded698dd126",
+    "index_fingerprint": "dcd8c655f43894f3fcae2d32b7befdb43debe3b7174de96e45a243f5e5faac56",
+    "prompt_sha256": "41df15e9f776e0ca72ab7d0812a51de31159a863f88e0deec813875df962d2f1",
+    "reranker": {
+      "enabled": true,
+      "required": false,
+      "provider": "sentence_transformers",
+      "model": "BAAI/bge-m3",
+      "device": "auto",
+      "batch_size": 8,
+      "max_length": 512
+    }
+  },
+  "benchmark": {
+    "host": "windows_worktree_D16_baseline",
+    "reranker_device": "cuda_unavailable",
+    "batch_size": 8,
+    "examples_per_sec": null,
+    "peak_gpu_vram_mib": null,
+    "output_fingerprint": "dcd8c655f43894f3fcae2d32b7befdb43debe3b7174de96e45a243f5e5faac56",
+    "cpu_gpu_ranking_equivalence": "not_run",
+    "blocker": "No CUDA device on current agent host; RTX4090 equivalence must be measured on Linux server before GPU reranker path can become canonical."
+  },
+  "validation": {
+    "require_complete_b2_freeze": true,
+    "validate_against_b2_freeze": true,
+    "live_hybrid_config_hash_matches_freeze": true,
+    "test_b2_freeze_passed": 12
+  }
+}

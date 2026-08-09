@@ -1,0 +1,89 @@
+{
+  "schema_version": "sedar_sft.ss00.current_state.v1",
+  "task": "SS-00",
+  "date": "2026-08-08",
+  "status": "pass",
+  "worktree": "D:\\16_baseline",
+  "branch": "codex/16_baseline",
+  "framework": {
+    "name": "SEDAR-SFT",
+    "version": "1.1",
+    "model_lock": "ntphuc149/ViLegalQwen3-1.7B-Base",
+    "playbook": "CODEX_PLAYBOOK_BUILD_SEDAR_SFT_V1_2_LINUX_RTX4090_VILEGALQWEN"
+  },
+  "server_deployment": {
+    "intended_os": "Ubuntu 22.04.4 LTS",
+    "intended_gpu": "NVIDIA GeForce RTX 4090 24GB",
+    "intended_driver": "550.54.15",
+    "intended_cuda": "12.4",
+    "current_agent_host": "Windows NT 10.0.26200",
+    "current_hostname": "JULIANNGUYEN",
+    "linux_rtx4090_accessible_in_session": false
+  },
+  "fast_work_root_strategy": {
+    "env_var": "SEDAR_WORK_ROOT",
+    "preferred_example": "/mnt/F/sedar-legalqa",
+    "subdirs": [
+      "hf-cache",
+      "datasets-cache",
+      "torch-cache",
+      "processed",
+      "checkpoints",
+      "outputs"
+    ],
+    "avoid": ["/", "/mnt/E"],
+    "secondary": "/mnt/D/<project>/",
+    "hardcode_in_python_modules": false
+  },
+  "python_plan": {
+    "project_requires": ">=3.11",
+    "current_executable_version": "3.13.12",
+    "current_executable": "C:\\Users\\PC\\miniconda3\\python.exe",
+    "project_venv_present": false,
+    "linux_plan": "isolated Python 3.11+ env on server; do not pollute system 3.10.12"
+  },
+  "gpu_occupancy": {
+    "current_workspace": {
+      "nvidia_smi": "not_available",
+      "torch_cuda_available": false,
+      "torch_version": "2.12.0+cpu"
+    },
+    "playbook_target_server_probe": {
+      "gpu": "RTX 4090",
+      "occupied_at_probe": true,
+      "approx_vram_used_gib": 9.8,
+      "approx_utilization_pct": 78,
+      "occupant": "existing python process"
+    }
+  },
+  "ml_stack_current_workspace": {
+    "torch": "2.12.0+cpu",
+    "transformers": "5.12.1",
+    "sentence_transformers": "5.6.0",
+    "peft": "missing",
+    "accelerate": "missing",
+    "trl": "missing",
+    "bitsandbytes": "missing",
+    "datasets": "missing"
+  },
+  "data": {
+    "manifest_verified": true,
+    "effective_train": 6609,
+    "excluded": 391,
+    "remediation_id": "ftr03-train-overlap-exclusion-v1",
+    "private_present": false
+  },
+  "b2_freeze": {
+    "status": "complete",
+    "config_hash": "8ac601b8dcd4352ef1fc7f6fa6b27b4585b887ada77922e59baf9ded698dd126",
+    "index_fingerprint": "dcd8c655f43894f3fcae2d32b7befdb43debe3b7174de96e45a243f5e5faac56"
+  },
+  "selfcheck": {
+    "pass": true,
+    "checks": "13/13"
+  },
+  "sedar_package_present": false,
+  "vilegalqwen_local_present": false,
+  "next_task": "SS-01",
+  "report": "docs/sedar_sft/SS_00_CURRENT_STATE_AUDIT.md"
+}

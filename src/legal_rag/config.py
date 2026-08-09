@@ -502,12 +502,15 @@ class ProjectConfig(ConfigSection):
                     "Reader profiles must not reuse the Legal-RAG retrieval stack"
                 )
 
-        is_generative_profile = self.project.profile == "finetuned_reader"
+        is_generative_profile = self.project.profile in {
+            "finetuned_reader",
+            "sedar_sft",
+        }
         if is_generative_profile != (
             self.finetuned_reader is not None and self.finetuned_reader.enabled
         ):
             raise ValueError(
-                "Generative finetuned_reader requires "
+                "Generative profiles (finetuned_reader/sedar_sft) require "
                 "finetuned_reader.enabled=true and non-generative profiles must "
                 "omit that section"
             )
@@ -516,11 +519,11 @@ class ProjectConfig(ConfigSection):
         if is_generative_profile:
             if self.reader is not None:
                 raise ValueError(
-                    "Generative finetuned_reader must not use reader settings"
+                    "Generative SFT profiles must not use extractive reader settings"
                 )
             if self.retrieval.strategy != "bm25_rerank" or not self.reranker.enabled:
                 raise ValueError(
-                    "Generative finetuned_reader must use the frozen BM25+reranker "
+                    "Generative SFT profiles must use the frozen BM25+reranker "
                     "retrieval contract"
                 )
         return self

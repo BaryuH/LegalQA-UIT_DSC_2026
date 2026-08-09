@@ -1,0 +1,31 @@
+# SEDAR-SFT SS-04A — Linux CUDA 12.4 / RTX4090 training stack
+# Canonical install target: Ubuntu 22.04 + driver 550 + CUDA 12.4
+# Do NOT install flash-attn in SS-04A.
+#
+# Usage (on the Linux GPU server, inside an isolated Python >=3.11 venv):
+#   export SEDAR_WORK_ROOT=/mnt/F/sedar-legalqa
+#   source scripts/sedar_sft/bootstrap_linux_env.sh
+#   # or manually:
+#   pip install -U pip setuptools wheel
+#   pip install --index-url https://download.pytorch.org/whl/cu124 torch torchvision torchaudio
+#   pip install -r requirements/sedar_sft_linux_cu124.txt
+#   pip install -e ".[sedar-sft,dev]"
+#
+# Pin policy: keep ranges aligned with pyproject [project.optional-dependencies].sedar-sft.
+# Exact resolved versions are recorded by scripts/sedar_sft/probe_environment.py after install.
+
+# Core project
+pydantic>=2.0,<3.0
+PyYAML>=6.0,<7.0
+
+# Training / PEFT (torch itself should come from the cu124 index above)
+transformers>=5.0,<6.0
+tokenizers>=0.20
+accelerate>=0.30,<2.0
+peft>=0.12,<1.0
+trl>=0.9,<1.0
+bitsandbytes>=0.43,<1.0
+datasets>=2.19,<4.0
+sentencepiece>=0.1.99
+sentence-transformers>=5.0,<6.0
+Pillow>=10.0

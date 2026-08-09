@@ -40,6 +40,22 @@ finetuned-reader = [
     # Qwen3.5's AutoProcessor imports image-processing support even for text-only use.
     "Pillow>=10.0",
 ]
+sedar-sft = [
+    # SS-04A training stack for SEDAR-SFT (Linux RTX4090 canonical).
+    # Install CUDA torch from the pinned index in requirements/sedar_sft_linux_cu124.txt
+    # before/with this extra; do not install FlashAttention in SS-04A.
+    "torch>=2.0",
+    "transformers>=5.0,<6.0",
+    "tokenizers>=0.20",
+    "accelerate>=0.30,<2.0",
+    "peft>=0.12,<1.0",
+    "trl>=0.9,<1.0",
+    "bitsandbytes>=0.43,<1.0",
+    "datasets>=2.19,<4.0",
+    "sentencepiece>=0.1.99",
+    "sentence-transformers>=5.0,<6.0",
+    "Pillow>=10.0",
+]
 
 [project.scripts]
 legal-rag = "legal_rag.cli:main"

@@ -1,0 +1,37 @@
+# SS-07 RTX4090 runtime knobs that must stay config/env-driven.
+# Do not hard-code AUTO resolutions inside reusable Python modules.
+# Resolve only after SS-04B/SS-04D probes on the GPU server.
+
+schema_version: sedar_sft.ss07.runtime_profile.v1
+runtime_profile: linux_rtx4090_single_gpu
+status: provisional_pending_gpu_probes
+
+training:
+  peft: qlora
+  gradient_checkpointing: true
+  packing: false
+  bf16: true          # only after capability probe
+  fp16: false
+  tf32: true          # after numerical smoke
+  dataloader_pin_memory: true
+  dataloader_persistent_workers: true
+  dataloader_num_workers: AUTO
+  gradient_accumulation_steps: AUTO
+
+quantization:
+  load_in_4bit: true
+  quant_type: nf4
+  double_quant: true
+  compute_dtype: bfloat16
+
+attention:
+  implementation: sdpa
+  flash_attention: optional_perf_gate
+
+gpu_deferred:
+  - SS-04A CUDA exit gate
+  - SS-04B exclusivity / BF16 smoke
+  - SS-04C revision + target_modules discovery
+  - SS-04D VRAM/throughput probe
+  - SS-05G GPU reranker optimization
+  - SS-07G FlashAttention gate

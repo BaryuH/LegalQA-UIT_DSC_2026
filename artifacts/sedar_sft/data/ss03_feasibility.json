@@ -1,0 +1,60 @@
+{
+  "schema_version": "sedar_sft.ss03.data_feasibility.v1",
+  "task": "SS-03",
+  "date": "2026-08-08",
+  "status": "pass",
+  "hard_stop": false,
+  "training_remediation": {
+    "effective_train_count": 6609,
+    "effective_train_to_nontrain_overlap_case_count": 0,
+    "exclusion_reason_counts": {
+      "id_overlap:warmup": 387,
+      "normalized_question_overlap:public": 1,
+      "normalized_question_overlap:warmup": 390
+    },
+    "policy": "exclude_and_record",
+    "remediation_id": "ftr03-train-overlap-exclusion-v1",
+    "source_train_count": 7000,
+    "source_train_overlap_case_count": 391,
+    "status": "remediated",
+    "unremediated_nontraining_overlap_total": 80
+  },
+  "leakage_pass": true,
+  "token_length_preanalysis": {
+    "tokenizer": "whitespace_estimator_only",
+    "model_tokenizer_frozen": false,
+    "max_seq_length": null,
+    "max_seq_length_guessed": false,
+    "train_answer_chars": {
+      "count": 7000,
+      "max": 10755,
+      "mean": 1575.7395714285715,
+      "min": 129,
+      "p50": 1410.0,
+      "p90": 2612.0,
+      "p95": 3145.0499999999993
+    },
+    "train_answer_whitespace_tokens": {
+      "count": 7000,
+      "max": 2824,
+      "mean": 386.60485714285716,
+      "min": 29,
+      "p50": 345.5,
+      "p90": 642.1000000000004,
+      "p95": 767.0499999999993
+    },
+    "train_question_chars": {
+      "count": 7000,
+      "max": 272,
+      "mean": 88.10085714285714,
+      "min": 12,
+      "p50": 85.0,
+      "p90": 128.0,
+      "p95": 140.0
+    }
+  },
+  "source_audit_summary": "artifacts/finetuned_reader_audit/summary.json",
+  "report": "docs/sedar_sft/SS_03_DATA_FEASIBILITY.md",
+  "next_task": "SS-04A",
+  "next_blocker_if_no_linux_gpu": "Ubuntu RTX4090 server not accessible from current Windows agent host"
+}

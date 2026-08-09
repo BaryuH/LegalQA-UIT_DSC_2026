@@ -1,0 +1,28 @@
+{
+  "schema_version": "sedar_sft.ss22.promotion.v1",
+  "status": "frozen_template",
+  "decision": "HOLD",
+  "execution_profile": {
+    "python_version": "UNRESOLVED_SERVER",
+    "torch_version": "UNRESOLVED_SERVER",
+    "cuda_build": "UNRESOLVED_SERVER",
+    "transformers": "UNRESOLVED_SERVER",
+    "peft": "UNRESOLVED_SERVER",
+    "trl": "UNRESOLVED_SERVER",
+    "bitsandbytes": "UNRESOLVED_SERVER",
+    "attention_backend": "sdpa",
+    "dtype": "bfloat16_if_supported",
+    "quantization": "nf4_double_quant",
+    "sequence_length": "UNRESOLVED_SS06",
+    "micro_batch": "UNRESOLVED_SS04D",
+    "gradient_accumulation": "AUTO",
+    "dataloader_workers": "AUTO"
+  },
+  "blockers": [
+    "canonical_training_not_completed",
+    "sft_vs_sedar_ablation_missing",
+    "server_execution_profile_unresolved",
+    "adversarial_review_open"
+  ],
+  "rule": "Promote only if SEDAR-SFT beats SFT-only under frozen B2 + approved evaluator"
+}

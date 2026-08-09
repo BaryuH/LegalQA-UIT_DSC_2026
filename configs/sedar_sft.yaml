@@ -1,0 +1,99 @@
+# SEDAR-SFT canonical config sketch (SS-01 freeze)
+
+# Experimental until Promotion Gate. Do not treat as Competition selected_method.
+# Model-specific batch/sequence numbers are intentionally absent (SS-01).
+# Exact HF revision/tokenizer paths remain unresolved until SS-04C.
+
+project:
+  name: legal-rag
+  method: sedar_sft
+  profile: sedar_sft
+  framework_version: "1.0"
+  profile_status: experimental
+  python_version: "3.11"
+
+runtime_profile: linux_rtx4090_single_gpu
+canonical_peft_preference: qlora
+canonical_compute_dtype: bf16_if_supported
+canonical_attention: sdpa_first
+flash_attention: optional_perf_gate
+canonical_gpu_count: 1
+exclusive_gpu_required_for_canonical_train: true
+
+data:
+  data_dir: data
+  question_path: data/train.json
+  selected_contexts_path: data/selected-contexts.zip
+  split: train
+  split_policy: train_development
+  effective_train_remediation: ftr03-train-overlap-exclusion-v1
+
+retrieval:
+  inherit: frozen_b2
+  allow_new_retrieval: false
+  frozen_config_path: configs/frozen/hybrid_rag_b2.yaml
+  freeze_fingerprint_path: artifacts/b2_freeze/fingerprint.json
+
+training:
+  method: sft
+  objective: answer_only
+  peft: qlora
+  peft_fallback: lora_bf16_after_measured_gate
+  full_finetune: false
+  packing: false
+
+model:
+  max_parameters: 4B
+  selected_base_model_id: ntphuc149/ViLegalQwen3-1.7B-Base
+  base_model: UNRESOLVED_SS04
+  revision: UNRESOLVED_SS04
+  tokenizer: UNRESOLVED_SS04
+  local_files_only: true
+
+sedar:
+  evidence_profile:
+    enabled: true
+  analyzer:
+    mode: rule_first
+    llm_fallback: true
+  candidate_generation:
+    default_count: 1
+    max_count: 2
+  verifier:
+    hard_checks: true
+    semantic_support: true
+  routing:
+    mode: heuristic_then_calibrated
+    self_reported_confidence_primary: false
+  critic:
+    enabled: true
+    activation: selective
+    mode: evidence_bound_patch
+    max_calls: 1
+  deliberation:
+    max_rounds: 1
+  finalizer:
+    can_add_new_unsupported_claims: false
+    can_add_new_unsupported_citations: false
+
+memory:
+  runtime: false
+
+external_search:
+  enabled: false
+
+evaluation:
+  enabled: true
+  primary_metric: meteor
+  secondary_metric: rouge_l
+
+submission:
+  enabled: true
+  format: object_by_question_id
+  answer_field: answer
+
+runtime:
+  # Paths must be supplied by env/config on the Linux server (SEDAR_WORK_ROOT).
+  # Do not hard-code /mnt/F inside Python modules.
+  fail_fast: true
+  seed: 42

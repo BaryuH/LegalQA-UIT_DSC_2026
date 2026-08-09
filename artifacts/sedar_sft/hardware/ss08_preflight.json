@@ -1,0 +1,107 @@
+{
+  "schema_version": "sedar_sft.ss08.preflight.v1",
+  "status": "blocked",
+  "blockers": [
+    "data_manifest_failed",
+    "gpu_execution_deferred_by_operator",
+    "peft_required_for_lora_or_qlora",
+    "accelerate_required_for_training_runtime",
+    "base_model_revision_unresolved",
+    "lora_target_modules_unresolved",
+    "bitsandbytes_required_for_4bit",
+    "local_base_model_path_missing",
+    "dataset_manifest_not_provided",
+    "model_revision_unresolved"
+  ],
+  "checks": {
+    "data_manifest": "fail:No module named 'scripts.verify_data_manifest'",
+    "b2_freeze": {
+      "status": "complete",
+      "config_hash": "8ac601b8dcd4352ef1fc7f6fa6b27b4585b887ada77922e59baf9ded698dd126",
+      "index_fingerprint": "dcd8c655f43894f3fcae2d32b7befdb43debe3b7174de96e45a243f5e5faac56"
+    },
+    "training_infra": {
+      "schema_version": "sedar_sft.ss07.training_infra.v1",
+      "blockers": [
+        "peft_required_for_lora_or_qlora",
+        "accelerate_required_for_training_runtime",
+        "base_model_revision_unresolved",
+        "lora_target_modules_unresolved",
+        "bitsandbytes_required_for_4bit",
+        "local_base_model_path_missing",
+        "gpu_execution_deferred_by_operator"
+      ],
+      "gpu_execution_authorized": false,
+      "qlora_defaults_present": true,
+      "ready_for_canonical_train": false,
+      "ready_for_code_smoke": true,
+      "runtime_profile": {
+        "schema_version": "sedar_sft.ss07.runtime_profile.v1",
+        "runtime_profile": "linux_rtx4090_single_gpu",
+        "status": "provisional_pending_gpu_probes",
+        "training": {
+          "peft": "qlora",
+          "gradient_checkpointing": true,
+          "packing": false,
+          "bf16": true,
+          "fp16": false,
+          "tf32": true,
+          "dataloader_pin_memory": true,
+          "dataloader_persistent_workers": true,
+          "dataloader_num_workers": "AUTO",
+          "gradient_accumulation_steps": "AUTO"
+        },
+        "quantization": {
+          "load_in_4bit": true,
+          "quant_type": "nf4",
+          "double_quant": true,
+          "compute_dtype": "bfloat16"
+        },
+        "attention": {
+          "implementation": "sdpa",
+          "flash_attention": "optional_perf_gate"
+        },
+        "gpu_deferred": [
+          "SS-04A CUDA exit gate",
+          "SS-04B exclusivity / BF16 smoke",
+          "SS-04C revision + target_modules discovery",
+          "SS-04D VRAM/throughput probe",
+          "SS-05G GPU reranker optimization",
+          "SS-07G FlashAttention gate"
+        ]
+      },
+      "stack": {
+        "blockers": [
+          "peft_required_for_lora_or_qlora",
+          "accelerate_required_for_training_runtime",
+          "base_model_revision_unresolved",
+          "lora_target_modules_unresolved",
+          "bitsandbytes_required_for_4bit",
+          "local_base_model_path_missing",
+          "gpu_execution_deferred_by_operator"
+        ],
+        "cuda_available": false,
+        "device": "cpu",
+        "packages": {
+          "torch": true,
+          "transformers": true,
+          "peft": false,
+          "accelerate": false,
+          "trl": false,
+          "bitsandbytes": false,
+          "datasets": false
+        },
+        "platform": "Windows-11-10.0.26200-SP0",
+        "torch_version": "2.12.0+cpu"
+      }
+    },
+    "dataset_manifest": "not_provided",
+    "model_revision": "UNRESOLVED"
+  },
+  "gpu_deferred": [
+    "exclusive GPU occupancy",
+    "NVMe free-space probe on SEDAR_WORK_ROOT",
+    "SS-04D/SS-07G batch-seq profile",
+    "canonical training launch"
+  ]
+}

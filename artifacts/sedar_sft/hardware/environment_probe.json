@@ -1,0 +1,84 @@
+{
+  "schema_version": "sedar_sft.ss04a.environment_probe.v1",
+  "task": "SS-04A",
+  "generated_at": "2026-08-08T17:11:55.215924+00:00",
+  "python": {
+    "version": "3.13.12 | packaged by Anaconda, Inc. | (main, Feb 24 2026, 16:05:56) [MSC v.1942 64 bit (AMD64)]",
+    "executable": "C:\\Users\\PC\\miniconda3\\python.exe",
+    "version_info": [
+      3,
+      13,
+      12
+    ]
+  },
+  "pip": "pip 26.0.1 from C:\\Users\\PC\\miniconda3\\Lib\\site-packages\\pip (python 3.13)",
+  "platform": {
+    "system": "Windows",
+    "release": "11",
+    "machine": "AMD64",
+    "node": "JulianNguyen"
+  },
+  "packages": {
+    "torch": "2.12.0+cpu",
+    "transformers": "5.12.1",
+    "tokenizers": "0.22.2",
+    "accelerate": "MISSING:ModuleNotFoundError",
+    "peft": "MISSING:ModuleNotFoundError",
+    "trl": "MISSING:ModuleNotFoundError",
+    "bitsandbytes": "MISSING:ModuleNotFoundError",
+    "datasets": "MISSING:ModuleNotFoundError",
+    "sentence-transformers": "5.6.0"
+  },
+  "cuda": {
+    "torch_version": "2.12.0+cpu",
+    "torch_version_cuda": null,
+    "cuda_available": false,
+    "device_count": 0,
+    "cudnn_version": null,
+    "device_name": null,
+    "device_capability": null,
+    "bf16_supported": null,
+    "driver_version": null,
+    "nvidia_smi": "unavailable:[WinError 2] The system cannot find the file specified"
+  },
+  "filesystem": {
+    "SEDAR_WORK_ROOT": null,
+    "HF_HOME": null,
+    "HF_HUB_CACHE": null,
+    "TRANSFORMERS_CACHE": null,
+    "DATASETS_CACHE": null,
+    "TORCH_HOME": null,
+    "mounts": {
+      "/": {
+        "total_gb": 484.95,
+        "free_gb": 345.7
+      },
+      "C:\\": {
+        "total_gb": 535.97,
+        "free_gb": 69.78
+      },
+      "D:\\": {
+        "total_gb": 484.95,
+        "free_gb": 345.7
+      }
+    }
+  },
+  "ram": {
+    "platform": "Windows",
+    "total_gb": 29.84,
+    "available_gb": 0.94
+  },
+  "flash_attn": "not_installed_by_ss04a_policy",
+  "exit_gate": {
+    "python_ge_311": true,
+    "cuda_enabled_torch": false,
+    "rtx4090_visible": false,
+    "compute_capability_8_9": false,
+    "bf16_measured": false,
+    "bitsandbytes_importable": false,
+    "nvme_work_root_configured": false,
+    "root_not_primary_hf_cache": false,
+    "all_pass": false,
+    "status": "pending_or_fail"
+  }
+}
