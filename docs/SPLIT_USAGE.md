@@ -40,6 +40,19 @@ legal-rag validate-submission \
 Local evaluator cũng bắt buộc `--split`. Nó kiểm tra reference access trước khi
 mở file reference, vì vậy private/public reference không thể đi qua lệnh này.
 
+## Clean warmup validation (VAL-00 / VAL-01)
+
+Local SFT/SEDAR validation uses the derived IDs-only manifest under
+`artifacts/sedar_sft/validation/` (`sedar-warmup-public-exclusion-v1`). Warmup
+cases overlapping Public by canonical ID or FTR-03
+`normalize_question_text` are excluded. Selection never opens gold answers.
+See `docs/finetuned_reader/VAL_00_WARMUP_VALIDATION.md`.
+
+Local evaluation on that clean ID set is VAL-01
+(`sedar-warmup-local-eval-v1`): question-only inference, then
+evaluation-only gold join. See
+`docs/finetuned_reader/VAL_01_WARMUP_EVALUATION.md`.
+
 ## Inference and retrieval boundaries
 
 - Pipeline inference dùng `load_inference_questions`, không materialize field

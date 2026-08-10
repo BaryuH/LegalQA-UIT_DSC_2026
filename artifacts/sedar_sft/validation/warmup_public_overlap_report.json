@@ -1,0 +1,261 @@
+{
+  "exact_id_overlap_count": 40,
+  "exact_id_overlap_ids": [
+    "104013",
+    "107831",
+    "119477",
+    "120127",
+    "126931",
+    "127023",
+    "132515",
+    "134117",
+    "138265",
+    "138861",
+    "145601",
+    "149147",
+    "152633",
+    "157993",
+    "158617",
+    "160735",
+    "164407",
+    "165393",
+    "166373",
+    "19485",
+    "23207",
+    "26611",
+    "30529",
+    "3575",
+    "41985",
+    "51829",
+    "64923",
+    "65357",
+    "6723",
+    "71273",
+    "72605",
+    "8067",
+    "80705",
+    "81559",
+    "83877",
+    "8457",
+    "87149",
+    "91063",
+    "97831",
+    "99169"
+  ],
+  "excluded": [
+    {
+      "case_id": "104013",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "107831",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "119477",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "120127",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "126931",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "127023",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "132515",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "134117",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "138265",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "138861",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "145601",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "149147",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "152633",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "157993",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "158617",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "160735",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "164407",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "165393",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "166373",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "19485",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "23207",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "26611",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "30529",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "3575",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "41985",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "51829",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "64923",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "65357",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "6723",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "71273",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "72605",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "8067",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "80705",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "81559",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "83877",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "8457",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "87149",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "91063",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "97831",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    },
+    {
+      "case_id": "99169",
+      "reason": "PUBLIC_ID_AND_QUESTION_OVERLAP"
+    }
+  ],
+  "included_count": 460,
+  "normalized_question_overlap_count": 40,
+  "normalized_question_overlap_ids": [
+    "104013",
+    "107831",
+    "119477",
+    "120127",
+    "126931",
+    "127023",
+    "132515",
+    "134117",
+    "138265",
+    "138861",
+    "145601",
+    "149147",
+    "152633",
+    "157993",
+    "158617",
+    "160735",
+    "164407",
+    "165393",
+    "166373",
+    "19485",
+    "23207",
+    "26611",
+    "30529",
+    "3575",
+    "41985",
+    "51829",
+    "64923",
+    "65357",
+    "6723",
+    "71273",
+    "72605",
+    "8067",
+    "80705",
+    "81559",
+    "83877",
+    "8457",
+    "87149",
+    "91063",
+    "97831",
+    "99169"
+  ],
+  "policy_id": "sedar-warmup-public-exclusion-v1",
+  "reason_counts": {
+    "PUBLIC_ID_AND_QUESTION_OVERLAP": 40,
+    "PUBLIC_ID_OVERLAP": 0,
+    "PUBLIC_NORMALIZED_QUESTION_OVERLAP": 0
+  },
+  "schema_version": 1,
+  "source_public_count": 1000,
+  "source_warmup_count": 500,
+  "union_excluded_count": 40
+}
