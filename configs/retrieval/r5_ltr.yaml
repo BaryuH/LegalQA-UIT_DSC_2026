@@ -1,0 +1,13 @@
+# SEDAR Retrieval v3 — R5 LambdaRank
+version: sedar-retrieval-v3
+stage: R5
+depends_on: R4
+status: local_features_ready_training_pending_labels
+ltr:
+  enabled: true
+  feature_schema: configs/retrieval/ltr_feature_schema_v1.json
+  objective: lambdarank
+reader:
+  frozen: true
+runtime:
+  outputs_root: reports/ablations/R5

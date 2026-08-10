@@ -1,0 +1,67 @@
+{
+  "task_id": "TASK_03",
+  "run_id": "20260810_local_scaffold_task03",
+  "git_commit": "908cf326dd887944039c6460e99bf299c8125d79",
+  "entry_gate": {
+    "status": "PASS",
+    "checks": [
+      {
+        "name": "raw_corpus_readable",
+        "status": "PASS",
+        "value": "data/selected-contexts.zip",
+        "expected": true
+      },
+      {
+        "name": "parser_fixtures",
+        "status": "PASS",
+        "value": "tests/sedar_retrieval/test_parse_legal.py",
+        "expected": true
+      }
+    ]
+  },
+  "exit_gate": {
+    "status": "PASS",
+    "checks": [
+      {
+        "name": "unique_canonical_id_rate",
+        "status": "PASS",
+        "value": 1.0,
+        "expected": ">=0.999"
+      },
+      {
+        "name": "orphan_nodes",
+        "status": "PASS",
+        "value": 0,
+        "expected": 0
+      },
+      {
+        "name": "unit_tests",
+        "status": "PASS",
+        "value": true,
+        "expected": true
+      },
+      {
+        "name": "sample_corpus_manifest",
+        "status": "PASS",
+        "value": "artifacts/sedar_retrieval/canonical/local_scaffold_v1/manifest.json",
+        "expected": true
+      }
+    ]
+  },
+  "artifacts": [
+    "src/legal_rag/sedar_retrieval/corpus/schema.py",
+    "src/legal_rag/sedar_retrieval/corpus/parse_legal.py",
+    "src/legal_rag/sedar_retrieval/corpus/hierarchy.py",
+    "scripts/sedar_retrieval/build_corpus.py",
+    "artifacts/sedar_retrieval/canonical/local_scaffold_v1/"
+  ],
+  "metrics": {
+    "sample_documents": 50,
+    "note": "Full-corpus audit still required before promotion; sample scaffold PASS"
+  },
+  "recommendation": "CONTINUE_LOCAL",
+  "known_issues": [
+    "Full 8k+ document corpus audit not yet run in this local scaffold pass.",
+    "unparsed retained spans remain by design and must be reported, not dropped."
+  ]
+}

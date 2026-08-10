@@ -1,0 +1,56 @@
+{
+  "task_id": "TASK_02",
+  "run_id": "20260810_local_scaffold_task02",
+  "git_commit": "908cf326dd887944039c6460e99bf299c8125d79",
+  "entry_gate": {
+    "status": "PASS",
+    "checks": [
+      {
+        "name": "local_dev_waiver",
+        "status": "PASS",
+        "value": true,
+        "expected": true
+      },
+      {
+        "name": "metric_contract_defined",
+        "status": "PASS",
+        "value": true,
+        "expected": true
+      }
+    ]
+  },
+  "exit_gate": {
+    "status": "PASS",
+    "checks": [
+      {
+        "name": "unit_tests",
+        "status": "PASS",
+        "value": "tests/sedar_retrieval/test_retrieval_metrics.py",
+        "expected": "pass"
+      },
+      {
+        "name": "no_reader_required",
+        "status": "PASS",
+        "value": true,
+        "expected": true
+      },
+      {
+        "name": "r0_eval_report",
+        "status": "DEFERRED_GPU",
+        "value": null,
+        "expected": "after R0 retrieval.jsonl freeze on server/local full run"
+      }
+    ]
+  },
+  "artifacts": [
+    "src/legal_rag/sedar_retrieval/eval/retrieval_metrics.py",
+    "src/legal_rag/sedar_retrieval/eval/evidence_metrics.py",
+    "scripts/sedar_retrieval/eval_retrieval.py",
+    "tests/sedar_retrieval/test_retrieval_metrics.py"
+  ],
+  "metrics": {},
+  "recommendation": "CONTINUE_LOCAL",
+  "known_issues": [
+    "Full R0 retrieval evaluation report waits for freeze_r0 artifacts + label provenance file."
+  ]
+}

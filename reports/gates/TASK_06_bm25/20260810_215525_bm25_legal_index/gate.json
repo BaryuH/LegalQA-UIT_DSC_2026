@@ -1,0 +1,13 @@
+{
+  "task_id": "TASK_06",
+  "run_id": "20260810_215525_bm25_legal_index",
+  "entry_gate": {"status": "PASS"},
+  "exit_gate": {
+    "status": "PASS",
+    "checks": [
+      {"name": "reload_topk_overlap", "status": "PASS", "value": 1.0, "expected": 1.0},
+      {"name": "smoke_hits", "status": "PASS", "value": 10}
+    ]
+  },
+  "recommendation": "CONTINUE_LOCAL"
+}

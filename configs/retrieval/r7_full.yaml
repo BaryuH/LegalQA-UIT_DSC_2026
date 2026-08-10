@@ -1,0 +1,19 @@
+# SEDAR Retrieval v3 — R7 sufficiency + adaptive curation
+version: sedar-retrieval-v3
+stage: R7
+depends_on: R6
+status: curation_local_ready_sufficiency_llm_deferred
+reference_expansion:
+  enabled: true
+  max_hops: 1
+  max_nodes: 5
+sufficiency:
+  enabled: deferred_llm
+  max_rounds: 2
+evidence:
+  dedup: true
+  adaptive_budget: true
+reader:
+  frozen: true
+runtime:
+  outputs_root: reports/ablations/R7

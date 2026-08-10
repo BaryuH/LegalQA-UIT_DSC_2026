@@ -1,0 +1,76 @@
+TASK_00 Environment Report
+run_id: 20260810_193206_task00_environment
+timestamp_utc: 2026-08-10T12:32:09.766908+00:00
+git_commit: 908cf326dd887944039c6460e99bf299c8125d79
+git_status_short:
+?? .cursor/
+?? cursor-goal/
+
+
+platform: Windows-11-10.0.26200-SP0
+python: 3.13.12 | packaged by Anaconda, Inc. | (main, Feb 24 2026, 16:05:56) [MSC v.1942 64 bit (AMD64)]
+executable: C:\Users\PC\miniconda3\python.exe
+torch: 2.12.0+cpu
+torch.version.cuda: None
+cuda_available: False
+gpu_name: None
+vram_gb: None
+
+imports: {"legal_rag": true, "legal_rag.sedar_sft": true, "legal_rag.retrieval.bm25": true, "torch": true}
+
+required_paths:
+{
+  "raw_corpus_zip": {
+    "path": "D:\\LegalQA-UIT_DSC_2026\\data\\selected-contexts.zip",
+    "exists": true,
+    "size": 97276888,
+    "sha256": null
+  },
+  "train_json": {
+    "path": "D:\\LegalQA-UIT_DSC_2026\\data\\train.json",
+    "exists": true,
+    "size": 16078892,
+    "sha256": "2a52501cc065d266f2f832475950bcf1e7c75c386efa9b2f568f251d745f5988"
+  },
+  "warmup_json": {
+    "path": "D:\\LegalQA-UIT_DSC_2026\\data\\warmup.json",
+    "exists": true,
+    "size": 1135881,
+    "sha256": "0b416328977471c8baca70050dff04d1108a263ca6562be13f80fb3dd64c0c17"
+  },
+  "public_official_json": {
+    "path": "D:\\LegalQA-UIT_DSC_2026\\data\\public-official.json",
+    "exists": true,
+    "size": 185622,
+    "sha256": "5f68ca901cb20798559538bef60fa7c32bd7d0df59f5bf31a37eb220c9e00df5"
+  },
+  "frozen_b2_config": {
+    "path": "D:\\LegalQA-UIT_DSC_2026\\configs\\frozen\\hybrid_rag_b2.yaml",
+    "exists": true,
+    "size": 1759,
+    "sha256": "bb4023e6fd335464d52331551cfc1ff1218f4c3e250dc13c392ec99be22bad2c"
+  },
+  "b2_fingerprint": {
+    "path": "D:\\LegalQA-UIT_DSC_2026\\artifacts\\b2_freeze\\fingerprint.json",
+    "exists": true,
+    "size": 2156,
+    "sha256": "c903e7d87d791e4cac48f2dafc6765bbc5d97fcecfcec791cd84103970cfdef6"
+  },
+  "validation_manifest": {
+    "path": "D:\\LegalQA-UIT_DSC_2026\\artifacts\\sedar_sft\\validation\\clean_warmup_manifest.json",
+    "exists": true,
+    "size": 7445,
+    "sha256": "cf3e3d01bc748f38b2580b9e7510d50ea83ff215382a8c5673f7e39cfb0053e3"
+  },
+  "sedar_config": {
+    "path": "D:\\LegalQA-UIT_DSC_2026\\configs\\sedar_sft.yaml",
+    "exists": true,
+    "size": 2491,
+    "sha256": "b34164c08199a8c4d32312d6f3ec26cd4be184f2dc7766e7fe50431776f078b2"
+  }
+}
+
+reader_checkpoint_candidates: []
+
+nvidia_smi:
+UNAVAILABLE: [WinError 2] The system cannot find the file specified

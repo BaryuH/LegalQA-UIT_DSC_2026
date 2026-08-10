@@ -1,0 +1,39 @@
+# SEDAR Retrieval v3 engineering gate thresholds.
+# Default engineering gates — not scientific claims. Edit only via commit.
+
+version: sedar-retrieval-v3-gates-v1
+
+local_dev:
+  # Local scaffold mode: CUDA is contractually assumed but may be unavailable.
+  # GPU-heavy stages must record status=DEFERRED_GPU instead of silent CPU swaps.
+  cuda_assumed: true
+  allow_cpu_scaffold: true
+  require_live_cuda_for_promotion: true
+
+regression_tolerance:
+  recall_abs: 0.005
+  mrr_abs: 0.005
+  ndcg_abs: 0.005
+  rouge_abs: 0.003
+  meteor_abs: 0.003
+
+promotion_min_gain:
+  recall_abs: 0.005
+  mrr_abs: 0.003
+  ndcg_abs: 0.003
+
+quality:
+  parser_unique_id_rate: 0.999
+  text_preservation_rate: 0.999
+  max_orphan_nodes: 0
+  max_duplicate_passage_ids: 0
+  max_nan_embeddings: 0
+
+runtime:
+  deterministic_topk_overlap: 1.0
+
+reader:
+  frozen: true
+  # Filled by TASK 00/01 once checkpoint bytes exist on the GPU server.
+  checkpoint_sha256: null
+  checkpoint_path: null

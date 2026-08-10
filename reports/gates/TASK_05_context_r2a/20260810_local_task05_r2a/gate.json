@@ -1,0 +1,14 @@
+{
+  "task_id": "TASK_05",
+  "run_id": "20260810_local_task05_r2a",
+  "entry_gate": {"status": "PASS"},
+  "exit_gate": {
+    "status": "PASS",
+    "checks": [
+      {"name": "r2a_passages", "status": "PASS"},
+      {"name": "reader_raw_separation", "status": "PASS"},
+      {"name": "r2b_synthetic_summary", "status": "SKIP", "detail": "optional; deferred"}
+    ]
+  },
+  "recommendation": "CONTINUE_LOCAL"
+}

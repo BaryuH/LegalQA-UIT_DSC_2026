@@ -1,0 +1,8 @@
+{
+  "task_id": "TASK_04",
+  "run_id": "20260810_local_task04_r1",
+  "entry_gate": {"status": "PASS", "checks": [{"name": "canonical_sample", "status": "PASS"}]},
+  "exit_gate": {"status": "PASS", "checks": [{"name": "r1_passages_built", "status": "PASS", "value": 3798}, {"name": "unit_tests", "status": "PASS"}]},
+  "recommendation": "CONTINUE_LOCAL",
+  "known_issues": ["Full R1 vs R0 promotion metrics deferred until full corpus + R0 freeze"]
+}

@@ -1,0 +1,129 @@
+{
+  "task_id": "TASK_00",
+  "run_id": "20260810_193206_task00_environment",
+  "git_commit": "908cf326dd887944039c6460e99bf299c8125d79",
+  "entry_gate": {
+    "status": "FAIL",
+    "checks": [
+      {
+        "name": "repository_checkout",
+        "status": "PASS",
+        "value": "908cf326dd887944039c6460e99bf299c8125d79",
+        "expected": "valid_sha"
+      },
+      {
+        "name": "working_tree_recorded",
+        "status": "PASS",
+        "value": true,
+        "expected": true
+      },
+      {
+        "name": "python_sedar_import",
+        "status": "PASS",
+        "value": {
+          "legal_rag": true,
+          "legal_rag.sedar_sft": true,
+          "legal_rag.retrieval.bm25": true,
+          "torch": true
+        },
+        "expected": true
+      },
+      {
+        "name": "cuda_available",
+        "status": "FAIL",
+        "value": false,
+        "expected": true
+      },
+      {
+        "name": "gpu_visible",
+        "status": "FAIL",
+        "value": null,
+        "expected": "NVIDIA GPU"
+      },
+      {
+        "name": "reader_checkpoint_exists",
+        "status": "FAIL",
+        "value": [],
+        "expected": "readable checkpoint path"
+      },
+      {
+        "name": "raw_corpus_exists",
+        "status": "PASS",
+        "value": true,
+        "expected": true
+      },
+      {
+        "name": "validation_dataset_exists",
+        "status": "PASS",
+        "value": {
+          "validation_manifest": true,
+          "warmup_json": true
+        },
+        "expected": true
+      }
+    ]
+  },
+  "exit_gate": {
+    "status": "FAIL",
+    "checks": [
+      {
+        "name": "cuda_visible",
+        "status": "FAIL",
+        "value": false,
+        "expected": true
+      },
+      {
+        "name": "repository_commit_captured",
+        "status": "PASS",
+        "value": "908cf326dd887944039c6460e99bf299c8125d79",
+        "expected": "sha"
+      },
+      {
+        "name": "environment_captured",
+        "status": "PASS",
+        "value": true,
+        "expected": true
+      },
+      {
+        "name": "reader_checkpoint_checksum_captured",
+        "status": "FAIL",
+        "value": false,
+        "expected": true
+      },
+      {
+        "name": "required_data_paths_readable",
+        "status": "PASS",
+        "value": {
+          "raw_corpus_zip": true,
+          "train_json": true,
+          "warmup_json": true,
+          "public_official_json": true,
+          "frozen_b2_config": true,
+          "b2_fingerprint": true,
+          "validation_manifest": true,
+          "sedar_config": true
+        },
+        "expected": true
+      },
+      {
+        "name": "no_source_file_modified_by_task00",
+        "status": "PASS",
+        "value": true,
+        "expected": true
+      }
+    ]
+  },
+  "artifacts": [
+    "D:\\LegalQA-UIT_DSC_2026\\reports\\gates\\TASK_00_environment\\20260810_193206_task00_environment\\gate.json",
+    "D:\\LegalQA-UIT_DSC_2026\\reports\\gates\\TASK_00_environment\\20260810_193206_task00_environment\\environment.txt",
+    "D:\\LegalQA-UIT_DSC_2026\\reports\\gates\\TASK_00_environment\\20260810_193206_task00_environment\\pip_freeze.txt"
+  ],
+  "metrics": {},
+  "recommendation": "FIX",
+  "known_issues": [
+    "Workstation is Windows with torch CPU-only; nvidia-smi unavailable; CUDA not visible.",
+    "No local SEDAR-SFT reader checkpoint/adapter bytes found under models/checkpoints/outputs.",
+    "Canonical target remains Linux + NVIDIA RTX 4090 as documented in SS-04A.",
+    "SEDAR-SFT contract currently freezes retrieval to B2 (allow_new_retrieval=false); Retrieval v3 is a new experimental phase that must explicitly supersede that freeze after environment PASS."
+  ]
+}

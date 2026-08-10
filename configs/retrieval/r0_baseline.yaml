@@ -1,0 +1,42 @@
+# SEDAR Retrieval v3 — R0 immutable baseline (current frozen B2 retrieval).
+version: sedar-retrieval-v3
+stage: R0
+inherits_frozen_b2: true
+frozen_config_path: configs/frozen/hybrid_rag_b2.yaml
+freeze_fingerprint_path: artifacts/b2_freeze/fingerprint.json
+
+gates:
+  config: configs/retrieval/gates.yaml
+
+data:
+  data_dir: data
+  question_path: data/warmup.json
+  selected_contexts_path: data/selected-contexts.zip
+  validation_manifest: artifacts/sedar_sft/validation/clean_warmup_manifest.json
+  split: warmup
+  split_policy: warmup_evaluation
+
+retrieval:
+  strategy: bm25_rerank
+  rough_top_n: 12
+  k1: 1.5
+  b: 0.75
+  # Local scaffold may run BM25-only when semantic reranker weights are absent.
+  # Promotion still requires the frozen B2 stack on the GPU server.
+  allow_reranker_skip_for_scaffold: true
+
+evidence:
+  evidence_top_k: 4
+  max_total_chars: 4000
+  max_chunks_per_document: 2
+
+reader:
+  frozen: true
+  # Prefer SEDAR-SFT checkpoint when present; mock only for local scaffold.
+  mode: auto  # auto|sedar_sft|mock
+  checkpoint_path: null
+
+runtime:
+  seed: 42
+  fail_fast: true
+  outputs_root: reports/ablations/R0

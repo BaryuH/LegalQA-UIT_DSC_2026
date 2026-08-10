@@ -1,0 +1,94 @@
+{
+  "task_id": "TASK_00",
+  "run_id": "20260810_194343_task00_local_waiver",
+  "git_commit": "908cf326dd887944039c6460e99bf299c8125d79",
+  "entry_gate": {
+    "status": "DEFERRED_GPU",
+    "checks": [
+      {
+        "name": "repository_checkout",
+        "status": "PASS",
+        "value": "908cf326dd887944039c6460e99bf299c8125d79",
+        "expected": "sha",
+        "detail": null
+      },
+      {
+        "name": "python_sedar_import",
+        "status": "PASS",
+        "value": true,
+        "expected": true,
+        "detail": null
+      },
+      {
+        "name": "cuda_live",
+        "status": "DEFERRED_GPU",
+        "value": "assumed_deferred",
+        "expected": "live",
+        "detail": "CUDA contractually assumed for SEDAR Retrieval v3 but not visible on this host; GPU stages must be completed on server"
+      },
+      {
+        "name": "local_dev_waiver_cuda_assumed",
+        "status": "PASS",
+        "value": true,
+        "expected": true,
+        "detail": "Operator authorized local scaffold with CUDA assumed"
+      },
+      {
+        "name": "raw_corpus_exists",
+        "status": "PASS",
+        "value": true,
+        "expected": true,
+        "detail": null
+      },
+      {
+        "name": "validation_dataset_exists",
+        "status": "PASS",
+        "value": true,
+        "expected": true,
+        "detail": null
+      },
+      {
+        "name": "reader_checkpoint_exists",
+        "status": "DEFERRED_GPU",
+        "value": false,
+        "expected": true,
+        "detail": "Provide on GPU server before R0 promotion"
+      }
+    ]
+  },
+  "exit_gate": {
+    "status": "PASS",
+    "checks": [
+      {
+        "name": "environment_captured",
+        "status": "PASS",
+        "value": true,
+        "expected": true,
+        "detail": null
+      },
+      {
+        "name": "proceed_local_scaffold",
+        "status": "PASS",
+        "value": true,
+        "expected": true,
+        "detail": "GPU stages remain blocked for promotion until live CUDA"
+      }
+    ]
+  },
+  "artifacts": [
+    "reports\\gates\\TASK_00_environment\\20260810_194343_task00_local_waiver\\gate.json"
+  ],
+  "metrics": {},
+  "recommendation": "CONTINUE_LOCAL",
+  "known_issues": [
+    "CUDA contractually assumed for SEDAR Retrieval v3 but not visible on this host; GPU stages must be completed on server",
+    "Reader checkpoint SHA deferred to GPU server."
+  ],
+  "local_dev_waiver": {
+    "enabled": true,
+    "cuda_assumed": true,
+    "cuda_mode": "assumed_deferred",
+    "allow_cpu_scaffold": true,
+    "promotion_requires_live_cuda": true
+  }
+}

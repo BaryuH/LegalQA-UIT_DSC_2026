@@ -1,0 +1,24 @@
+# SEDAR Retrieval v3 — R2 context-augmented retrieval text.
+version: sedar-retrieval-v3
+stage: R2
+depends_on: R1
+gates:
+  config: configs/retrieval/gates.yaml
+
+corpus:
+  hierarchy: true
+  article_view: true
+  clause_view: true
+  context_augmentation: true
+  synthetic_summary: false  # R2a default; R2b optional later
+
+retrieval:
+  strategy: bm25
+  rough_top_n: 12
+
+reader:
+  frozen: true
+
+runtime:
+  seed: 42
+  outputs_root: reports/ablations/R2

@@ -1,0 +1,16 @@
+{
+  "task_id": "LOCAL_BUNDLE",
+  "run_id": "20260810_local_completion",
+  "entry_gate": {"status": "PASS", "checks": [{"name": "cuda_assumed_waiver", "status": "PASS"}]},
+  "exit_gate": {
+    "status": "PASS",
+    "checks": [
+      {"name": "unit_tests", "status": "PASS", "value": "tests/sedar_retrieval"},
+      {"name": "local_modules_implemented", "status": "PASS"},
+      {"name": "sample_pipeline_artifacts", "status": "PASS"},
+      {"name": "gpu_stages", "status": "DEFERRED_GPU"}
+    ]
+  },
+  "recommendation": "CONTINUE_LOCAL",
+  "next_server_tasks": ["TASK_00_live_cuda", "TASK_01_r0_freeze", "TASK_07_dense", "TASK_09_11_train", "TASK_13_ltr_train"]
+}

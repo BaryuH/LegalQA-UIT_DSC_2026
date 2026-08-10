@@ -1,0 +1,27 @@
+# SEDAR Retrieval v3 — R1 hierarchical retrieval units.
+version: sedar-retrieval-v3
+stage: R1
+depends_on: R0
+gates:
+  config: configs/retrieval/gates.yaml
+
+corpus:
+  hierarchy: true
+  article_view: true
+  clause_view: true
+  context_augmentation: false
+  synthetic_summary: false
+
+retrieval:
+  # Same retriever family as R0; only chunk representation changes.
+  strategy: bm25
+  rough_top_n: 12
+  k1: 1.5
+  b: 0.75
+
+reader:
+  frozen: true
+
+runtime:
+  seed: 42
+  outputs_root: reports/ablations/R1

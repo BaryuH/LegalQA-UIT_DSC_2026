@@ -1,0 +1,27 @@
+{
+  "schema_version": "sedar-ltr-features-v1",
+  "missing_value": -1.0,
+  "features": [
+    "article_number_match",
+    "article_title_similarity",
+    "bigram_overlap",
+    "bm25_rank",
+    "bm25_score",
+    "chapter_title_similarity",
+    "clause_number_match",
+    "dense_rank",
+    "dense_score",
+    "document_name_match",
+    "document_number_match",
+    "exact_phrase_match",
+    "idf_weighted_overlap",
+    "is_effective",
+    "is_expired",
+    "legal_term_overlap",
+    "point_match",
+    "query_token_coverage",
+    "rrf_score",
+    "year_match"
+  ],
+  "leakage_policy": "no_answer_text_no_gold_labels_no_reader_outputs"
+}

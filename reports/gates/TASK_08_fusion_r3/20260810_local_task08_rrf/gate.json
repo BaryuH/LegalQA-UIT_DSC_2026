@@ -1,0 +1,15 @@
+{
+  "task_id": "TASK_08",
+  "run_id": "20260810_local_task08_rrf",
+  "entry_gate": {"status": "PASS"},
+  "exit_gate": {
+    "status": "PASS",
+    "checks": [
+      {"name": "rrf_unit_tests", "status": "PASS"},
+      {"name": "bm25_only_fusion_artifact", "status": "PASS"},
+      {"name": "dense_branch", "status": "DEFERRED_GPU"}
+    ]
+  },
+  "recommendation": "CONTINUE_LOCAL",
+  "known_issues": ["R3 promotion vs dense requires server dense index"]
+}

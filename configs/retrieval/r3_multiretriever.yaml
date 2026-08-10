@@ -1,0 +1,30 @@
+# SEDAR Retrieval v3 — R3 multi-retriever candidate union.
+version: sedar-retrieval-v3
+stage: R3
+depends_on: R2
+gates:
+  config: configs/retrieval/gates.yaml
+
+bm25:
+  enabled: true
+  top_n: 150
+
+dense:
+  enabled: true
+  model: Qwen/Qwen3-Embedding-4B
+  top_n: 150
+  normalize: true
+  # Local scaffold marks DEFERRED_GPU until server encode completes.
+  status: deferred_gpu_until_server
+
+fusion:
+  method: rrf
+  rrf_k: 60
+  union_cap: 250
+
+reader:
+  frozen: true
+
+runtime:
+  seed: 42
+  outputs_root: reports/ablations/R3

@@ -1,0 +1,42 @@
+"""Retrieval subpackage for SEDAR Retrieval v3."""
+
+from .bm25_passages import (
+    build_passage_bm25_index,
+    corpus_fingerprint,
+    hits_to_ranked_ids,
+    load_passages_and_build,
+    search_passages,
+    write_index_manifest,
+)
+from .dense import (
+    DEFAULT_DENSE_MODEL,
+    DEFAULT_QUERY_INSTRUCTION,
+    DenseIndexManifest,
+    build_dense_index_scaffold,
+    dense_manifest_to_dict,
+    format_instruct_query,
+    require_dense_encode,
+)
+from .fusion import FusedCandidate, RetrieverHit, reciprocal_rank_fusion
+from .passage_adapter import load_passages_jsonl, passage_to_legal_chunk
+
+__all__ = [
+    "DEFAULT_DENSE_MODEL",
+    "DEFAULT_QUERY_INSTRUCTION",
+    "DenseIndexManifest",
+    "FusedCandidate",
+    "RetrieverHit",
+    "build_dense_index_scaffold",
+    "build_passage_bm25_index",
+    "corpus_fingerprint",
+    "dense_manifest_to_dict",
+    "format_instruct_query",
+    "hits_to_ranked_ids",
+    "load_passages_and_build",
+    "load_passages_jsonl",
+    "passage_to_legal_chunk",
+    "reciprocal_rank_fusion",
+    "require_dense_encode",
+    "search_passages",
+    "write_index_manifest",
+]

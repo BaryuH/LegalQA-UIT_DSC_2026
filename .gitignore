@@ -89,5 +89,17 @@ artifacts/data-validation/
 artifacts/experiments.jsonl
 artifacts/submission-test/
 
+# SEDAR Retrieval v3 local/server runtime artifacts (rebuild from scripts)
+artifacts/sedar_retrieval/canonical/
+artifacts/sedar_retrieval/views/
+artifacts/sedar_retrieval/indexes/
+artifacts/sedar_retrieval/retrieval/
+artifacts/sedar_retrieval/eval/
+artifacts/sedar_retrieval/graphs/
+
+# Local IDE / nested tooling checkouts
+.cursor/
+cursor-goal/
+
 # Historical local audit; not part of the implementation contract
 docs/integration-audit.md

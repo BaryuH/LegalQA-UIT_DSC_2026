@@ -1,0 +1,93 @@
+{
+  "task_id": "TASK_01",
+  "run_id": "20260810_195450_r0_baseline",
+  "git_commit": "908cf326dd887944039c6460e99bf299c8125d79",
+  "entry_gate": {
+    "status": "PASS",
+    "checks": [
+      {
+        "name": "local_dev_waiver",
+        "status": "PASS",
+        "value": true,
+        "expected": true,
+        "detail": null
+      },
+      {
+        "name": "frozen_b2_config",
+        "status": "PASS",
+        "value": "configs\\frozen\\hybrid_rag_b2.yaml",
+        "expected": true,
+        "detail": null
+      },
+      {
+        "name": "validation_manifest",
+        "status": "PASS",
+        "value": "artifacts\\sedar_sft\\validation\\clean_warmup_manifest.json",
+        "expected": true,
+        "detail": null
+      }
+    ]
+  },
+  "exit_gate": {
+    "status": "DEFERRED_GPU",
+    "checks": [
+      {
+        "name": "artifacts_exist",
+        "status": "PASS",
+        "value": true,
+        "expected": true,
+        "detail": null
+      },
+      {
+        "name": "query_count_nonzero",
+        "status": "PASS",
+        "value": 3,
+        "expected": ">0",
+        "detail": null
+      },
+      {
+        "name": "reader_checksum_equals_task00",
+        "status": "DEFERRED_GPU",
+        "value": null,
+        "expected": "task00_checksum",
+        "detail": null
+      },
+      {
+        "name": "full_e2e_metrics",
+        "status": "DEFERRED_GPU",
+        "value": null,
+        "expected": "rouge/meteor with frozen reader",
+        "detail": null
+      }
+    ]
+  },
+  "artifacts": [
+    "reports\\ablations\\R0\\20260810_195450_r0_baseline\\answers.jsonl",
+    "reports\\ablations\\R0\\20260810_195450_r0_baseline\\config.yaml",
+    "reports\\ablations\\R0\\20260810_195450_r0_baseline\\evidence.jsonl",
+    "reports\\ablations\\R0\\20260810_195450_r0_baseline\\latency.json",
+    "reports\\ablations\\R0\\20260810_195450_r0_baseline\\manifest.json",
+    "reports\\ablations\\R0\\20260810_195450_r0_baseline\\metrics.json",
+    "reports\\ablations\\R0\\20260810_195450_r0_baseline\\pipeline_run",
+    "reports\\ablations\\R0\\20260810_195450_r0_baseline\\reader_checksum.txt",
+    "reports\\ablations\\R0\\20260810_195450_r0_baseline\\retrieval.jsonl"
+  ],
+  "metrics": {
+    "n_queries": 3,
+    "error_count": 0,
+    "index_fingerprint": "c5f8ce49fb32686f1b3529f69bf22adf98904cf0a352e8d71b5829146e4baf5f",
+    "rouge": null,
+    "meteor": null,
+    "note": "ROUGE/METEOR with frozen SEDAR-SFT reader deferred to GPU server"
+  },
+  "recommendation": "CONTINUE_LOCAL",
+  "known_issues": [
+    "Local R0 uses frozen B2 mock generation; SEDAR reader checksum deferred.",
+    "Re-run on GPU server with live reranker + frozen SEDAR-SFT reader before PROMOTE."
+  ],
+  "local_dev_waiver": {
+    "cuda_assumed": true,
+    "cuda_mode": "assumed_deferred",
+    "allow_cpu_scaffold": true
+  }
+}

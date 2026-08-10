@@ -1,0 +1,14 @@
+# SEDAR Retrieval v3 — R6 conditional query rewrite
+version: sedar-retrieval-v3
+stage: R6
+depends_on: R5
+status: deterministic_analyzer_ready_llm_rewrite_deferred
+query:
+  citation_parser: true
+  semantic_analyzer: deferred_llm
+  conditional_rewrite: deferred_llm
+  max_rewrites: 3
+reader:
+  frozen: true
+runtime:
+  outputs_root: reports/ablations/R6

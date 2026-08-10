@@ -1,0 +1,12 @@
+# SEDAR Retrieval v3 — R4 domain retriever (server / GPU deferred)
+version: sedar-retrieval-v3
+stage: R4
+depends_on: R3
+status: deferred_gpu
+dense:
+  model: Qwen/Qwen3-Embedding-4B
+  training: lora_peft
+reader:
+  frozen: true
+runtime:
+  outputs_root: reports/ablations/R4
