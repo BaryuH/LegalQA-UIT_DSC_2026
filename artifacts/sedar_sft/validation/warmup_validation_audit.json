@@ -1,0 +1,40 @@
+{
+  "answers_used_for_selection": false,
+  "blank_questions": 0,
+  "blank_warmup_references": 0,
+  "determinism_check": {
+    "excluded_ids_sorted": true,
+    "included_ids_sorted": true,
+    "repeat_build_included_ids_hash": "69be61d034909d1eb03bddecf674bf40397b2b71409ba61982e600c9526b0ba6"
+  },
+  "duplicate_ids": 0,
+  "exact_id_overlap_count": 40,
+  "excluded_ids_hash": "59d8f4fb0e03c41ec0fabe86a324d3e72ddd0e787a969db92b86fa469c5fcb59",
+  "included_count": 460,
+  "included_ids_hash": "69be61d034909d1eb03bddecf674bf40397b2b71409ba61982e600c9526b0ba6",
+  "normalization_hash_or_version": "04884ea3e595b5da7de9bb76e06c5c61f7e9b51a7d0ea08825005eae37d91036",
+  "normalization_implementation": "legal_rag.finetuned_reader.split_remediation.normalize_question_text",
+  "normalization_policy_id": "ftr03-train-overlap-exclusion-v1",
+  "normalized_question_overlap_count": 40,
+  "policy_id": "sedar-warmup-public-exclusion-v1",
+  "public_answers_materialized": false,
+  "schema_version": 1,
+  "source_hashes_unchanged": true,
+  "source_public_count": 1000,
+  "source_public_path": "data/public-official.json",
+  "source_public_sha256_after": "5f68ca901cb20798559538bef60fa7c32bd7d0df59f5bf31a37eb220c9e00df5",
+  "source_public_sha256_before": "5f68ca901cb20798559538bef60fa7c32bd7d0df59f5bf31a37eb220c9e00df5",
+  "source_warmup_count": 500,
+  "source_warmup_path": "data/warmup.json",
+  "source_warmup_sha256_after": "0b416328977471c8baca70050dff04d1108a263ca6562be13f80fb3dd64c0c17",
+  "source_warmup_sha256_before": "0b416328977471c8baca70050dff04d1108a263ca6562be13f80fb3dd64c0c17",
+  "union_excluded_count": 40,
+  "warmup_answers_materialized": false,
+  "warmup_inspect": {
+    "answer_missing_count": 0,
+    "blank_answer_count": 0,
+    "blank_question_count": 0,
+    "duplicate_id_count": 0,
+    "record_count": 500
+  }
+}
