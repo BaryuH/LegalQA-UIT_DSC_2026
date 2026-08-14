@@ -10,6 +10,7 @@ import json
 import re
 from pathlib import Path
 
+from legal_rag.sedar_retrieval.io.jsonl import iter_jsonl_lines
 from legal_rag.sedar_retrieval.query.citation_parser import parse_citations
 
 _ARTICLE_IN_ANSWER = re.compile(
@@ -30,9 +31,7 @@ def build_silver_labels_from_answers(
     questions = json.loads(questions_path.read_text(encoding="utf-8"))
     # passages: article_number -> passage_ids (article-level preferred)
     article_index: dict[str, list[str]] = {}
-    for line in passages_path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
+    for line in iter_jsonl_lines(passages_path):
         row = json.loads(line)
         if row.get("retrieval_level") != "article":
             continue

@@ -15,6 +15,7 @@ from legal_rag.sedar_retrieval.corpus.hierarchy import (
 )
 from legal_rag.sedar_retrieval.corpus.parse_legal import parse_legal_document
 from legal_rag.sedar_retrieval.gates import git_commit_sha, new_run_id
+from legal_rag.sedar_retrieval.io.jsonl import count_jsonl_records
 
 
 def main() -> int:
@@ -77,9 +78,7 @@ def main() -> int:
 
     audit = audit_canonical_nodes(all_nodes, source_texts=source_texts)
     audit_payload = audit.model_dump(mode="json")
-    audit_payload["passage_count"] = sum(
-        1 for _ in passages_path.read_text(encoding="utf-8").splitlines() if _.strip()
-    )
+    audit_payload["passage_count"] = count_jsonl_records(passages_path)
     (output_dir / "audit.json").write_text(
         json.dumps(audit_payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",

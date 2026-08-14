@@ -9,13 +9,12 @@ from collections import defaultdict
 from pathlib import Path
 
 from legal_rag.sedar_retrieval.retrieval.fusion import RetrieverHit, reciprocal_rank_fusion
+from legal_rag.sedar_retrieval.io.jsonl import iter_jsonl_lines
 
 
 def _load_source(path: Path, source: str) -> dict[str, list[RetrieverHit]]:
     by_q: dict[str, list[RetrieverHit]] = defaultdict(list)
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
+    for line in iter_jsonl_lines(path):
         row = json.loads(line)
         qid = str(row["query_id"])
         for item in row.get("scores", []):

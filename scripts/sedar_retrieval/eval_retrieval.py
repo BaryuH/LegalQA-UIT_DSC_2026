@@ -13,15 +13,11 @@ from legal_rag.sedar_retrieval.eval.retrieval_metrics import (
     evaluate_retrieval,
     metrics_to_dict,
 )
+from legal_rag.sedar_retrieval.io.jsonl import load_jsonl_records
 
 
 def _load_jsonl(path: Path) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        rows.append(json.loads(line))
-    return rows
+    return load_jsonl_records(path)
 
 
 def main() -> int:

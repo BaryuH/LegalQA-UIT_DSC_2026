@@ -38,11 +38,10 @@ def passage_to_legal_chunk(passage: CanonicalPassage) -> LegalChunk:
 
 def load_passages_jsonl(path: str) -> tuple[CanonicalPassage, ...]:
     import json
-    from pathlib import Path
+
+    from legal_rag.sedar_retrieval.io.jsonl import iter_jsonl_lines
 
     rows: list[CanonicalPassage] = []
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
+    for line in iter_jsonl_lines(path):
         rows.append(CanonicalPassage.model_validate(json.loads(line)))
     return tuple(rows)

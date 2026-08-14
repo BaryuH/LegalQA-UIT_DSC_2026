@@ -10,6 +10,7 @@ from pathlib import Path
 from legal_rag.sedar_retrieval.corpus.reference_graph import parse_reference_edges
 from legal_rag.sedar_retrieval.corpus.schema import CanonicalNode
 from legal_rag.sedar_retrieval.gates import new_run_id
+from legal_rag.sedar_retrieval.io.jsonl import iter_jsonl_lines
 
 
 def main() -> int:
@@ -19,8 +20,7 @@ def main() -> int:
     args = parser.parse_args()
     nodes = tuple(
         CanonicalNode.model_validate(json.loads(line))
-        for line in args.nodes.read_text(encoding="utf-8").splitlines()
-        if line.strip()
+        for line in iter_jsonl_lines(args.nodes)
     )
     edges = parse_reference_edges(nodes)
     args.output.parent.mkdir(parents=True, exist_ok=True)

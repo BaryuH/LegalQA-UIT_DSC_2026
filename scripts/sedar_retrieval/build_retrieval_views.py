@@ -14,13 +14,13 @@ from legal_rag.sedar_retrieval.corpus.context_augment import (
 from legal_rag.sedar_retrieval.corpus.hierarchy import nodes_to_passages
 from legal_rag.sedar_retrieval.corpus.schema import CanonicalNode
 from legal_rag.sedar_retrieval.gates import git_commit_sha, new_run_id
+from legal_rag.sedar_retrieval.io.jsonl import iter_jsonl_lines
 
 
 def _load_nodes(path: Path) -> tuple[CanonicalNode, ...]:
     rows: list[CanonicalNode] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            rows.append(CanonicalNode.model_validate(json.loads(line)))
+    for line in iter_jsonl_lines(path):
+        rows.append(CanonicalNode.model_validate(json.loads(line)))
     return tuple(rows)
 
 
