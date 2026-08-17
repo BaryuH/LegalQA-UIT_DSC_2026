@@ -37,6 +37,7 @@ python scripts/sedar_retrieval/build_dense_index.py \
   --dtype bf16 \
   --batch-size 8 \
   --shard-size 4096 \
+  --embedding-storage sharded \
   --top-k 10
 ```
 
@@ -46,13 +47,16 @@ closed if CUDA is unavailable.
 Expected artifacts:
 
 - `index.faiss`
-- `embeddings.npy` (float32 embedding cache aligned by passage ordinal)
+- `embedding_shards/*.npy` (float32 cache aligned by length-bucket order)
 - `embedding_cache_manifest.json`
 - `passage_metadata.jsonl`
 - `manifest.json`
 
 The manifest records corpus hash, model/revision, dtype, dimension, alignment,
 NaN/Inf count, reload top-k overlap, throughput, index size, and peak VRAM.
+
+Use `--embedding-storage sharded` on mounts that do not support POSIX
+`mmap`/`numpy.memmap` (for example, some `/mnt/G` filesystems).
 
 ## Dense retrieval and evaluation
 
