@@ -239,14 +239,16 @@ Encode offline corpus R2a, FAISS IndexFlatIP, metric dense-only.
 - Disk đủ cho vectors
 - BM25 full results có sẵn để so sánh sau
 
-### Việc cần implement (chưa có script encode đầy đủ)
-Hiện chỉ có scaffold: `src/legal_rag/sedar_retrieval/retrieval/dense.py`.  
-Trên server cần thêm script kiểu:
+### Implementation
+The runnable implementation is provided by:
 
 ```text
 scripts/sedar_retrieval/build_dense_index.py
 scripts/sedar_retrieval/run_dense_retrieval.py
 ```
+
+Detailed server commands and artifact contracts are documented in
+`docs/sedar_retrieval/TASK07_DENSE_INDEX.md`.
 
 ### Spec bắt buộc khi implement
 1. Model: `Qwen/Qwen3-Embedding-4B`
