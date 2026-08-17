@@ -341,11 +341,14 @@ Tạo train data domain adaptation; **không** đụng validation/test positives
 pilot 10k accepted → audit ≥300 → mới scale 50k/100k
 ```
 
-### Cần implement
+### Implementation
 ```text
 scripts/sedar_retrieval/generate_synthetic_queries.py
 src/legal_rag/sedar_retrieval/training/synthetic_queries.py
 ```
+
+Detailed commands and the pilot audit contract are documented in
+`docs/sedar_retrieval/TASK09_SYNTHETIC_QUERIES.md`.
 
 Mỗi record tối thiểu:
 `synthetic_id, query, positive_passage_id, source_document_id, query_type, legal_domain, generator_model, generator_revision, prompt_version, source_hash, quality_flags, raw_generation`
