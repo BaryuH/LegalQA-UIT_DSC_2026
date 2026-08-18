@@ -2,6 +2,7 @@
 
 from .synthetic_queries import (
     DEFAULT_PROMPT_VERSION,
+    GENERATOR_SYSTEM_PROMPT,
     QUERY_TYPES,
     SyntheticBuildReport,
     SyntheticGenerationConfig,
@@ -11,6 +12,7 @@ from .synthetic_queries import (
     TemplateQueryGenerator,
     TransformersQueryGenerator,
     assign_document_splits,
+    build_generator_prompt,
     build_synthetic_records,
     load_synthetic_records,
     synthetic_prompt_sha256,
@@ -22,6 +24,7 @@ from .synthetic_queries import (
 
 __all__ = [
     "DEFAULT_PROMPT_VERSION",
+    "GENERATOR_SYSTEM_PROMPT",
     "QUERY_TYPES",
     "SyntheticBuildReport",
     "SyntheticGenerationConfig",
@@ -31,6 +34,7 @@ __all__ = [
     "TemplateQueryGenerator",
     "TransformersQueryGenerator",
     "assign_document_splits",
+    "build_generator_prompt",
     "build_synthetic_records",
     "load_synthetic_records",
     "synthetic_prompt_sha256",

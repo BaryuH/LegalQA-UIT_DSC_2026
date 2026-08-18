@@ -6,6 +6,8 @@ the frozen SEDAR-SFT reader.
 
 The frozen machine query-type IDs are `direct`, `citizen_paraphrase`, `scenario`,
 `citation_free`, and `condition_exception`.
+The hardened chat-template prompt is versioned as `sedar-task09-v3`; changing it
+requires a new output directory and a new audit.
 
 ## Local scaffold
 

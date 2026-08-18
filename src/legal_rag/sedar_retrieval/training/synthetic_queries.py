@@ -42,18 +42,82 @@ QUERY_TYPES: tuple[QueryType, ...] = (
     "citation_free",
     "condition_exception",
 )
-DEFAULT_PROMPT_VERSION = "sedar-task09-v1"
+DEFAULT_PROMPT_VERSION = "sedar-task09-v3"
 SYNTHETIC_SCHEMA_VERSION = "sedar-retrieval-v3-synthetic-query-v1"
+GENERATOR_SYSTEM_PROMPT = (
+    "You are a strict Vietnamese legal-query generator. "
+    "Never reveal reasoning or output an answer."
+)
 GENERATOR_PROMPT = """\
-You generate exactly one Vietnamese legal question supported by the supplied
-passage. Do not answer it. Do not invent citations, dates, legal documents, or
-facts. Return only the question and preserve the requested query type.
+You are a Vietnamese legal-query generator. Generate exactly one self-contained
+Vietnamese question supported by the supplied legal passage.
+
+Hard output rules:
+- Return one line only, ending with exactly one question mark.
+- Return the question only; never output labels, headings, bullets, numbering,
+  answers, explanations, reasoning, English text, or copied list items.
+- Use 8-40 Vietnamese words and paraphrase the passage instead of copying it.
+- Do not invent facts, dates, legal documents, article/clause numbers, or
+  citations. If a citation is used, it must match the supplied metadata exactly.
 
 Query type: {query_type}
-Passage:
+Type-specific instruction: {query_type_instruction}
+Source metadata:
+{metadata}
+Legal passage:
 {passage}
 """
+_QUERY_TYPE_INSTRUCTIONS: dict[QueryType, str] = {
+    "direct": (
+        "Ask directly what rule, requirement, responsibility, or result the "
+        "passage establishes."
+    ),
+    "citizen_paraphrase": (
+        "Rewrite the rule as a natural question an ordinary citizen would ask "
+        "when seeking practical guidance."
+    ),
+    "scenario": (
+        "Frame a short hypothetical situation grounded in the passage and ask "
+        "what should apply or be done."
+    ),
+    "citation_free": (
+        "Ask about the rule without any Điều, Khoản, Điểm, document name, "
+        "document number, or date citation."
+    ),
+    "condition_exception": (
+        "Ask specifically about a condition, limitation, exception, or "
+        "case-dependent application in the passage."
+    ),
+}
 _VIETNAMESE_MARKERS = set("ăâđêôơưĂÂĐÊÔƠƯ")
+_GENERATION_LABEL_RE = re.compile(
+    r"^\s*(?:"
+    r"câu hỏi|question|query|"
+    r"vietnamese\s+legal\s+question|"
+    r"citizen\s+paraphrase|"
+    r"scenario(?:\s+question)?|"
+    r"citation[- ]free\s+query|"
+    r"condition[- /]exception(?:\s+question)?"
+    r")\s*:?\s*",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+_REASONING_MARKER_RE = re.compile(
+    r"\b(?:suy nghĩ|phân tích|lập luận|analysis|reasoning|chain\s+of\s+thought)\b",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+_LIST_FRAGMENT_RE = re.compile(
+    r"^\s*(?:[-*•]\s+|\d+(?:\.\d+)*[\.)]\s+|[A-Za-zĐđ][\.)]\s+)",
+    flags=re.UNICODE,
+)
+_CITATION_FREE_REFERENCE_RE = re.compile(
+    r"(?:"
+    r"\b(?:điều|khoản|điểm)\s+\d+"
+    r"|\b(?:nghị định|thông tư|quyết định)\b"
+    r"|\b(?:bộ\s+luật|(?<!pháp )luật)\b"
+    r"|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"
+    r")",
+    flags=re.IGNORECASE | re.UNICODE,
+)
 _TRIVIAL_WORDS = {
     "ai",
     "cái",
@@ -240,7 +304,30 @@ class SyntheticBuildReport:
 def synthetic_prompt_sha256() -> str:
     """Return the hash of the frozen generator prompt template."""
 
-    return sha256(GENERATOR_PROMPT.encode("utf-8")).hexdigest()
+    prompt_material = f"{GENERATOR_SYSTEM_PROMPT}\n{GENERATOR_PROMPT}"
+    return sha256(prompt_material.encode("utf-8")).hexdigest()
+
+
+def build_generator_prompt(
+    passage: CanonicalPassage,
+    query_type: QueryType,
+) -> str:
+    """Build a metadata-aware prompt without exposing gold answers."""
+
+    metadata = "\n".join(
+        (
+            f"Document: {passage.document_name or 'unknown'}",
+            f"Article: {passage.article_number or 'unknown'}",
+            f"Clause: {passage.clause_number or 'unknown'}",
+            f"Point: {passage.point_label or 'unknown'}",
+        )
+    )
+    return GENERATOR_PROMPT.format(
+        query_type=query_type,
+        query_type_instruction=_QUERY_TYPE_INSTRUCTIONS[query_type],
+        metadata=metadata,
+        passage=passage.reader_text[:12_000],
+    )
 
 
 def assign_document_splits(
@@ -285,16 +372,16 @@ def _sanitize_generated_query(text: str) -> str:
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
-    lines = [
-        re.sub(
-            r"^(?:câu hỏi|question)\s*:\s*",
-            "",
-            line.strip().strip("`*_-'\""),
-            flags=re.IGNORECASE,
-        ).strip()
-        for line in without_thinking.splitlines()
-        if line.strip()
-    ]
+    lines = []
+    for raw_line in without_thinking.splitlines():
+        line = raw_line.strip().strip("`*_\"'")
+        for _ in range(3):
+            cleaned = _GENERATION_LABEL_RE.sub("", line).strip()
+            if cleaned == line:
+                break
+            line = cleaned
+        if line:
+            lines.append(line)
     if not lines:
         return ""
     question_line = next((line for line in lines if "?" in line), lines[0])
@@ -411,11 +498,15 @@ class TransformersQueryGenerator:
         )
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        if not callable(getattr(self.tokenizer, "apply_chat_template", None)):
+            raise SyntheticQueryError(
+                "TASK 09 Transformers backend requires a tokenizer chat template."
+            )
         self.language_model: Any = AutoModelForCausalLM.from_pretrained(
             model,
             revision=revision,
             trust_remote_code=True,
-            torch_dtype=torch_dtype,
+            dtype=torch_dtype,
             device_map="auto",
             local_files_only=local_files_only,
         )
@@ -425,9 +516,14 @@ class TransformersQueryGenerator:
     def generate(
         self, passage: CanonicalPassage, query_type: QueryType
     ) -> GeneratedQuery:
-        prompt = GENERATOR_PROMPT.format(
-            query_type=query_type,
-            passage=passage.reader_text[:12_000],
+        prompt_content = build_generator_prompt(passage, query_type)
+        prompt = self.tokenizer.apply_chat_template(
+            [
+                {"role": "system", "content": GENERATOR_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt_content},
+            ],
+            tokenize=False,
+            add_generation_prompt=True,
         )
         inputs = self.tokenizer(
             prompt,
@@ -495,31 +591,59 @@ def _filter_query(
     query: str,
     passage: CanonicalPassage,
     *,
+    query_type: QueryType,
     deduplicator: _QueryDeduplicator,
     min_source_token_overlap: float,
 ) -> _FilterDecision:
     flags: list[str] = []
+    query = _sanitize_generated_query(query)
     normalized_query = _normalize_text(query)
-    if len(_tokens(query)) < 6 or _TRIVIAL_WORDS.issuperset(_tokens(query)):
+    query_tokens = _tokens(query)
+    if not query or not normalized_query.endswith("?"):
+        return _FilterDecision(False, ("not_question",))
+    if _GENERATION_LABEL_RE.search(query) or _REASONING_MARKER_RE.search(query):
+        return _FilterDecision(False, ("generation_artifact",))
+    if _LIST_FRAGMENT_RE.match(query):
+        return _FilterDecision(False, ("list_fragment",))
+    if len(query_tokens) < 6:
         return _FilterDecision(False, ("trivial",))
+    if len(query_tokens) > 64:
+        return _FilterDecision(False, ("too_long",))
     if not any(char in _VIETNAMESE_MARKERS for char in query):
         return _FilterDecision(False, ("invalid_vietnamese",))
+    if _TRIVIAL_WORDS.issuperset(query_tokens):
+        return _FilterDecision(False, ("trivial",))
 
     source_text = passage.reader_text
     normalized_source = _normalize_text(source_text)
-    source_fragments = re.split(r"[.!?\n]+", normalized_source)
+    source_fragments = re.split(r"[.!?;\n]+", normalized_source)
     if normalized_query in normalized_source or any(
         SequenceMatcher(None, normalized_query, fragment).ratio() >= 0.92
         for fragment in source_fragments
         if fragment
     ):
         return _FilterDecision(False, ("copy_source",))
+    query_content_tokens = _content_tokens(query)
+    source_content_by_fragment = (
+        _content_tokens(fragment) for fragment in source_fragments if fragment
+    )
+    for fragment_tokens in source_content_by_fragment:
+        if len(fragment_tokens) >= 6 and (
+            len(query_content_tokens & fragment_tokens)
+            / max(len(query_content_tokens), 1)
+            >= 0.85
+        ):
+            return _FilterDecision(False, ("copy_source",))
 
     duplicate_reason = deduplicator.reason(query)
     if duplicate_reason:
         return _FilterDecision(False, (duplicate_reason,))
 
     citations = parse_citations(query)
+    if query_type == "citation_free" and (
+        citations or _CITATION_FREE_REFERENCE_RE.search(query)
+    ):
+        return _FilterDecision(False, ("forbidden_citation",))
     for citation in citations:
         if citation.document_number:
             return _FilterDecision(False, ("wrong_citation",))
@@ -535,11 +659,14 @@ def _filter_query(
                 or citation.clause.casefold() != passage.clause_number.casefold()
             ):
                 return _FilterDecision(False, ("wrong_citation",))
+    flags.append("question_form_checked")
+    flags.append("query_type_checked")
     flags.append("citation_checked")
 
-    query_tokens = _content_tokens(query)
     source_tokens = _content_tokens(source_text)
-    overlap = len(query_tokens & source_tokens) / max(len(query_tokens), 1)
+    overlap = len(query_content_tokens & source_tokens) / max(
+        len(query_content_tokens), 1
+    )
     if overlap < min_source_token_overlap:
         return _FilterDecision(False, ("unsupported_lexical_heuristic",))
     flags.append("heuristic_supportable")
@@ -643,6 +770,7 @@ def build_synthetic_records(
             decision = _filter_query(
                 candidate_query,
                 passage,
+                query_type=query_type,
                 deduplicator=deduplicator,
                 min_source_token_overlap=cfg.min_source_token_overlap,
             )
@@ -781,6 +909,7 @@ def load_synthetic_records(path: str | Path) -> tuple[SyntheticQueryRecord, ...]
 
 __all__ = [
     "DEFAULT_PROMPT_VERSION",
+    "GENERATOR_SYSTEM_PROMPT",
     "GENERATOR_PROMPT",
     "QUERY_TYPES",
     "SYNTHETIC_SCHEMA_VERSION",
@@ -796,6 +925,7 @@ __all__ = [
     "TemplateQueryGenerator",
     "TransformersQueryGenerator",
     "assign_document_splits",
+    "build_generator_prompt",
     "build_synthetic_records",
     "load_synthetic_records",
     "synthetic_prompt_sha256",
