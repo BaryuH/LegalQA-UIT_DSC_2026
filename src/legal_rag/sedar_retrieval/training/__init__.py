@@ -1,5 +1,17 @@
 """Training-data utilities for SEDAR Retrieval v3."""
 
+from .hard_negatives import (
+    TASK10_SCHEMA_VERSION,
+    CandidateHit,
+    HardNegative,
+    HardNegativeMiningConfig,
+    HardNegativeMiningReport,
+    HardNegativeRecord,
+    build_audit_sample,
+    load_candidate_hits,
+    mine_hard_negatives,
+    write_jsonl_models,
+)
 from .synthetic_queries import (
     DEFAULT_PROMPT_VERSION,
     GENERATOR_SYSTEM_PROMPT,
@@ -23,8 +35,14 @@ from .synthetic_queries import (
 )
 
 __all__ = [
+    "TASK10_SCHEMA_VERSION",
+    "CandidateHit",
     "DEFAULT_PROMPT_VERSION",
     "GENERATOR_SYSTEM_PROMPT",
+    "HardNegative",
+    "HardNegativeMiningConfig",
+    "HardNegativeMiningReport",
+    "HardNegativeRecord",
     "QUERY_TYPES",
     "SyntheticBuildReport",
     "SyntheticGenerationConfig",
@@ -35,11 +53,15 @@ __all__ = [
     "TransformersQueryGenerator",
     "assign_document_splits",
     "build_generator_prompt",
+    "build_audit_sample",
     "build_synthetic_records",
     "load_synthetic_records",
+    "load_candidate_hits",
+    "mine_hard_negatives",
     "synthetic_prompt_sha256",
     "validate_document_isolation",
     "write_generation_errors",
+    "write_jsonl_models",
     "write_synthetic_records",
     "write_synthetic_rejections",
 ]

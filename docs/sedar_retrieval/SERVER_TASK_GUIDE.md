@@ -381,6 +381,9 @@ A same-law wrong article · B same-article wrong clause · C similar term wrong 
 scripts/sedar_retrieval/mine_hard_negatives.py
 ```
 
+Implementation and server commands are documented in
+`docs/sedar_retrieval/TASK10_HARD_NEGATIVES.md`.
+
 Mỗi query: 2–5 explicit negatives; exclude positive; flag potential FN (citation overlap, high lexical+semantic agreement).
 
 ### Exit Gate
