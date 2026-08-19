@@ -437,12 +437,15 @@ Nếu chỉ thắng trên synthetic val → `FAIL/FIX`.
 Code feature đã có: `src/legal_rag/sedar_retrieval/ranking/features.py`  
 Schema: `configs/retrieval/ltr_feature_schema_v1.json`
 
-### Việc còn lại trên server
+### Implementation
 Implement:
 
 ```text
 scripts/sedar_retrieval/build_ltr_features.py
 ```
+
+Detailed input, smoke command, and exit-gate checks are documented in
+`docs/sedar_retrieval/TASK12_LTR_FEATURES.md`.
 
 Input: RRF candidate JSONL + passage metadata + query citations  
 Output: feature rows group theo `query_id`, labels 0/1 hoặc graded 0–3  
