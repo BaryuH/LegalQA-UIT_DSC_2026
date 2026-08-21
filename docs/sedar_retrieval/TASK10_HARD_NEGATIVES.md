@@ -88,12 +88,26 @@ Structural categories take precedence over E/F.  E/F records retain
 source is never lost.  The miner:
 
 - excludes the positive passage ID;
+- rejects hierarchical containment pairs where one passage ID is a strict
+  ancestor of the other (for example clause positive vs parent article, or
+  article positive vs descendant clause);
 - deduplicates candidate IDs;
 - selects two to five negatives per accepted query;
 - records rank, score, category, source, source hash, and hardness score;
-- flags citation overlap, same-article overlap, high lexical agreement,
-  high dense agreement, and reference overlap as potential false negatives;
+- records diagnostic flags (`same_article`, `citation_overlap`,
+  `high_lexical_agreement`, `same_clause`, `exact_cited_clause`,
+  `high_dense_agreement`, `reference_overlap`);
+- marks `potential_false_negative` only on strong signals
+  (`same_clause`, `exact_cited_clause`, `high_dense_agreement`,
+  `reference_overlap`) — weak same-article or lexical overlap alone is not
+  enough;
 - writes a deterministic pair-level audit sample.
+
+Assisted audit of the official 300-pair sample found that most confirmed
+false negatives were parent-article passages for clause-level positives, while
+machine flags based only on `same_article` / `high_lexical_agreement`
+over-estimated the rate (~83% flagged vs ~12% confirmed).  The containment
+reject and strong-signal policy above encode that finding.
 
 The hardness score is a machine diagnostic combining query/candidate lexical
 overlap, hierarchy proximity, and candidate rank.  It is compared with a

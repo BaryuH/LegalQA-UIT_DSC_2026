@@ -125,6 +125,7 @@ class HardNegativeMiningReport:
     negative_count: int
     unresolved_candidate_count: int
     positive_in_negative_count: int
+    skipped_containment_count: int
     potential_false_negative_count: int
     rejection_counts: dict[str, int]
     category_counts: dict[str, int]
@@ -147,6 +148,7 @@ class HardNegativeMiningReport:
             "negative_count": self.negative_count,
             "unresolved_candidate_count": self.unresolved_candidate_count,
             "positive_in_negative_count": self.positive_in_negative_count,
+            "skipped_containment_count": self.skipped_containment_count,
             "potential_false_negative_count": self.potential_false_negative_count,
             "rejection_counts": dict(sorted(self.rejection_counts.items())),
             "category_counts": dict(sorted(self.category_counts.items())),
@@ -206,6 +208,35 @@ def _citation_overlap(
     return False
 
 
+def _is_hierarchical_containment(
+    positive: CanonicalPassage,
+    candidate: CanonicalPassage,
+) -> bool:
+    """Return True when one passage ID is a strict ancestor of the other.
+
+    Clause/point positives frequently retrieve their parent article passage.
+    The parent text usually contains the positive clause, so it is a false
+    negative rather than a hard negative.  The reverse case (article positive
+    vs descendant clause) is rejected for the same reason.
+    """
+
+    positive_id = positive.passage_id
+    candidate_id = candidate.passage_id
+    return positive_id.startswith(f"{candidate_id}::") or candidate_id.startswith(
+        f"{positive_id}::"
+    )
+
+
+def _same_clause(positive: CanonicalPassage, candidate: CanonicalPassage) -> bool:
+    if not _same_article(positive, candidate):
+        return False
+    if positive.clause_id and candidate.clause_id:
+        return positive.clause_id == candidate.clause_id
+    if positive.clause_number and candidate.clause_number:
+        return positive.clause_number == candidate.clause_number
+    return False
+
+
 def _classify_category(
     positive: CanonicalPassage,
     candidate: CanonicalPassage,
@@ -250,6 +281,20 @@ def _hardness_score(
     return min(1.0, 0.5 * lexical + 0.35 * hierarchy + 0.15 * rank_component)
 
 
+def _exact_cited_clause(query: str, candidate: CanonicalPassage) -> bool:
+    for citation in parse_citations(query):
+        if (
+            citation.article
+            and citation.clause
+            and candidate.article_number
+            and candidate.clause_number
+            and citation.article.casefold() == candidate.article_number.casefold()
+            and citation.clause.casefold() == candidate.clause_number.casefold()
+        ):
+            return True
+    return False
+
+
 def _false_negative_flags(
     query: str,
     positive: CanonicalPassage,
@@ -261,11 +306,17 @@ def _false_negative_flags(
     lexical_false_negative_threshold: float,
     dense_threshold: float,
 ) -> tuple[str, ...]:
+    """Collect diagnostic flags; weak signals alone do not imply a false negative."""
+
     flags: list[str] = []
     if _same_article(positive, candidate):
         flags.append("same_article")
+    if _same_clause(positive, candidate):
+        flags.append("same_clause")
     if _citation_overlap(query, candidate):
         flags.append("citation_overlap")
+    if _exact_cited_clause(query, candidate):
+        flags.append("exact_cited_clause")
     if lexical_overlap >= lexical_false_negative_threshold:
         flags.append("high_lexical_agreement")
     if source == "dense" and retrieval_score >= dense_threshold:
@@ -276,6 +327,26 @@ def _false_negative_flags(
     ):
         flags.append("reference_overlap")
     return tuple(flags)
+
+
+def _is_potential_false_negative(flags: Sequence[str]) -> bool:
+    """Require strong evidence; same-article or lexical overlap alone is not enough.
+
+    Assisted audit of the official 300-pair sample showed that machine flags
+    based only on ``same_article`` or ``high_lexical_agreement`` over-estimated
+    the false-negative rate (~83% flagged vs ~12% confirmed).  Category B
+    different-clause pairs are valid hard negatives.
+    """
+
+    return bool(
+        set(flags)
+        & {
+            "reference_overlap",
+            "high_dense_agreement",
+            "same_clause",
+            "exact_cited_clause",
+        }
+    )
 
 
 def _stable_hard_negative_id(
@@ -487,6 +558,7 @@ def mine_hard_negatives(
     source_counts: Counter[str] = Counter()
     unresolved_count = 0
     positive_overlap_count = 0
+    skipped_containment_count = 0
     potential_fn_count = 0
     hard_scores: list[float] = []
     random_scores: list[float] = []
@@ -512,6 +584,9 @@ def mine_hard_negatives(
             candidate = passage_map.get(hit.passage_id)
             if candidate is None:
                 unresolved_count += 1
+                continue
+            if _is_hierarchical_containment(positive, candidate):
+                skipped_containment_count += 1
                 continue
             seen_ids.add(hit.passage_id)
             lexical_overlap = _lexical_overlap(record.query, candidate.reader_text)
@@ -552,7 +627,7 @@ def mine_hard_negatives(
                     rank=hit.rank,
                     retrieval_score=hit.score,
                     hardness_score=hardness,
-                    potential_false_negative=bool(flags),
+                    potential_false_negative=_is_potential_false_negative(flags),
                     false_negative_flags=flags,
                 )
             )
@@ -617,6 +692,7 @@ def mine_hard_negatives(
         negative_count=negative_count,
         unresolved_candidate_count=unresolved_count,
         positive_in_negative_count=positive_overlap_count,
+        skipped_containment_count=skipped_containment_count,
         potential_false_negative_count=potential_fn_count,
         rejection_counts=dict(rejection_counts),
         category_counts=dict(category_counts),

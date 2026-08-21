@@ -28,26 +28,32 @@ def _passage(
     passage_id: str,
     document_id: str,
     article_number: str,
-    clause_number: str,
+    clause_number: str | None,
     text: str,
     *,
     status: str = "effective",
+    retrieval_level: str | None = None,
 ) -> CanonicalPassage:
     source = SourceProvenance(
         source_path=f"data/{document_id}.txt",
         document_id=document_id,
         content_hash=f"hash-{passage_id}",
     )
+    level = retrieval_level or ("clause" if clause_number else "article")
     return CanonicalPassage(
         passage_id=passage_id,
         document_id=document_id,
         article_id=f"{document_id}:article:{article_number}",
-        clause_id=f"{document_id}:article:{article_number}:clause:{clause_number}",
-        retrieval_level="clause",
+        clause_id=(
+            f"{document_id}:article:{article_number}:clause:{clause_number}"
+            if clause_number
+            else None
+        ),
+        retrieval_level=level,  # type: ignore[arg-type]
         document_name="Bộ luật Lao động 2019",
         article_number=article_number,
         clause_number=clause_number,
-        status=status,
+        status=status,  # type: ignore[arg-type]
         raw_text=text,
         reader_text=text,
         retrieval_text=text,
@@ -125,7 +131,162 @@ def test_mining_excludes_positive_and_classifies_structural_hard_negatives() -> 
     assert {negative.negative_category for negative in negatives} >= {"A", "B"}
     assert report.positive_in_negative_count == 0
     assert report.harder_than_random is True
-    assert any(negative.potential_false_negative for negative in negatives)
+    # Same-article different-clause is a valid hard negative; soft flags alone
+    # must not mark the pair as a potential false negative.
+    same_article = next(
+        negative for negative in negatives if negative.negative_category == "B"
+    )
+    assert "same_article" in same_article.false_negative_flags
+    assert same_article.potential_false_negative is False
+
+
+def test_parent_article_candidates_are_rejected_as_containment() -> None:
+    positive = _passage(
+        "law-1::art::76::cl::1",
+        "law-1",
+        "76",
+        "1",
+        "Người lao động được nghỉ hằng năm theo quy định.",
+    )
+    parent_article = _passage(
+        "law-1::art::76",
+        "law-1",
+        "76",
+        None,
+        "Điều 76. 1. Người lao động được nghỉ hằng năm. 2. Phải báo trước.",
+        retrieval_level="article",
+    )
+    other_clause = _passage(
+        "law-1::art::76::cl::2",
+        "law-1",
+        "76",
+        "2",
+        "Người lao động phải báo trước khi nghỉ hằng năm.",
+    )
+    other_article = _passage(
+        "law-1::art::77::cl::1",
+        "law-1",
+        "77",
+        "1",
+        "Người lao động được nghỉ việc trong trường hợp đặc biệt.",
+    )
+    records, report = mine_hard_negatives(
+        (_record(positive),),
+        (positive, parent_article, other_clause, other_article),
+        {
+            "syn-1": (
+                CandidateHit("law-1::art::76", 1, 12.0, "bm25"),
+                CandidateHit("law-1::art::76::cl::2", 2, 10.0, "bm25"),
+                CandidateHit("law-1::art::77::cl::1", 3, 8.0, "bm25"),
+            )
+        },
+        config=HardNegativeMiningConfig(min_negatives=2, max_negatives=3),
+    )
+
+    assert len(records) == 1
+    negative_ids = {negative.negative_passage_id for negative in records[0].negatives}
+    assert "law-1::art::76" not in negative_ids
+    assert "law-1::art::76::cl::2" in negative_ids
+    assert report.skipped_containment_count == 1
+    assert report.estimated_false_negative_rate == 0.0
+
+
+def test_weak_lexical_overlap_alone_is_not_potential_false_negative() -> None:
+    positive = _passage(
+        "law-1::art::76::cl::1",
+        "law-1",
+        "76",
+        "1",
+        "Người lao động được nghỉ hằng năm theo quy định.",
+    )
+    other_law = _passage(
+        "law-2::art::9::cl::1",
+        "law-2",
+        "9",
+        "1",
+        "Người lao động có thể nghỉ hằng năm theo điều kiện riêng.",
+    )
+    other_article = _passage(
+        "law-1::art::77::cl::1",
+        "law-1",
+        "77",
+        "1",
+        "Người lao động được nghỉ việc trong trường hợp đặc biệt.",
+    )
+    records, report = mine_hard_negatives(
+        (_record(positive),),
+        (positive, other_law, other_article),
+        {
+            "syn-1": (
+                CandidateHit("law-2::art::9::cl::1", 1, 9.0, "bm25"),
+                CandidateHit("law-1::art::77::cl::1", 2, 8.0, "bm25"),
+            )
+        },
+        config=HardNegativeMiningConfig(
+            min_negatives=2,
+            max_negatives=2,
+            lexical_false_negative_threshold=0.20,
+        ),
+    )
+
+    assert len(records) == 1
+    assert all(
+        not negative.potential_false_negative for negative in records[0].negatives
+    )
+    assert report.potential_false_negative_count == 0
+    assert report.estimated_false_negative_rate == 0.0
+
+
+def test_exact_cited_clause_marks_potential_false_negative() -> None:
+    positive = _passage(
+        "law-1::art::76::cl::1",
+        "law-1",
+        "76",
+        "1",
+        "Người lao động được nghỉ hằng năm theo quy định.",
+    )
+    # Same clause metadata but a non-descendant ID so containment does not apply.
+    sibling = _passage(
+        "law-1::art::76::cl::1__alt",
+        "law-1",
+        "76",
+        "1",
+        "Người lao động được nghỉ hằng năm theo quy định chi tiết.",
+    )
+    other_article = _passage(
+        "law-1::art::77::cl::1",
+        "law-1",
+        "77",
+        "1",
+        "Người lao động được nghỉ việc trong trường hợp đặc biệt.",
+    )
+    record = _record(positive)
+    record = record.model_copy(
+        update={
+            "query": "Theo Khoản 1 Điều 76, người lao động được nghỉ hằng năm thế nào?"
+        }
+    )
+    records, report = mine_hard_negatives(
+        (record,),
+        (positive, sibling, other_article),
+        {
+            "syn-1": (
+                CandidateHit("law-1::art::76::cl::1__alt", 1, 11.0, "bm25"),
+                CandidateHit("law-1::art::77::cl::1", 2, 8.0, "bm25"),
+            )
+        },
+        config=HardNegativeMiningConfig(min_negatives=2, max_negatives=2),
+    )
+
+    assert len(records) == 1
+    flagged = next(
+        negative
+        for negative in records[0].negatives
+        if negative.negative_passage_id == "law-1::art::76::cl::1__alt"
+    )
+    assert flagged.potential_false_negative is True
+    assert "same_clause" in flagged.false_negative_flags
+    assert report.potential_false_negative_count >= 1
 
 
 def test_unresolved_candidates_cannot_satisfy_minimum() -> None:
