@@ -53,15 +53,18 @@ class RetrieverLoRAConfig:
     base_model: str = DEFAULT_DENSE_MODEL
     model_revision: str = "UNPINNED"
     query_instruction: str = DEFAULT_QUERY_INSTRUCTION
-    lora_rank: int = 16
-    lora_alpha: int = 32
+    lora_rank: int = 8
+    lora_alpha: int = 16
     lora_dropout: float = 0.05
     lora_target_modules: tuple[str, ...] = ("q_proj", "k_proj", "v_proj", "o_proj")
     epochs: int = 1
-    batch_size: int = 4
-    grad_accum: int = 4
+    batch_size: int = 1
+    encode_batch_size: int = 1
+    grad_accum: int = 16
     learning_rate: float = 2e-5
-    max_seq_length: int = 8192
+    max_seq_length: int = 3072
+    max_hard_negatives: int = 2
+    load_in_4bit: bool = False
     seed: int = 42
     validation_fraction: float = 0.1
     test_fraction: float = 0.1
@@ -77,8 +80,12 @@ class RetrieverLoRAConfig:
             raise ValueError("lora_dropout must be in [0, 1)")
         if self.epochs <= 0 or self.batch_size <= 0 or self.grad_accum <= 0:
             raise ValueError("epochs, batch_size, and grad_accum must be positive")
+        if self.encode_batch_size <= 0:
+            raise ValueError("encode_batch_size must be positive")
         if self.max_seq_length <= 0:
             raise ValueError("max_seq_length must be positive")
+        if self.max_hard_negatives < 0:
+            raise ValueError("max_hard_negatives must be non-negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,6 +329,34 @@ def _select_torch_dtype(torch: Any, dtype: str, device: str) -> Any | None:
     return None
 
 
+def _enable_gradient_checkpointing(model: Any) -> None:
+    """Reduce activation memory during LoRA backward passes."""
+
+    candidates: list[Any] = []
+    if hasattr(model, "gradient_checkpointing_enable"):
+        candidates.append(model)
+    first_module = model[0] if len(model) else None
+    if first_module is not None and hasattr(first_module, "auto_model"):
+        candidates.append(first_module.auto_model)
+        base = getattr(first_module.auto_model, "base_model", None)
+        if base is not None and hasattr(base, "model"):
+            candidates.append(base.model)
+    for candidate in candidates:
+        if hasattr(candidate, "gradient_checkpointing_enable"):
+            candidate.gradient_checkpointing_enable()
+            return
+
+
+def _release_cuda_cache() -> None:
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ModuleNotFoundError:
+        return
+
+
 def _apply_lora(
     model: Any,
     *,
@@ -357,12 +392,50 @@ def _model_device(model: Any, fallback: str) -> str:
         return fallback
 
 
+def _build_model_kwargs(
+    config: RetrieverLoRAConfig,
+    *,
+    torch: Any,
+) -> dict[str, Any]:
+    model_kwargs: dict[str, Any] = {
+        "device": config.device,
+        "trust_remote_code": True,
+        "local_files_only": config.local_files_only,
+    }
+    if config.model_revision != "UNPINNED":
+        model_kwargs["revision"] = config.model_revision
+    inner_kwargs: dict[str, Any] = {}
+    dtype = _select_torch_dtype(torch, config.dtype, config.device)
+    if config.load_in_4bit:
+        try:
+            from transformers import BitsAndBytesConfig
+        except ModuleNotFoundError as exc:
+            raise RetrieverLoRATrainingError(
+                "4-bit loading requires transformers and bitsandbytes"
+            ) from exc
+        compute_dtype = dtype or torch.bfloat16
+        inner_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=compute_dtype,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+        if config.device.startswith("cuda"):
+            inner_kwargs["device_map"] = {"": config.device}
+    elif dtype is not None:
+        inner_kwargs["torch_dtype"] = dtype
+    if inner_kwargs:
+        model_kwargs["model_kwargs"] = inner_kwargs
+    return model_kwargs
+
+
 def _encode_texts(
     model: Any,
     texts: Sequence[str],
     *,
     batch_size: int,
     device: str,
+    require_grad: bool = True,
 ) -> Any:
     """Encode with gradients via SentenceTransformer.forward (not encode())."""
 
@@ -371,21 +444,25 @@ def _encode_texts(
         raise RetrieverLoRATrainingError("Cannot encode an empty text batch")
     target_device = _model_device(model, device)
     chunks: list[Any] = []
-    for start in range(0, len(texts), batch_size):
-        batch = list(texts[start : start + batch_size])
-        features = model.tokenize(batch)
-        features = {
-            key: value.to(target_device) if torch.is_tensor(value) else value
-            for key, value in features.items()
-        }
-        output = model(features)
-        if not isinstance(output, dict) or "sentence_embedding" not in output:
-            raise RetrieverLoRATrainingError(
-                "SentenceTransformer forward did not return sentence_embedding"
-            )
-        chunks.append(output["sentence_embedding"])
+    grad_context = (
+        torch.enable_grad() if require_grad else torch.no_grad()
+    )
+    with grad_context:
+        for start in range(0, len(texts), batch_size):
+            batch = list(texts[start : start + batch_size])
+            features = model.tokenize(batch)
+            features = {
+                key: value.to(target_device) if torch.is_tensor(value) else value
+                for key, value in features.items()
+            }
+            output = model(features)
+            if not isinstance(output, dict) or "sentence_embedding" not in output:
+                raise RetrieverLoRATrainingError(
+                    "SentenceTransformer forward did not return sentence_embedding"
+                )
+            chunks.append(output["sentence_embedding"])
     encoded = torch.cat(chunks, dim=0)
-    if not encoded.requires_grad:
+    if require_grad and not encoded.requires_grad:
         raise RetrieverLoRATrainingError(
             "Training embeddings are detached; use forward(), not encode()"
         )
@@ -474,6 +551,8 @@ def train_retriever_lora(
         "query_instruction": config.query_instruction,
         "corpus_hash": dataset.corpus_hash,
         "lora_config_hash": _lora_config_hash(config),
+        "load_in_4bit": config.load_in_4bit,
+        "max_hard_negatives": config.max_hard_negatives,
         "train_count": len(dataset.train),
         "validation_count": len(dataset.validation),
         "document_splits": dict(sorted(dataset.document_splits.items())),
@@ -510,16 +589,7 @@ def train_retriever_lora(
     if config.device.startswith("cuda") and torch.cuda.is_available():
         torch.cuda.manual_seed_all(config.seed)
 
-    model_kwargs: dict[str, Any] = {
-        "device": config.device,
-        "trust_remote_code": True,
-        "local_files_only": config.local_files_only,
-    }
-    if config.model_revision != "UNPINNED":
-        model_kwargs["revision"] = config.model_revision
-    dtype = _select_torch_dtype(torch, config.dtype, config.device)
-    if dtype is not None:
-        model_kwargs["model_kwargs"] = {"torch_dtype": dtype}
+    model_kwargs: dict[str, Any] = _build_model_kwargs(config, torch=torch)
 
     model = sentence_transformer(config.base_model, **model_kwargs)
     model.max_seq_length = config.max_seq_length
@@ -554,6 +624,10 @@ def train_retriever_lora(
     if trainable_params == 0:
         raise RetrieverLoRATrainingError("LoRA produced zero trainable parameters")
     model.train()
+    _enable_gradient_checkpointing(model)
+    encode_batch_size = config.encode_batch_size
+    autocast_device = config.device if config.device.startswith("cuda") else None
+    autocast_dtype = _select_torch_dtype(torch, config.dtype, config.device)
     final_loss: float | None = None
     global_step = 0
     optimizer.zero_grad(set_to_none=True)
@@ -563,84 +637,102 @@ def train_retriever_lora(
             batch = dataset.train[batch_start : batch_start + config.batch_size]
             query_texts = [example.instruct_query for example in batch]
             positive_texts = [example.positive_passage for example in batch]
-            hard_texts = [
-                text
-                for example in batch
-                for text in example.hard_negative_passages
-            ]
-            query_vectors = _encode_texts(
-                model,
-                query_texts,
-                batch_size=len(query_texts),
-                device=config.device,
-            )
-            positive_vectors = _encode_texts(
-                model,
-                positive_texts,
-                batch_size=len(positive_texts),
-                device=config.device,
-            )
-            hard_vectors = None
-            hard_mask = None
-            if hard_texts:
-                encoded_hard = _encode_texts(
+            hard_texts: list[str] = []
+            hard_counts: list[int] = []
+            for example in batch:
+                negatives = example.hard_negative_passages
+                if config.max_hard_negatives > 0:
+                    negatives = negatives[: config.max_hard_negatives]
+                hard_counts.append(len(negatives))
+                hard_texts.extend(negatives)
+            with torch.autocast(
+                device_type="cuda",
+                dtype=autocast_dtype,
+                enabled=autocast_device is not None and autocast_dtype is not None,
+            ):
+                query_vectors = _encode_texts(
                     model,
-                    hard_texts,
-                    batch_size=min(len(hard_texts), config.batch_size),
+                    query_texts,
+                    batch_size=min(encode_batch_size, len(query_texts)),
                     device=config.device,
+                    require_grad=True,
                 )
-                cursor = 0
-                grouped: list[Any] = []
-                masks: list[Any] = []
-                for example in batch:
-                    count = len(example.hard_negative_passages)
-                    grouped.append(encoded_hard[cursor : cursor + count])
-                    masks.append(
-                        torch.ones(count, dtype=torch.bool, device=encoded_hard.device)
+                positive_vectors = _encode_texts(
+                    model,
+                    positive_texts,
+                    batch_size=min(encode_batch_size, len(positive_texts)),
+                    device=config.device,
+                    require_grad=True,
+                )
+                hard_vectors = None
+                hard_mask = None
+                if hard_texts:
+                    encoded_hard = _encode_texts(
+                        model,
+                        hard_texts,
+                        batch_size=min(encode_batch_size, len(hard_texts)),
+                        device=config.device,
+                        require_grad=False,
                     )
-                    cursor += count
-                max_negs = max(group.size(0) for group in grouped)
-                padded: list[Any] = []
-                padded_masks: list[Any] = []
-                for group, mask in zip(grouped, masks, strict=True):
-                    if group.size(0) == max_negs:
-                        padded.append(group)
-                        padded_masks.append(mask)
-                        continue
-                    pad_rows = max_negs - group.size(0)
-                    pad = torch.zeros(
-                        (pad_rows, group.size(1)),
-                        dtype=group.dtype,
-                        device=group.device,
-                    )
-                    padded.append(torch.cat([group, pad], dim=0))
-                    padded_masks.append(
-                        torch.cat(
-                            [
-                                mask,
-                                torch.zeros(
-                                    pad_rows,
-                                    dtype=torch.bool,
-                                    device=group.device,
-                                ),
-                            ]
+                    cursor = 0
+                    grouped: list[Any] = []
+                    masks: list[Any] = []
+                    for count in hard_counts:
+                        if count == 0:
+                            continue
+                        grouped.append(encoded_hard[cursor : cursor + count])
+                        masks.append(
+                            torch.ones(
+                                count,
+                                dtype=torch.bool,
+                                device=encoded_hard.device,
+                            )
                         )
-                    )
-                hard_vectors = torch.stack(padded, dim=0)
-                hard_mask = torch.stack(padded_masks, dim=0)
+                        cursor += count
+                    max_negs = max(group.size(0) for group in grouped)
+                    padded: list[Any] = []
+                    padded_masks: list[Any] = []
+                    for group, mask in zip(grouped, masks, strict=True):
+                        if group.size(0) == max_negs:
+                            padded.append(group)
+                            padded_masks.append(mask)
+                            continue
+                        pad_rows = max_negs - group.size(0)
+                        pad = torch.zeros(
+                            (pad_rows, group.size(1)),
+                            dtype=group.dtype,
+                            device=group.device,
+                        )
+                        padded.append(torch.cat([group, pad], dim=0))
+                        padded_masks.append(
+                            torch.cat(
+                                [
+                                    mask,
+                                    torch.zeros(
+                                        pad_rows,
+                                        dtype=torch.bool,
+                                        device=group.device,
+                                    ),
+                                ]
+                            )
+                        )
+                    hard_vectors = torch.stack(padded, dim=0)
+                    hard_mask = torch.stack(padded_masks, dim=0)
 
-            loss = _contrastive_step_loss(
-                query_vectors,
-                positive_vectors,
-                hard_vectors,
-                hard_negative_mask=hard_mask,
-            ) / config.grad_accum
+                loss = _contrastive_step_loss(
+                    query_vectors,
+                    positive_vectors,
+                    hard_vectors,
+                    hard_negative_mask=hard_mask,
+                ) / config.grad_accum
             loss.backward()
             if (global_step + 1) % config.grad_accum == 0:
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
+                _release_cuda_cache()
             final_loss = float(loss.detach().cpu().item() * config.grad_accum)
             global_step += 1
+            del query_vectors, positive_vectors, hard_vectors, hard_mask, loss
             _append_metrics(
                 metrics_path,
                 {

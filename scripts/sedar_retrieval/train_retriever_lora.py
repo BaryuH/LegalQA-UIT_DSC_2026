@@ -40,10 +40,19 @@ def main() -> int:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=("bf16", "fp16", "fp32"), default="bf16")
     parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--grad-accum", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--encode-batch-size", type=int, default=1)
+    parser.add_argument("--grad-accum", type=int, default=16)
     parser.add_argument("--lr", type=float, default=2e-5)
-    parser.add_argument("--max-seq-length", type=int, default=8192)
+    parser.add_argument("--max-seq-length", type=int, default=3072)
+    parser.add_argument("--max-hard-negatives", type=int, default=2)
+    parser.add_argument("--lora-rank", type=int, default=8)
+    parser.add_argument("--lora-alpha", type=int, default=16)
+    parser.add_argument(
+        "--load-in-4bit",
+        action="store_true",
+        help="Load the base encoder in 4-bit (QLoRA) to fit 24GB GPUs.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--resume", type=Path, default=None)
@@ -63,11 +72,16 @@ def main() -> int:
     config = RetrieverLoRAConfig(
         base_model=args.base_model or DEFAULT_DENSE_MODEL,
         model_revision=args.model_revision,
+        lora_rank=args.lora_rank,
+        lora_alpha=args.lora_alpha,
         epochs=args.epochs,
         batch_size=args.batch_size,
+        encode_batch_size=args.encode_batch_size,
         grad_accum=args.grad_accum,
         learning_rate=args.lr,
         max_seq_length=args.max_seq_length,
+        max_hard_negatives=args.max_hard_negatives,
+        load_in_4bit=args.load_in_4bit,
         seed=args.seed,
         device=args.device,
         dtype=args.dtype,

@@ -13,8 +13,8 @@ dense:
     Prioritize applicable rules, conditions, exceptions, definitions and
     referenced provisions.
   lora:
-    rank: 16
-    alpha: 32
+    rank: 8
+    alpha: 16
     dropout: 0.05
     target_modules:
       - q_proj
@@ -23,10 +23,13 @@ dense:
       - o_proj
   optimization:
     epochs: 1
-    batch_size: 4
-    grad_accum: 4
+    batch_size: 1
+    encode_batch_size: 1
+    grad_accum: 16
     learning_rate: 2.0e-5
-    max_seq_length: 8192
+    max_seq_length: 3072
+    max_hard_negatives: 2
+    load_in_4bit: true
     seed: 42
   data:
     source_split: train
