@@ -330,17 +330,31 @@ def _apply_lora(
     task_type: Any,
     get_peft_model: Any,
 ) -> Any:
-    transformer = model[0].auto_model
     lora_config = lora_config_cls(
         r=config.lora_rank,
         lora_alpha=config.lora_alpha,
         lora_dropout=config.lora_dropout,
         target_modules=list(config.lora_target_modules),
         task_type=task_type.FEATURE_EXTRACTION,
+        inference_mode=False,
         bias="none",
     )
+    if hasattr(model, "add_adapter"):
+        model.add_adapter(lora_config)
+        return model
+    transformer = model[0].auto_model
     model[0].auto_model = get_peft_model(transformer, lora_config)
     return model
+
+
+def _model_device(model: Any, fallback: str) -> str:
+    device_attr = getattr(model, "device", None)
+    if device_attr is not None:
+        return str(device_attr)
+    try:
+        return str(next(model.parameters()).device)
+    except StopIteration:
+        return fallback
 
 
 def _encode_texts(
@@ -350,15 +364,31 @@ def _encode_texts(
     batch_size: int,
     device: str,
 ) -> Any:
+    """Encode with gradients via SentenceTransformer.forward (not encode())."""
+
     torch, _, _, _ = _load_training_runtime()
-    encoded = model.encode(
-        list(texts),
-        batch_size=batch_size,
-        convert_to_tensor=True,
-        normalize_embeddings=False,
-        show_progress_bar=False,
-        device=device,
-    )
+    if not texts:
+        raise RetrieverLoRATrainingError("Cannot encode an empty text batch")
+    target_device = _model_device(model, device)
+    chunks: list[Any] = []
+    for start in range(0, len(texts), batch_size):
+        batch = list(texts[start : start + batch_size])
+        features = model.tokenize(batch)
+        features = {
+            key: value.to(target_device) if torch.is_tensor(value) else value
+            for key, value in features.items()
+        }
+        output = model(features)
+        if not isinstance(output, dict) or "sentence_embedding" not in output:
+            raise RetrieverLoRATrainingError(
+                "SentenceTransformer forward did not return sentence_embedding"
+            )
+        chunks.append(output["sentence_embedding"])
+    encoded = torch.cat(chunks, dim=0)
+    if not encoded.requires_grad:
+        raise RetrieverLoRATrainingError(
+            "Training embeddings are detached; use forward(), not encode()"
+        )
     if not torch.isfinite(encoded).all():
         raise RetrieverLoRATrainingError("Encoder produced non-finite embeddings")
     return encoded
@@ -368,6 +398,8 @@ def _contrastive_step_loss(
     query_vectors: Any,
     positive_vectors: Any,
     hard_negative_vectors: Any | None,
+    *,
+    hard_negative_mask: Any | None = None,
 ) -> Any:
     """Compute in-batch plus explicit hard-negative contrastive loss."""
 
@@ -392,6 +424,8 @@ def _contrastive_step_loss(
             hard_negative_vectors,
             query_vectors.unsqueeze(-1),
         ).squeeze(-1)
+        if hard_negative_mask is not None:
+            hard_logits = hard_logits.masked_fill(~hard_negative_mask, float("-inf"))
         logits.append(hard_logits)
     denominator = torch.logsumexp(torch.cat(logits, dim=-1), dim=-1)
     loss = -(pos_logits - denominator).mean()
@@ -512,6 +546,13 @@ def train_retriever_lora(
         (parameter for parameter in model.parameters() if parameter.requires_grad),
         lr=config.learning_rate,
     )
+    trainable_params = sum(
+        parameter.numel()
+        for parameter in model.parameters()
+        if parameter.requires_grad
+    )
+    if trainable_params == 0:
+        raise RetrieverLoRATrainingError("LoRA produced zero trainable parameters")
     model.train()
     final_loss: float | None = None
     global_step = 0
@@ -540,6 +581,7 @@ def train_retriever_lora(
                 device=config.device,
             )
             hard_vectors = None
+            hard_mask = None
             if hard_texts:
                 encoded_hard = _encode_texts(
                     model,
@@ -549,15 +591,21 @@ def train_retriever_lora(
                 )
                 cursor = 0
                 grouped: list[Any] = []
+                masks: list[Any] = []
                 for example in batch:
                     count = len(example.hard_negative_passages)
                     grouped.append(encoded_hard[cursor : cursor + count])
+                    masks.append(
+                        torch.ones(count, dtype=torch.bool, device=encoded_hard.device)
+                    )
                     cursor += count
                 max_negs = max(group.size(0) for group in grouped)
-                padded = []
-                for group in grouped:
+                padded: list[Any] = []
+                padded_masks: list[Any] = []
+                for group, mask in zip(grouped, masks, strict=True):
                     if group.size(0) == max_negs:
                         padded.append(group)
+                        padded_masks.append(mask)
                         continue
                     pad_rows = max_negs - group.size(0)
                     pad = torch.zeros(
@@ -566,12 +614,26 @@ def train_retriever_lora(
                         device=group.device,
                     )
                     padded.append(torch.cat([group, pad], dim=0))
+                    padded_masks.append(
+                        torch.cat(
+                            [
+                                mask,
+                                torch.zeros(
+                                    pad_rows,
+                                    dtype=torch.bool,
+                                    device=group.device,
+                                ),
+                            ]
+                        )
+                    )
                 hard_vectors = torch.stack(padded, dim=0)
+                hard_mask = torch.stack(padded_masks, dim=0)
 
             loss = _contrastive_step_loss(
                 query_vectors,
                 positive_vectors,
                 hard_vectors,
+                hard_negative_mask=hard_mask,
             ) / config.grad_accum
             loss.backward()
             if (global_step + 1) % config.grad_accum == 0:
@@ -589,7 +651,10 @@ def train_retriever_lora(
             )
 
     adapter_dir.mkdir(parents=True, exist_ok=True)
-    model[0].auto_model.save_pretrained(adapter_dir)
+    if hasattr(model, "save_adapter"):
+        model.save_adapter(str(adapter_dir))
+    else:
+        model[0].auto_model.save_pretrained(adapter_dir)
     payload = {
         **base_manifest,
         "status": "PASS",
