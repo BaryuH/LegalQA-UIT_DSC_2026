@@ -18,6 +18,7 @@ from legal_rag.sedar_retrieval.ranking.ltr_dataset import (
     group_feature_rows,
     load_question_map,
     load_rrf_candidates,
+    load_synthetic_query_map,
     validate_feature_schema,
 )
 from legal_rag.sedar_retrieval.retrieval.passage_adapter import load_passages_jsonl
@@ -51,11 +52,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidates", type=Path, required=True)
     parser.add_argument("--passages", type=Path, required=True)
-    parser.add_argument("--questions", type=Path, required=True)
+    parser.add_argument("--questions", type=Path, default=None)
     parser.add_argument(
         "--split",
         choices=("train", "warmup", "public", "private"),
-        required=True,
+        default="warmup",
+    )
+    parser.add_argument("--synthetic", type=Path, default=None)
+    parser.add_argument(
+        "--label-source",
+        choices=("citation", "positive_passage_id"),
+        default="citation",
+    )
+    parser.add_argument(
+        "--source-split",
+        default="train",
+        help="Synthetic source_split filter when label-source=positive_passage_id.",
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
@@ -84,6 +96,12 @@ def main() -> int:
         raise SystemExit("--max-candidates must be non-negative")
     if args.limit < 0:
         raise SystemExit("--limit must be non-negative")
+    if args.label_source == "citation" and args.questions is None:
+        raise SystemExit("--questions is required when --label-source=citation")
+    if args.label_source == "positive_passage_id" and args.synthetic is None:
+        raise SystemExit(
+            "--synthetic is required when --label-source=positive_passage_id"
+        )
 
     try:
         schema_hash = validate_feature_schema(args.schema)
@@ -93,21 +111,43 @@ def main() -> int:
                 query_id: candidates[query_id]
                 for query_id in sorted(candidates)[: args.limit]
             }
-        questions = load_question_map(args.questions, split=args.split)
         passages = load_passages_jsonl(str(args.passages))
         passage_map = {passage.passage_id: passage for passage in passages}
         if len(passage_map) != len(passages):
             raise LTRFeatureBuildError("Passage corpus contains duplicate IDs")
-        rows, report = build_ltr_feature_rows(
-            candidates=candidates,
-            questions=questions,
-            passages=passage_map,
-            config=LTRFeatureBuildConfig(
-                label_mode=args.label_mode,
-                unlabeled_policy=args.unlabeled_policy,
-                max_candidates=args.max_candidates,
-            ),
+
+        config = LTRFeatureBuildConfig(
+            label_mode=args.label_mode,
+            label_source=args.label_source,
+            unlabeled_policy=args.unlabeled_policy,
+            max_candidates=args.max_candidates,
         )
+        if args.label_source == "citation":
+            assert args.questions is not None
+            questions = load_question_map(args.questions, split=args.split)
+            rows, report = build_ltr_feature_rows(
+                candidates=candidates,
+                questions=questions,
+                passages=passage_map,
+                config=config,
+            )
+            label_provenance = "query_citation_heuristic"
+            leakage_source = "question_citations_only"
+        else:
+            assert args.synthetic is not None
+            synthetic_queries = load_synthetic_query_map(
+                args.synthetic,
+                source_split=args.source_split,
+            )
+            rows, report = build_ltr_feature_rows(
+                candidates=candidates,
+                synthetic_queries=synthetic_queries,
+                passages=passage_map,
+                config=config,
+            )
+            label_provenance = "positive_passage_id"
+            leakage_source = "synthetic_positive_passage_id_only"
+
         if not rows:
             raise LTRFeatureBuildError("No labeled feature rows were produced")
     except (OSError, ValueError, LTRFeatureBuildError) as exc:
@@ -127,8 +167,13 @@ def main() -> int:
         "status": "PASS",
         "candidates_path": str(args.candidates),
         "passages_path": str(args.passages),
-        "questions_path": str(args.questions),
-        "question_split": args.split,
+        "questions_path": str(args.questions) if args.questions else None,
+        "synthetic_path": str(args.synthetic) if args.synthetic else None,
+        "question_split": args.split if args.label_source == "citation" else None,
+        "source_split": args.source_split
+        if args.label_source == "positive_passage_id"
+        else None,
+        "label_source": args.label_source,
         "label_mode": args.label_mode,
         "unlabeled_policy": args.unlabeled_policy,
         "max_candidates": args.max_candidates,
@@ -144,7 +189,8 @@ def main() -> int:
             "answer_text_used": False,
             "gold_labels_used_as_features": False,
             "reader_outputs_used": False,
-            "source": "question_citations_only",
+            "source": leakage_source,
+            "label_provenance": label_provenance,
         },
     }
     _write_json(manifest_path, manifest, force=args.force)
@@ -155,6 +201,7 @@ def main() -> int:
                 "queries": report.output_query_count,
                 "rows": report.output_row_count,
                 "skipped_unlabeled": report.skipped_unlabeled_query_count,
+                "label_source": args.label_source,
                 "output": str(output_path),
                 "manifest": str(manifest_path),
             },

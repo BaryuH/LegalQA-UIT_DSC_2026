@@ -29,6 +29,7 @@ from .features import (
 )
 
 LabelMode = Literal["binary", "graded"]
+LabelSource = Literal["citation", "positive_passage_id"]
 UnlabeledPolicy = Literal["fail", "skip"]
 LTR_DATASET_SCHEMA_VERSION = "sedar-ltr-feature-dataset-v1"
 
@@ -52,10 +53,20 @@ class LTRCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class SyntheticQueryView:
+    """Minimal synthetic query view for TASK 12 positive-passage labeling."""
+
+    synthetic_id: str
+    query: str
+    positive_passage_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class LTRFeatureBuildConfig:
     """Deterministic label and candidate policy for one feature build."""
 
     label_mode: LabelMode = "graded"
+    label_source: LabelSource = "citation"
     unlabeled_policy: UnlabeledPolicy = "skip"
     max_candidates: int = 0
 
@@ -261,6 +272,33 @@ def load_rrf_candidates(
     return result
 
 
+def load_synthetic_query_map(
+    path: str | Path,
+    *,
+    source_split: str = "train",
+) -> dict[str, SyntheticQueryView]:
+    """Load synthetic queries keyed by synthetic_id without answer fields."""
+
+    from legal_rag.sedar_retrieval.training.synthetic_queries import (
+        load_synthetic_records,
+    )
+
+    try:
+        records = load_synthetic_records(path)
+    except (OSError, ValueError) as exc:
+        raise LTRFeatureBuildError(f"Cannot load synthetic query map: {path}") from exc
+    result: dict[str, SyntheticQueryView] = {}
+    for record in records:
+        if source_split and record.source_split != source_split:
+            continue
+        result[record.synthetic_id] = SyntheticQueryView(
+            synthetic_id=record.synthetic_id,
+            query=record.query,
+            positive_passage_id=record.positive_passage_id,
+        )
+    return result
+
+
 def load_question_map(
     path: str | Path,
     *,
@@ -327,16 +365,42 @@ def _status_features(
     )
 
 
+def _positive_passage_label(
+    positive_passage_id: str,
+    candidate_passage_id: str,
+    *,
+    label_mode: LabelMode,
+) -> int:
+    if candidate_passage_id == positive_passage_id:
+        return 3 if label_mode == "graded" else 1
+    return 0
+
+
 def build_ltr_feature_rows(
     *,
     candidates: Mapping[str, Sequence[LTRCandidate]],
-    questions: Mapping[str, InferenceQuestion],
     passages: Mapping[str, CanonicalPassage],
     config: LTRFeatureBuildConfig | None = None,
+    questions: Mapping[str, InferenceQuestion] | None = None,
+    synthetic_queries: Mapping[str, SyntheticQueryView] | None = None,
 ) -> tuple[tuple[dict[str, object], ...], LTRFeatureBuildReport]:
-    """Build deterministic, citation-supervised feature rows."""
+    """Build deterministic feature rows with citation or positive-passage labels."""
 
     cfg = config or LTRFeatureBuildConfig()
+    if cfg.label_source == "citation":
+        if questions is None:
+            raise LTRFeatureBuildError(
+                "questions map is required when label_source=citation"
+            )
+    elif cfg.label_source == "positive_passage_id":
+        if synthetic_queries is None:
+            raise LTRFeatureBuildError(
+                "synthetic_queries map is required when "
+                "label_source=positive_passage_id"
+            )
+    else:
+        raise LTRFeatureBuildError(f"Unsupported label_source: {cfg.label_source!r}")
+
     output: list[dict[str, object]] = []
     candidate_counts: dict[str, int] = {}
     label_counts: Counter[str] = Counter()
@@ -344,21 +408,49 @@ def build_ltr_feature_rows(
     output_queries = 0
 
     for query_id in sorted(candidates):
-        question = questions.get(query_id)
-        if question is None:
-            raise LTRFeatureBuildError(
-                f"Candidate query_id is absent from question map: {query_id}"
+        query_text: str
+        label_provenance: str
+        citations: tuple[CitationMention, ...] = ()
+        query_article: str | None = None
+        query_clause: str | None = None
+        query_year: str | None = None
+        query_doc_number: str | None = None
+        positive_passage_id: str | None = None
+
+        if cfg.label_source == "citation":
+            assert questions is not None
+            question = questions.get(query_id)
+            if question is None:
+                raise LTRFeatureBuildError(
+                    f"Candidate query_id is absent from question map: {query_id}"
+                )
+            query_text = question.question
+            label_provenance = "query_citation_heuristic"
+            citations, query_article, query_clause, query_year, query_doc_number = (
+                _citation_context(query_text)
             )
-        citations, query_article, query_clause, query_year, query_doc_number = (
-            _citation_context(question.question)
-        )
-        if not citations and cfg.unlabeled_policy == "fail":
-            raise LTRFeatureBuildError(
-                f"Query has no citation for label construction: {query_id}"
-            )
-        if not citations:
-            skipped_unlabeled += 1
-            continue
+            if not citations and cfg.unlabeled_policy == "fail":
+                raise LTRFeatureBuildError(
+                    f"Query has no citation for label construction: {query_id}"
+                )
+            if not citations:
+                skipped_unlabeled += 1
+                continue
+        else:
+            assert synthetic_queries is not None
+            synthetic = synthetic_queries.get(query_id)
+            if synthetic is None:
+                raise LTRFeatureBuildError(
+                    f"Candidate query_id is absent from synthetic map: {query_id}"
+                )
+            query_text = synthetic.query
+            positive_passage_id = synthetic.positive_passage_id
+            label_provenance = "positive_passage_id"
+            if positive_passage_id not in passages:
+                raise LTRFeatureBuildError(
+                    f"Positive passage_id is absent from corpus: "
+                    f"{positive_passage_id}"
+                )
 
         selected = sorted(
             candidates[query_id],
@@ -381,7 +473,7 @@ def build_ltr_feature_rows(
             is_effective, is_expired = _status_features(passage)
             feature_row: LTRFeatureRow = extract_features(
                 query_id=query_id,
-                query=question.question,
+                query=query_text,
                 passage_id=candidate.passage_id,
                 passage_text=passage.retrieval_text,
                 bm25_score=candidate.bm25_score,
@@ -400,14 +492,22 @@ def build_ltr_feature_rows(
                 query_year=query_year,
                 query_doc_number=query_doc_number,
             )
-            grade = _citation_grade(citations, passage)
-            if grade is None:
-                raise LTRFeatureBuildError(
-                    f"Internal citation label error for query_id={query_id}"
+            if cfg.label_source == "citation":
+                grade = _citation_grade(citations, passage)
+                if grade is None:
+                    raise LTRFeatureBuildError(
+                        f"Internal citation label error for query_id={query_id}"
+                    )
+                label = 1 if grade > 0 else 0
+                if cfg.label_mode == "graded":
+                    label = grade
+            else:
+                assert positive_passage_id is not None
+                label = _positive_passage_label(
+                    positive_passage_id,
+                    candidate.passage_id,
+                    label_mode=cfg.label_mode,
                 )
-            label = 1 if grade > 0 else 0
-            if cfg.label_mode == "graded":
-                label = grade
             label_counts[str(label)] += 1
             output.append(
                 {
@@ -415,7 +515,7 @@ def build_ltr_feature_rows(
                     "passage_id": candidate.passage_id,
                     "rank": candidate.rank,
                     "label": label,
-                    "label_provenance": "query_citation_heuristic",
+                    "label_provenance": label_provenance,
                     "features": feature_row.features,
                     "schema_version": FEATURE_SCHEMA_VERSION,
                 }
@@ -457,15 +557,18 @@ def group_feature_rows(
 
 
 __all__ = [
+    "LabelSource",
     "LTRCandidate",
     "LTR_DATASET_SCHEMA_VERSION",
     "LTRFeatureBuildConfig",
     "LTRFeatureBuildError",
     "LTRFeatureBuildReport",
+    "SyntheticQueryView",
     "build_ltr_feature_rows",
     "group_feature_rows",
     "load_question_map",
     "load_rrf_candidates",
+    "load_synthetic_query_map",
     "schema_sha256",
     "validate_feature_schema",
 ]

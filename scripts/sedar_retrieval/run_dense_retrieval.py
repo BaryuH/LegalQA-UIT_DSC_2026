@@ -9,7 +9,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-from legal_rag.questions import load_inference_questions
 from legal_rag.sedar_retrieval.retrieval.bm25_passages import corpus_fingerprint
 from legal_rag.sedar_retrieval.retrieval.dense import (
     DEFAULT_QUERY_INSTRUCTION,
@@ -22,6 +21,11 @@ from legal_rag.sedar_retrieval.retrieval.dense import (
     search_dense_index,
 )
 from legal_rag.sedar_retrieval.retrieval.passage_adapter import load_passages_jsonl
+from legal_rag.sedar_retrieval.training.query_inputs import (
+    RetrievalQuery,
+    load_retrieval_queries_from_json,
+    load_retrieval_queries_from_synthetic,
+)
 
 
 def _percentile(values: list[float], quantile: float) -> float:
@@ -54,16 +58,16 @@ def _write_latency(path: Path, values: list[float], *, n_queries: int) -> None:
 
 def _write_predictions(
     path: Path,
-    questions: tuple[Any, ...],
+    queries: tuple[RetrievalQuery, ...],
     hits_by_query: tuple[tuple[Any, ...], ...],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
-        for question, hits in zip(questions, hits_by_query, strict=True):
+        for query, hits in zip(queries, hits_by_query, strict=True):
             handle.write(
                 json.dumps(
                     {
-                        "query_id": question.id,
+                        "query_id": query.query_id,
                         "ranked_ids": [hit.passage_id for hit in hits],
                         "scores": [
                             {
@@ -85,8 +89,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--index-dir", type=Path, required=True)
     parser.add_argument("--passages", type=Path, required=True)
-    parser.add_argument("--questions", type=Path, default=Path("data/warmup.json"))
+    parser.add_argument("--questions", type=Path, default=None)
+    parser.add_argument("--synthetic-jsonl", type=Path, default=None)
     parser.add_argument("--split", default="warmup")
+    parser.add_argument(
+        "--source-split",
+        default="train",
+        help="Synthetic source_split filter when --synthetic-jsonl is used.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", default=None)
     parser.add_argument("--device", default="cuda")
@@ -97,6 +107,10 @@ def main() -> int:
     parser.add_argument("--local-files-only", action="store_true")
     args = parser.parse_args()
 
+    if args.questions is None and args.synthetic_jsonl is None:
+        args.questions = Path("data/warmup.json")
+    if args.questions is not None and args.synthetic_jsonl is not None:
+        raise SystemExit("Provide only one of --questions or --synthetic-jsonl")
     if args.batch_size <= 0 or args.top_k <= 0:
         raise SystemExit("--batch-size and --top-k must be positive")
     if args.max_seq_length <= 0:
@@ -149,12 +163,19 @@ def main() -> int:
         local_files_only=args.local_files_only,
     )
 
-    questions = load_inference_questions(args.questions, split=args.split)
+    if args.synthetic_jsonl is not None:
+        queries = load_retrieval_queries_from_synthetic(
+            args.synthetic_jsonl,
+            source_split=args.source_split,
+        )
+    else:
+        assert args.questions is not None
+        queries = load_retrieval_queries_from_json(args.questions, split=args.split)
     if args.limit > 0:
-        questions = questions[: args.limit]
+        queries = queries[: args.limit]
     query_texts = [
-        format_instruct_query(question.question, instruction=instruction)
-        for question in questions
+        format_instruct_query(query.question, instruction=instruction)
+        for query in queries
     ]
     all_hits: list[tuple[Any, ...]] = []
     latency_values: list[float] = []
@@ -178,13 +199,13 @@ def main() -> int:
         )
         latency_values.extend([batch_latency_ms] * len(batch_hits))
 
-    _write_predictions(args.output, questions, tuple(all_hits))
+    _write_predictions(args.output, queries, tuple(all_hits))
     latency_path = args.output.with_name(f"{args.output.stem}_latency.json")
-    _write_latency(latency_path, latency_values, n_queries=len(questions))
+    _write_latency(latency_path, latency_values, n_queries=len(queries))
     print(
         json.dumps(
             {
-                "n_queries": len(questions),
+                "n_queries": len(queries),
                 "output": str(args.output),
                 "corpus_hash": corpus_hash,
                 "model": model,

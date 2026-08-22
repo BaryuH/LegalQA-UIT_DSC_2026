@@ -5,24 +5,46 @@ later LambdaRank training.  It uses the shared extractor in
 `src/legal_rag/sedar_retrieval/ranking/features.py` and validates the checked
 in schema at `configs/retrieval/ltr_feature_schema_v1.json`.
 
-The builder never reads answer text, gold labels, or reader outputs.  Questions
-are loaded through the inference-only question loader and citations are parsed
-from the question text.
+The builder never reads answer text, gold labels, or reader outputs.
+
+## Label sources
+
+### Citation mode (warmup smoke only)
+
+Questions are loaded through the inference-only question loader and citations are
+parsed from the question text.  Official train data has very low citation
+coverage (~0.47%), so this mode is mainly for warmup smoke builds.
+
+```text
+--label-source citation
+--questions    question JSON object; answers are excluded by the loader
+--split        train, warmup, public, or private
+```
+
+### Positive-passage mode (full 10k build)
+
+Use TASK 09 synthetic queries with `positive_passage_id` labels:
+
+```text
+--label-source positive_passage_id
+--synthetic    synthetic_queries.jsonl
+--source-split train
+```
+
+Citation context features (`query_article`, etc.) remain empty in synthetic mode.
 
 ## Inputs
 
 ```text
 --candidates   RRF/ranked candidate JSONL
 --passages     canonical passages_r2a.jsonl
---questions    question JSON object; answers are excluded by the loader
---split        train, warmup, public, or private
 ```
 
 RRF rows use the existing TASK 08 shape:
 
 ```json
 {
-  "query_id": "101515",
+  "query_id": "syn-000001",
   "ranked_ids": ["passage-1"],
   "candidates": [
     {
@@ -39,9 +61,35 @@ RRF rows use the existing TASK 08 shape:
 Candidates must resolve to canonical passage IDs.  Unknown IDs, duplicate IDs,
 missing queries, invalid ranks, and non-finite scores fail closed.
 
-## Server smoke command
+## Synthetic retrieval prerequisites
 
-The existing warmup RRF artifact can be used for a smoke build:
+Generate synthetic RRF candidates before the full TASK 12 build:
+
+```bash
+# BM25 on synthetic queries (CPU)
+python scripts/sedar_retrieval/run_bm25_retrieval.py \
+  --passages "$VIEWS/passages_r2a.jsonl" \
+  --synthetic-jsonl "$PILOT_OUT/synthetic_queries.jsonl" \
+  --source-split train \
+  --top-k 150 \
+  --output "$EVAL_ROOT/bm25_synthetic_10k.jsonl"
+
+# Dense on synthetic queries (GPU)
+python scripts/sedar_retrieval/run_dense_retrieval.py \
+  --index-dir "$ZERO_SHOT_INDEX" \
+  --passages "$VIEWS/passages_r2a.jsonl" \
+  --synthetic-jsonl "$PILOT_OUT/synthetic_queries.jsonl" \
+  --source-split train \
+  --top-k 250 \
+  --output "$EVAL_ROOT/dense_synthetic_10k.jsonl"
+
+# Fuse to RRF
+python scripts/sedar_retrieval/fuse_candidates.py \
+  ... \
+  --output "$EVAL_ROOT/rrf_synthetic_10k.jsonl"
+```
+
+## Server smoke command (citation / warmup)
 
 ```bash
 export PROJECT_ROOT=/mnt/G/LegalQA-UIT_DSC_2026
@@ -63,22 +111,24 @@ python scripts/sedar_retrieval/build_ltr_features.py \
   --output "$LTR_ROOT/warmup500_features.jsonl"
 ```
 
-For a training feature build, use a train-only RRF candidate file and
-`--split train`.  Do not mix warmup, public, or private candidates into the
-training group.
+## Full synthetic 10k build
 
-`--label-mode graded` emits citation-derived grades:
-
-```text
-3 exact cited article/clause
-2 cited article
-1 cited document number
-0 candidate does not match the query citation
+```bash
+python scripts/sedar_retrieval/build_ltr_features.py \
+  --candidates "$EVAL_ROOT/rrf_synthetic_10k.jsonl" \
+  --passages "$VIEWS/passages_r2a.jsonl" \
+  --label-source positive_passage_id \
+  --synthetic "$PILOT_OUT/synthetic_queries.jsonl" \
+  --source-split train \
+  --label-mode binary \
+  --unlabeled-policy fail \
+  --output "$LTR_ROOT/synthetic_10k_features.jsonl"
 ```
 
-Queries without explicit citations are skipped by `--unlabeled-policy skip`.
-Use `--unlabeled-policy fail` when every query is required to have a citation
-label.  The `binary` mode maps grades above zero to label 1.
+Expected: ~10k queries, ~250k rows (if 25 candidates/query), `skipped_unlabeled=0`.
+
+`--label-mode graded` with synthetic labels emits grade 3 for the positive passage
+and 0 otherwise.  The `binary` mode maps exact positive matches to label 1.
 
 ## Outputs
 
@@ -105,7 +155,8 @@ Before TASK 13, verify:
 - all feature rows resolve to canonical passages;
 - query groups are deterministic and have stable row counts;
 - the manifest contains the schema hash;
-- no answer text, gold labels, or reader outputs were used as features.
+- no answer text, gold labels, or reader outputs were used as features;
+- synthetic full build has `skipped_unlabeled=0`.
 
-The warmup500 artifact is a smoke result only.  It is not a full training
-feature dataset.
+The warmup500 artifact is a smoke result only.  The production training dataset
+uses synthetic `positive_passage_id` labels.

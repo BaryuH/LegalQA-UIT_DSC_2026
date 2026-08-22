@@ -766,6 +766,18 @@ def build_audit_sample(
     return tuple(selected)
 
 
+def load_hard_negative_records(path: str | Path) -> tuple[HardNegativeRecord, ...]:
+    """Load TASK 10 hard-negative records from JSONL."""
+
+    from legal_rag.sedar_retrieval.io.jsonl import iter_jsonl_lines
+
+    records: list[HardNegativeRecord] = []
+    for line in iter_jsonl_lines(path):
+        records.append(HardNegativeRecord.model_validate_json(line))
+    records.sort(key=lambda record: record.synthetic_id)
+    return tuple(records)
+
+
 def write_jsonl_models(
     path: str | Path,
     records: Sequence[DomainModel | Mapping[str, object]],
@@ -799,6 +811,7 @@ __all__ = [
     "TASK10_SCHEMA_VERSION",
     "build_audit_sample",
     "load_candidate_hits",
+    "load_hard_negative_records",
     "mine_hard_negatives",
     "write_jsonl_models",
 ]
