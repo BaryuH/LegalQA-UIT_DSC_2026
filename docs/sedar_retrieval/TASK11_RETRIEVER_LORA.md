@@ -66,9 +66,14 @@ python scripts/sedar_retrieval/rebuild_dense_from_checkpoint.py \
   --adapter-dir "$TRAINING_ROOT/task11_smoke/adapter" \
   --passages "$VIEWS/passages_r2a.jsonl" \
   --output-dir "$SEDAR_WORK_ROOT/artifacts/sedar_retrieval/indexes/dense_r2a_lora_smoke" \
+  --embedding-storage sharded \
   --device cuda \
   --force
 ```
+
+On mounts that reject `mmap` (for example some `/mnt/G` filesystems), use
+`--embedding-storage sharded` (same as TASK 07).  Default `auto` falls back to
+shards when memmap fails with `OSError`.
 
 Evaluate the rebuilt index on warmup500 and compare against the zero-shot TASK 07
 baseline before promoting R4.

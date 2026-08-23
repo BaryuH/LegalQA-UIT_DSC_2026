@@ -88,6 +88,12 @@ def main() -> int:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--shard-size", type=int, default=4096)
+    parser.add_argument(
+        "--embedding-storage",
+        choices=("auto", "memmap", "sharded"),
+        default="auto",
+        help="Use mmap, .npy shards, or mmap with automatic fallback to shards.",
+    )
     parser.add_argument("--max-seq-length", type=int, default=8192)
     parser.add_argument("--smoke-query", default="Điều 76")
     parser.add_argument("--top-k", type=int, default=10)
@@ -158,10 +164,17 @@ def main() -> int:
     embeddings: Any = None
     embedding_dim: int | None = None
     embedding_path = args.output_dir / "embeddings.npy"
+    shard_dir = args.output_dir / "embedding_shards"
+    shard_paths: list[Path] = []
+    storage_mode = "sharded" if args.embedding_storage == "sharded" else "memmap"
+    storage_fallback_reason: str | None = None
     encode_started = time.perf_counter()
+    shard_count = 0
 
     for shard_start in range(0, len(order), args.shard_size):
+        shard_count += 1
         shard = order[shard_start : shard_start + args.shard_size]
+        shard_vectors: list[Any] = []
         for batch_start in range(0, len(shard), args.batch_size):
             batch_indices = shard[batch_start : batch_start + args.batch_size]
             encoded = encoder.encode(
@@ -174,34 +187,79 @@ def main() -> int:
                 encoded = validate_embedding_matrix(encoded)
             if embedding_dim is None:
                 embedding_dim = int(encoded.shape[1])
-                embeddings = np.lib.format.open_memmap(
-                    embedding_path,
-                    mode="w+",
-                    dtype="float32",
-                    shape=(len(passages), embedding_dim),
+                if storage_mode == "memmap":
+                    try:
+                        embeddings = np.lib.format.open_memmap(
+                            embedding_path,
+                            mode="w+",
+                            dtype="float32",
+                            shape=(len(passages), embedding_dim),
+                        )
+                    except OSError as exc:
+                        if args.embedding_storage == "memmap":
+                            raise DenseIndexError(
+                                "Embedding memmap is unsupported on this "
+                                "filesystem; use --embedding-storage sharded."
+                            ) from exc
+                        storage_mode = "sharded"
+                        storage_fallback_reason = str(exc)
+                        embedding_path.unlink(missing_ok=True)
+            elif int(encoded.shape[1]) != embedding_dim:
+                raise DenseIndexError(
+                    f"Model returned inconsistent embedding dimension: "
+                    f"{encoded.shape[1]} vs {embedding_dim}"
                 )
+            if storage_mode == "memmap":
+                assert embeddings is not None
+                embeddings[np.asarray(batch_indices, dtype=np.int64)] = encoded
+            else:
+                shard_vectors.append(encoded)
+        if storage_mode == "memmap":
             assert embeddings is not None
-            embeddings[np.asarray(batch_indices, dtype=np.int64)] = encoded
+            embeddings.flush()
+        else:
+            shard_dir.mkdir(parents=True, exist_ok=True)
+            shard_path = shard_dir / f"embeddings-{shard_count:05d}.npy"
+            shard_matrix = np.concatenate(shard_vectors, axis=0)
+            np.save(shard_path, shard_matrix, allow_pickle=False)
+            shard_paths.append(shard_path)
 
-    assert embeddings is not None and embedding_dim is not None
-    embeddings.flush()
+    if storage_mode == "memmap":
+        assert embeddings is not None
+    elif not shard_paths:
+        raise DenseIndexError("No embedding shards were written")
+    assert embedding_dim is not None
     encode_seconds = max(time.perf_counter() - encode_started, 1e-9)
 
     index = faiss.IndexFlatIP(embedding_dim)
-    for start in range(0, len(passages), args.batch_size):
-        index.add(
-            np.asarray(
-                embeddings[start : start + args.batch_size],
-                dtype="float32",
-                order="C",
+    if storage_mode == "memmap":
+        for start in range(0, len(passages), args.batch_size):
+            index.add(
+                np.asarray(
+                    embeddings[start : start + args.batch_size],
+                    dtype="float32",
+                    order="C",
+                )
             )
-        )
+        index_passage_indices = tuple(range(len(passages)))
+        embedding_cache_path = embedding_path
+    else:
+        for shard_path in shard_paths:
+            shard_matrix = validate_embedding_matrix(
+                np.load(shard_path, allow_pickle=False),
+                expected_dim=embedding_dim,
+            )
+            index.add(np.asarray(shard_matrix, dtype="float32", order="C"))
+        index_passage_indices = order
+        embedding_cache_path = shard_dir
+
     index_path = args.output_dir / "index.faiss"
     faiss.write_index(index, str(index_path))
 
     metadata_path = args.output_dir / "passage_metadata.jsonl"
-    _write_metadata(metadata_path, passages)
-    index_passage_ids = tuple(passage.passage_id for passage in passages)
+    index_passages = tuple(passages[index] for index in index_passage_indices)
+    _write_metadata(metadata_path, index_passages)
+    index_passage_ids = tuple(passage.passage_id for passage in index_passages)
     if index.ntotal != len(index_passage_ids):
         raise DenseIndexError(
             "FAISS/metadata alignment mismatch after rebuild: "
@@ -254,10 +312,14 @@ def main() -> int:
             "corpus_hash": adapter_manifest.get("corpus_hash"),
         },
         "index_path": str(index_path),
-        "embedding_cache_path": str(embedding_path),
+        "embedding_cache_path": str(embedding_cache_path),
+        "embedding_storage": storage_mode,
+        "embedding_storage_requested": args.embedding_storage,
+        "embedding_storage_fallback_reason": storage_fallback_reason,
         "passage_metadata_path": str(metadata_path),
         "alignment_ok": True,
         "nan_inf_count": 0,
+        "length_bucketed": True,
         "smoke_query": args.smoke_query,
         "smoke_hit_count": len(smoke_hits),
         "smoke_hit_ids": [hit.passage_id for hit in smoke_hits],
@@ -276,8 +338,9 @@ def main() -> int:
         "passage_count": len(passages),
         "embedding_dim": embedding_dim,
         "vector_dtype": "float32",
-        "embeddings_path": str(embedding_path),
-        "storage_mode": "memmap",
+        "embeddings_path": str(embedding_cache_path),
+        "storage_mode": storage_mode,
+        "shard_paths": [str(path) for path in shard_paths],
         "passage_metadata_path": str(metadata_path),
         "adapter_dir": str(args.adapter_dir),
     }

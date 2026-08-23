@@ -398,10 +398,11 @@ def _build_model_kwargs(
     torch: Any,
 ) -> dict[str, Any]:
     model_kwargs: dict[str, Any] = {
-        "device": config.device,
         "trust_remote_code": True,
         "local_files_only": config.local_files_only,
     }
+    if not config.load_in_4bit:
+        model_kwargs["device"] = config.device
     if config.model_revision != "UNPINNED":
         model_kwargs["revision"] = config.model_revision
     inner_kwargs: dict[str, Any] = {}
@@ -450,7 +451,10 @@ def _encode_texts(
     with grad_context:
         for start in range(0, len(texts), batch_size):
             batch = list(texts[start : start + batch_size])
-            features = model.tokenize(batch)
+            if hasattr(model, "preprocess"):
+                features = model.preprocess(batch)
+            else:
+                features = model.tokenize(batch)
             features = {
                 key: value.to(target_device) if torch.is_tensor(value) else value
                 for key, value in features.items()
