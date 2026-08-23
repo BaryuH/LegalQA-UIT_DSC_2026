@@ -23,6 +23,11 @@ semantic-reranker = [
     # Optional F2 runtime; base/offline installs stay free of model dependencies.
     "sentence-transformers>=5.0,<6.0",
 ]
+evaluation = [
+    # BTC-source-compatible local evaluation adapter dependencies.
+    "nltk>=3.10,<4.0",
+    "rouge-score>=0.1.2,<0.2",
+]
 reader = [
     # Optional local-only extractive reader runtime; unit tests use the mock backend.
     "torch>=2.0",
@@ -55,6 +60,12 @@ sedar-sft = [
     "sentencepiece>=0.1.99",
     "sentence-transformers>=5.0,<6.0",
     "Pillow>=10.0",
+]
+
+sedar-ltr = [
+    # TASK 13 LightGBM LambdaRank training/inference (CPU-friendly).
+    "lightgbm>=4.0,<5.0",
+    "numpy>=1.26,<3.0",
 ]
 
 [project.scripts]

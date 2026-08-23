@@ -1,13 +1,48 @@
-# SEDAR Retrieval v3 — R5 LambdaRank
+# SEDAR Retrieval v3 — R5 Legal LambdaRank (TASK 13)
 version: sedar-retrieval-v3
 stage: R5
 depends_on: R4
-status: local_features_ready_training_pending_labels
+status: ready_for_training
+
 ltr:
   enabled: true
   feature_schema: configs/retrieval/ltr_feature_schema_v1.json
   objective: lambdarank
+  feature_group: all
+  validation_fraction: 0.1
+  seed: 42
+  hyperparameters:
+    num_leaves: 31
+    learning_rate: 0.05
+    n_estimators: 200
+    min_child_samples: 20
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    max_depth: -1
+    early_stopping_rounds: 30
+  ablations:
+    - all
+    - no_lexical
+    - no_citation
+    - no_hierarchy
+    - no_dense
+  promotion:
+    promotion_min_gain: 0.01
+    recall_at_20_max_regression: 0.005
+    metrics:
+      - ndcg_at_10
+      - mrr_at_10
+    compare_against:
+      - bm25
+      - dense
+      - rrf
+  online_offline_topk_overlap: 1.0
+
 reader:
   frozen: true
+
 runtime:
   outputs_root: reports/ablations/R5
+  train_script: scripts/sedar_retrieval/train_ltr.py
+  rank_script: scripts/sedar_retrieval/run_ltr_rank.py

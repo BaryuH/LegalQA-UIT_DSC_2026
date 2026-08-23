@@ -608,7 +608,7 @@ Có thể promote R5 nếu R5 tốt hơn R7 end-to-end — không bắt buộc b
 [ ] TASK 10 hard negatives               ← cần code mới
 [ ] TASK 11 LoRA retriever + rebuild     ← cần code mới
 [ ] TASK 12 feature dataset scale-up     ← cần script mới
-[ ] TASK 13 LambdaRank                   ← cần code mới
+[ ] TASK 13 LambdaRank                   ← code sẵn; train trên server
 [ ] TASK 15 LLM analyzer                 ← cần code mới
 [ ] TASK 16 conditional rewrite          ← cần code mới
 [ ] TASK 17 full reference graph
