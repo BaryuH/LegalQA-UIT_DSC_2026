@@ -56,6 +56,28 @@ def _write_latency(path: Path, values: list[float], *, n_queries: int) -> None:
     )
 
 
+def _apply_lora_adapter_if_present(encoder: SentenceTransformerEncoder, manifest: dict[str, object]) -> None:
+    adapter_dir = manifest.get("adapter_dir")
+    if not adapter_dir:
+        return
+    if not isinstance(adapter_dir, str) or not adapter_dir.strip():
+        raise SystemExit("Dense manifest adapter_dir must be a non-empty string")
+    try:
+        from peft import PeftModel
+    except ModuleNotFoundError as exc:
+        raise SystemExit(
+            "LoRA dense index requires peft to load the TASK 11 adapter."
+        ) from exc
+    try:
+        encoder.model[0].auto_model = PeftModel.from_pretrained(
+            encoder.model[0].auto_model,
+            adapter_dir,
+            is_trainable=False,
+        )
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"DENSE_RETRIEVAL_LORA_FAILED: {exc}") from exc
+
+
 def _write_predictions(
     path: Path,
     queries: tuple[RetrievalQuery, ...],
@@ -162,6 +184,7 @@ def main() -> int:
         max_seq_length=args.max_seq_length,
         local_files_only=args.local_files_only,
     )
+    _apply_lora_adapter_if_present(encoder, loaded.manifest)
 
     if args.synthetic_jsonl is not None:
         queries = load_retrieval_queries_from_synthetic(
@@ -210,6 +233,7 @@ def main() -> int:
                 "corpus_hash": corpus_hash,
                 "model": model,
                 "model_revision": revision,
+                "adapter_dir": loaded.manifest.get("adapter_dir"),
                 "top_k": args.top_k,
                 "latency": str(latency_path),
                 "latency_p50_ms": _percentile(latency_values, 0.50),
