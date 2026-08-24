@@ -30,7 +30,7 @@ from .features import (
 
 LabelMode = Literal["binary", "graded"]
 LabelSource = Literal["citation", "positive_passage_id"]
-UnlabeledPolicy = Literal["fail", "skip"]
+UnlabeledPolicy = Literal["fail", "skip", "keep"]
 LTR_DATASET_SCHEMA_VERSION = "sedar-ltr-feature-dataset-v1"
 
 
@@ -429,13 +429,15 @@ def build_ltr_feature_rows(
             citations, query_article, query_clause, query_year, query_doc_number = (
                 _citation_context(query_text)
             )
-            if not citations and cfg.unlabeled_policy == "fail":
-                raise LTRFeatureBuildError(
-                    f"Query has no citation for label construction: {query_id}"
-                )
             if not citations:
-                skipped_unlabeled += 1
-                continue
+                if cfg.unlabeled_policy == "fail":
+                    raise LTRFeatureBuildError(
+                        f"Query has no citation for label construction: {query_id}"
+                    )
+                if cfg.unlabeled_policy == "skip":
+                    skipped_unlabeled += 1
+                    continue
+                label_provenance = "unlabeled_no_citation"
         else:
             assert synthetic_queries is not None
             synthetic = synthetic_queries.get(query_id)
@@ -495,9 +497,12 @@ def build_ltr_feature_rows(
             if cfg.label_source == "citation":
                 grade = _citation_grade(citations, passage)
                 if grade is None:
-                    raise LTRFeatureBuildError(
-                        f"Internal citation label error for query_id={query_id}"
-                    )
+                    if cfg.unlabeled_policy == "keep" and not citations:
+                        grade = 0
+                    else:
+                        raise LTRFeatureBuildError(
+                            f"Internal citation label error for query_id={query_id}"
+                        )
                 label = 1 if grade > 0 else 0
                 if cfg.label_mode == "graded":
                     label = grade

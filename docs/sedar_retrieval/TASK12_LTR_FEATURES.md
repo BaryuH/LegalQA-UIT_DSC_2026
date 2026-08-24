@@ -15,6 +15,11 @@ Questions are loaded through the inference-only question loader and citations ar
 parsed from the question text.  Official train data has very low citation
 coverage (~0.47%), so this mode is mainly for warmup smoke builds.
 
+`--unlabeled-policy`:
+- `skip` — drop queries without citations (warmup smoke only; can leave 5/500)
+- `fail` — abort if any query has no citation (train-label builds)
+- `keep` — emit all queries; unlabeled rows get label `0` (inference/eval only)
+
 ```text
 --label-source citation
 --questions    question JSON object; answers are excluded by the loader
@@ -107,7 +112,7 @@ python scripts/sedar_retrieval/build_ltr_features.py \
   --questions "$PROJECT_ROOT/data/warmup.json" \
   --split warmup \
   --label-mode graded \
-  --unlabeled-policy skip \
+  --unlabeled-policy keep \
   --output "$LTR_ROOT/warmup500_features.jsonl"
 ```
 

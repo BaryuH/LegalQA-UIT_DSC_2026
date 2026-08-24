@@ -78,6 +78,11 @@ Expected: `parity_topk_overlap == 1.0`.
 
 ## Evaluate vs BM25 / dense / RRF
 
+Warmup questions rarely contain parseable citations.  For inference/eval,
+rebuild warmup features with `--unlabeled-policy keep` so all queries are
+scored.  Do not train LambdaRank on `keep` rows: labels are zeros, not
+relevance.  `eval_retrieval.py` still uses silver labels, not these zeros.
+
 ```bash
 # On warmup500 (non-synthetic) after building warmup LTR features + ranking
 python scripts/sedar_retrieval/eval_retrieval.py \

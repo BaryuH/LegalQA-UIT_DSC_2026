@@ -173,6 +173,17 @@ def test_unlabeled_queries_are_skipped_or_rejected_explicitly() -> None:
             config=LTRFeatureBuildConfig(unlabeled_policy="fail"),
         )
 
+    kept_rows, kept_report = build_ltr_feature_rows(
+        candidates=candidates,
+        questions={question.id: question},
+        passages=passages,
+        config=LTRFeatureBuildConfig(unlabeled_policy="keep"),
+    )
+    assert kept_report.output_query_count == 1
+    assert kept_report.skipped_unlabeled_query_count == 0
+    assert [row["label"] for row in kept_rows] == [0]
+    assert kept_rows[0]["label_provenance"] == "unlabeled_no_citation"
+
 
 def test_schema_matches_extractor() -> None:
     schema = (

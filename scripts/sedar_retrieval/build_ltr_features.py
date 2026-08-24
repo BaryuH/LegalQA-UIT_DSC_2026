@@ -84,7 +84,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--unlabeled-policy",
-        choices=("fail", "skip"),
+        choices=("fail", "skip", "keep"),
         default="skip",
     )
     parser.add_argument("--max-candidates", type=int, default=0)
