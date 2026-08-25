@@ -25,7 +25,17 @@ def main() -> int:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=Path("artifacts/sedar_sft/validation/clean_warmup_manifest.json"),
+        default=None,
+        help="Clean-warmup manifest; required when --id-source=clean_manifest.",
+    )
+    parser.add_argument(
+        "--id-source",
+        choices=("clean_manifest", "questions"),
+        default="clean_manifest",
+        help=(
+            "clean_manifest: VAL-00 included IDs. "
+            "questions: every ID in --questions for the given --split (public/private)."
+        ),
     )
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--checkpoint-manifest", type=Path, default=None)
@@ -67,13 +77,16 @@ def main() -> int:
         raise SystemExit("--limit must be non-negative")
     if args.evidence_top_k <= 0 or args.max_total_chars <= 0:
         raise SystemExit("Evidence budget arguments must be positive")
+    if args.id_source == "clean_manifest" and args.manifest is None:
+        args.manifest = Path(
+            "artifacts/sedar_sft/validation/clean_warmup_manifest.json"
+        )
 
     repo_root = args.repo_root.resolve()
     config = SedarE2EConfig(
         retrieval_path=args.retrieval.resolve(),
         passages_path=args.passages.resolve(),
         questions_path=args.questions.resolve(),
-        manifest_path=args.manifest.resolve(),
         checkpoint_dir=args.checkpoint.resolve(),
         checkpoint_manifest=(
             args.checkpoint_manifest.resolve()
@@ -94,7 +107,9 @@ def main() -> int:
         stop_sequences=(),
         device=args.device,
         load_in_4bit=args.load_in_4bit,
+        manifest_path=args.manifest.resolve() if args.manifest is not None else None,
         split=args.split,
+        id_source=args.id_source,
         limit=None if args.limit <= 0 else args.limit,
         fail_fast=not args.continue_on_error,
         repo_root=repo_root,

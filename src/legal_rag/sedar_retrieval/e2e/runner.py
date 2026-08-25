@@ -15,6 +15,7 @@ from legal_rag.finetuned_reader.warmup_eval import (
     load_clean_warmup_manifest,
     select_included_ids,
 )
+from legal_rag.questions import load_inference_questions
 from legal_rag.schemas import PackedEvidence
 from legal_rag.sedar_retrieval.evidence.passage_packer import (
     PassageEvidenceConfig,
@@ -38,7 +39,6 @@ class SedarE2EConfig:
     retrieval_path: Path
     passages_path: Path
     questions_path: Path
-    manifest_path: Path
     checkpoint_dir: Path
     checkpoint_manifest: Path | None
     inference_prompt_path: Path
@@ -51,7 +51,9 @@ class SedarE2EConfig:
     stop_sequences: tuple[str, ...]
     device: str
     load_in_4bit: bool | None
+    manifest_path: Path | None = None
     split: str = "warmup"
+    id_source: str = "clean_manifest"
     limit: int | None = None
     fail_fast: bool = True
     repo_root: Path | None = None
@@ -94,13 +96,28 @@ def run_sedar_e2e(
     """Run frozen generative reader inference on precomputed SEDAR retrieval."""
 
     repo_root = (config.repo_root or Path.cwd()).resolve()
-    manifest = load_clean_warmup_manifest(config.manifest_path)
-    selected_ids = select_included_ids(manifest.included_ids, limit=config.limit)
-    cases = load_clean_inference_questions(
-        config.questions_path,
-        split=config.split,
-        included_ids=selected_ids,
-    )
+    if config.id_source not in {"clean_manifest", "questions"}:
+        raise SedarE2ERunnerError(
+            f"Unsupported id_source: {config.id_source!r} "
+            "(expected clean_manifest or questions)"
+        )
+    if config.id_source == "clean_manifest":
+        if config.manifest_path is None:
+            raise SedarE2ERunnerError(
+                "manifest_path is required when id_source=clean_manifest"
+            )
+        manifest = load_clean_warmup_manifest(config.manifest_path)
+        selected_ids = select_included_ids(manifest.included_ids, limit=config.limit)
+        cases = load_clean_inference_questions(
+            config.questions_path,
+            split=config.split,
+            included_ids=selected_ids,
+        )
+    else:
+        cases = load_inference_questions(config.questions_path, split=config.split)
+        if config.limit is not None:
+            cases = cases[: config.limit]
+        selected_ids = tuple(case.id for case in cases)
     rankings = load_retrieval_rankings(config.retrieval_path)
     passage_rows = load_passages_jsonl(str(config.passages_path))
     passages = {passage.passage_id: passage for passage in passage_rows}
@@ -111,7 +128,8 @@ def run_sedar_e2e(
     if missing_rankings:
         preview = ", ".join(missing_rankings[:5])
         raise SedarE2ERunnerError(
-            f"Retrieval JSONL is missing clean-warmup query IDs; examples: {preview}"
+            "Retrieval JSONL is missing query IDs required for this split; "
+            f"examples: {preview}"
         )
 
     generator = generator_factory()
@@ -226,6 +244,7 @@ def run_sedar_e2e(
         "device": config.device,
         "load_in_4bit": config.load_in_4bit,
         "split": config.split,
+        "id_source": config.id_source,
         "selected_ids_count": len(selected_ids),
         "reader_frozen": True,
     }
@@ -345,8 +364,17 @@ def run_sedar_e2e(
 
 
 def load_selected_case_ids(config: SedarE2EConfig) -> tuple[str, ...]:
-    """Return the clean-warmup IDs that a run would score."""
+    """Return the case IDs that a run would score."""
 
+    if config.id_source == "questions":
+        cases = load_inference_questions(config.questions_path, split=config.split)
+        if config.limit is not None:
+            cases = cases[: config.limit]
+        return tuple(case.id for case in cases)
+    if config.manifest_path is None:
+        raise SedarE2ERunnerError(
+            "manifest_path is required when id_source=clean_manifest"
+        )
     try:
         manifest = load_clean_warmup_manifest(config.manifest_path)
     except WarmupEvalError as exc:
