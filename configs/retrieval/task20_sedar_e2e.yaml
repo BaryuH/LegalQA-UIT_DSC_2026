@@ -1,0 +1,31 @@
+# TASK 20 — SEDAR retrieval + frozen SEDAR-SFT reader
+version: sedar-retrieval-v3
+task: TASK20
+
+reader:
+  checkpoint_dir: checkpoints/sedar_sft/vilegal-sedar-v1
+  checkpoint_manifest: checkpoints/sedar_sft/vilegal-sedar-v1/checkpoint_manifest.json
+  inference_prompt_path: configs/prompts/sedar_sft_infer_v1.txt
+  train_prompt_path: configs/prompts/sedar_sft_train_v1.txt
+  prompt_version: sedar-sft-v1
+  max_new_tokens: 512
+  device: cuda
+  load_in_4bit: null
+
+data:
+  questions_path: data/warmup.json
+  manifest_path: artifacts/sedar_sft/validation/clean_warmup_manifest.json
+  split: warmup
+
+evidence:
+  evidence_top_k: 4
+  max_total_chars: 4000
+  max_chunks_per_document: 2
+
+variants:
+  dense_zero_shot:
+    retrieval_path: artifacts/sedar_retrieval/eval/dense_r2a_warmup500.jsonl
+  rrf_dense:
+    retrieval_path: artifacts/sedar_retrieval/eval/rrf_r2a_dense_warmup500.jsonl
+  ltr_full_all:
+    retrieval_path: artifacts/sedar_retrieval/eval/ltr_warmup500.jsonl
