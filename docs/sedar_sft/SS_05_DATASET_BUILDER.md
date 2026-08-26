@@ -37,6 +37,13 @@ full 6,609-case build preferred on server NVMe work root
 PYTHONPATH=src python scripts/sedar_sft/build_dataset.py --max-examples 8
 ```
 
+## Related: Path B (LTR-aligned)
+
+Train/infer mismatch: SS-05 packs **B2** evidence; champion submission packs
+**LTR**. For aligned retrain see
+`docs/sedar_sft/SS_05B_LTR_ALIGNED_DATASET.md`
+(`build_dataset_from_ltr.py` + `configs/sedar_sft_train_ltr.yaml`).
+
 ## Exit Gate (local)
 
 ```text

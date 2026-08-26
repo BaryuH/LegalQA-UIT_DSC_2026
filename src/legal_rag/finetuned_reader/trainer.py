@@ -17,7 +17,10 @@ from typing import Any
 from ..config import ProjectConfig
 from .checkpoint import hash_directory
 from .collator import TargetDoesNotFitError, collate_tokenized, tokenize_sft_example
-from .dataset import DatasetBuildResult, build_sft_dataset_from_config
+from .dataset import (
+    build_sft_dataset_from_config,
+    load_prebuilt_sft_dataset,
+)
 from .prompting import GenerativePromptBuilder
 from .training import TrainingGateError, require_training_stack
 
@@ -325,8 +328,10 @@ def run_real_sft(
     repo_root: str | Path,
     run_id: str | None = None,
     max_examples: int | None = None,
+    dataset_dir: str | Path | None = None,
+    required_evidence_source: str | None = None,
 ) -> RealTrainingResult:
-    """Build the frozen-B2 SFT set and train one local LoRA adapter."""
+    """Train one local LoRA adapter from B2-built or prebuilt SFT artifacts."""
 
     settings = config.finetuned_reader
     if settings is None or not settings.enabled:
@@ -353,11 +358,21 @@ def run_real_sft(
             f"Refusing to overwrite checkpoint directory: {checkpoint_dir}"
         )
 
-    # Dataset construction owns the GPU first.  Qwen is intentionally loaded only
-    # after BM25-CUDA/reranker state has been released, avoiding idle model VRAM.
-    dataset_result: DatasetBuildResult = build_sft_dataset_from_config(
-        config, repo_root=root, max_examples=max_examples
-    )
+    # Path B: load a prebuilt LTR (or other) dataset. Path A / default: build via
+    # frozen B2. Qwen loads only after any retrieval GPU state is released.
+    if dataset_dir is not None:
+        resolved_dataset = Path(dataset_dir)
+        if not resolved_dataset.is_absolute():
+            resolved_dataset = root / resolved_dataset
+        dataset_result = load_prebuilt_sft_dataset(
+            resolved_dataset,
+            required_evidence_source=required_evidence_source,
+            max_examples=max_examples,
+        )
+    else:
+        dataset_result = build_sft_dataset_from_config(
+            config, repo_root=root, max_examples=max_examples
+        )
     examples = dataset_result.examples
     if max_examples is not None:
         examples = examples[:max_examples]

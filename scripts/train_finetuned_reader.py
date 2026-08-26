@@ -89,6 +89,23 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional deterministic prefix for a server smoke run.",
     )
     parser.add_argument(
+        "--dataset-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Prebuilt SFT dataset directory (train.jsonl + manifest). "
+            "Skips frozen-B2 retrieval; required for Path-B LTR-aligned train."
+        ),
+    )
+    parser.add_argument(
+        "--required-evidence-source",
+        default=None,
+        help=(
+            "When --dataset-dir is set, require manifest.evidence_source to match "
+            "(e.g. ltr_passage_rankings)."
+        ),
+    )
+    parser.add_argument(
         "--train-batch-size",
         type=int,
         default=None,
@@ -138,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
             repo_root=root,
             run_id=args.run_id,
             max_examples=args.max_examples,
+            dataset_dir=args.dataset_dir,
+            required_evidence_source=args.required_evidence_source,
         )
     except (
         OSError,

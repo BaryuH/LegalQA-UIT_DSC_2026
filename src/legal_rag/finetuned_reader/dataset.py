@@ -321,13 +321,8 @@ def _excluded_example_from_dict(payload: Mapping[str, object]) -> ExcludedExampl
     )
 
 
-def _load_cached_dataset(
-    output_dir: Path,
-    *,
-    cache_identity: Mapping[str, object],
-    max_examples: int | None,
-) -> DatasetBuildResult | None:
-    """Load a complete, identity-matching dataset artifact without retrieval work."""
+def _read_dataset_tree(output_dir: Path) -> DatasetBuildResult:
+    """Load and integrity-check a complete dataset artifact tree."""
 
     required_paths = (
         output_dir / "train.jsonl",
@@ -336,11 +331,13 @@ def _load_cached_dataset(
         output_dir / "dataset_manifest.json",
         output_dir / "statistics.json",
     )
-    present_paths = [path.exists() for path in required_paths]
-    if not any(present_paths):
-        return None
-    if not all(present_paths):
-        raise DatasetBuildError(f"Cached dataset is incomplete: {output_dir}")
+    missing = [path for path in required_paths if not path.exists()]
+    if missing:
+        raise DatasetBuildError(
+            "Dataset tree is incomplete: "
+            + ", ".join(path.name for path in missing)
+            + f" under {output_dir}"
+        )
     try:
         manifest = json.loads(
             (output_dir / "dataset_manifest.json").read_text(encoding="utf-8")
@@ -356,16 +353,6 @@ def _load_cached_dataset(
         raise DatasetBuildError(
             f"Cached dataset metadata must be objects: {output_dir}"
         )
-    if any(
-        manifest.get(field_name) != value
-        for field_name, value in cache_identity.items()
-    ):
-        return None
-    cached_scope = manifest.get("dataset_scope", "full")
-    if cached_scope != ("full" if max_examples is None else "smoke"):
-        return None
-    if manifest.get("requested_max_examples") != max_examples:
-        return None
 
     examples = tuple(
         _sft_example_from_dict(record)
@@ -395,6 +382,92 @@ def _load_cached_dataset(
         retrieval_failures=failures,
         manifest=manifest,
     )
+
+
+def load_prebuilt_sft_dataset(
+    output_dir: str | Path,
+    *,
+    required_evidence_source: str | None = None,
+    max_examples: int | None = None,
+) -> DatasetBuildResult:
+    """Load a prebuilt train.jsonl tree without running retrieval again.
+
+    Use this for Path-B SEDAR-SFT (LTR-packed evidence) and any other dataset
+    written by ``write_dataset_artifacts``. Gold must already be present only
+    in ``target_answer`` fields.
+    """
+
+    root = Path(output_dir).resolve()
+    result = _read_dataset_tree(root)
+    if required_evidence_source is not None:
+        source = result.manifest.get("evidence_source")
+        if source != required_evidence_source:
+            raise DatasetBuildError(
+                "Prebuilt dataset evidence_source mismatch: "
+                f"expected {required_evidence_source!r}, got {source!r}"
+            )
+    if max_examples is not None:
+        if max_examples <= 0:
+            raise DatasetBuildError("max_examples must be greater than zero")
+        examples = result.examples[:max_examples]
+        return DatasetBuildResult(
+            output_dir=result.output_dir,
+            examples=examples,
+            excluded=result.excluded,
+            retrieval_failures=result.retrieval_failures,
+            manifest={
+                **result.manifest,
+                "example_count": len(examples),
+                "requested_max_examples": max_examples,
+                "dataset_scope": "smoke",
+            },
+        )
+    return result
+
+
+def _load_cached_dataset(
+    output_dir: Path,
+    *,
+    cache_identity: Mapping[str, object],
+    max_examples: int | None,
+) -> DatasetBuildResult | None:
+    """Load a complete, identity-matching dataset artifact without retrieval work."""
+
+    required_paths = (
+        output_dir / "train.jsonl",
+        output_dir / "excluded.jsonl",
+        output_dir / "retrieval_failures.jsonl",
+        output_dir / "dataset_manifest.json",
+        output_dir / "statistics.json",
+    )
+    present_paths = [path.exists() for path in required_paths]
+    if not any(present_paths):
+        return None
+    if not all(present_paths):
+        raise DatasetBuildError(f"Cached dataset is incomplete: {output_dir}")
+    try:
+        manifest = json.loads(
+            (output_dir / "dataset_manifest.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DatasetBuildError(
+            f"Cached dataset metadata is invalid: {output_dir}"
+        ) from exc
+    if not isinstance(manifest, dict):
+        raise DatasetBuildError(
+            f"Cached dataset metadata must be objects: {output_dir}"
+        )
+    if any(
+        manifest.get(field_name) != value
+        for field_name, value in cache_identity.items()
+    ):
+        return None
+    cached_scope = manifest.get("dataset_scope", "full")
+    if cached_scope != ("full" if max_examples is None else "smoke"):
+        return None
+    if manifest.get("requested_max_examples") != max_examples:
+        return None
+    return _read_dataset_tree(output_dir)
 
 
 def build_sft_dataset(
@@ -729,5 +802,6 @@ __all__ = [
     "FrozenRetrievalResult",
     "build_sft_dataset",
     "build_sft_dataset_from_config",
+    "load_prebuilt_sft_dataset",
     "write_dataset_artifacts",
 ]

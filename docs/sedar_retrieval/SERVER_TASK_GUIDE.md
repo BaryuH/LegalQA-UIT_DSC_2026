@@ -596,26 +596,29 @@ Có thể promote R5 nếu R5 tốt hơn R7 end-to-end — không bắt buộc b
 ## Thứ tự thực thi đề xuất (checklist)
 
 ```text
-[ ] 0. Bootstrap CUDA env + SEDAR_WORK_ROOT
-[ ] TASK 00 live + reader SHA256
-[ ] TASK 01 freeze R0 (+ SEDAR reader answers/metrics)
-[ ] Full corpus --compact-nodes
-[ ] Full R1/R2a views
-[ ] Full BM25 + eval
-[ ] TASK 07 dense encode + eval          ← cần code mới
-[ ] TASK 08 RRF with dense + eval
-[ ] TASK 09 synthetic pilot + audit      ← cần code mới
-[ ] TASK 10 hard negatives               ← cần code mới
-[ ] TASK 11 LoRA retriever + rebuild     ← cần code mới
-[ ] TASK 12 feature dataset scale-up     ← cần script mới
-[ ] TASK 13 LambdaRank                   ← code sẵn; train trên server
-[ ] TASK 15 LLM analyzer                 ← cần code mới
-[ ] TASK 16 conditional rewrite          ← cần code mới
-[ ] TASK 17 full reference graph
-[ ] TASK 18 sufficiency loop             ← cần code mới
-[ ] TASK 19/20 e2e curation + reader
-[ ] TASK 21 ablation report
+[x] 0. Bootstrap CUDA env + SEDAR_WORK_ROOT
+[x] TASK 00 live + reader SHA256 (checkpoint vilegal-sedar-v1; hash in TASK 21)
+[x] TASK 01 freeze R0 (+ VAL-01 / TASK20 SEDAR metrics)
+[x] Full corpus --compact-nodes
+[x] Full R1/R2a views
+[x] Full BM25 + eval
+[x] TASK 07 dense encode + eval
+[x] TASK 08 RRF with dense + eval
+[x] TASK 09 synthetic pilot + audit
+[x] TASK 10 hard negatives
+[x] TASK 11 LoRA retriever + rebuild   ← evaluated; R4 FAIL (not promoted)
+[x] TASK 12 feature dataset scale-up
+[x] TASK 13 LambdaRank                  ← R5 e2e PROMOTE
+[ ] TASK 15 LLM analyzer                ← deferred (stop rule)
+[ ] TASK 16 conditional rewrite         ← deferred
+[ ] TASK 17 full reference graph        ← deferred / optional
+[ ] TASK 18 sufficiency loop            ← deferred
+[x] TASK 19/20 e2e curation + reader    ← pack_evidence + SEDAR e2e
+[x] TASK 21 ablation report             ← docs/sedar_retrieval/TASK21_ABLATION_AND_PROMOTION.md
+[ ] SS-05B Path-B LTR-aligned SEDAR retrain ← docs/sedar_sft/SS_05B_LTR_ALIGNED_DATASET.md
 ```
+
+**Champion:** LTR + `vilegal-sedar-v1`. Public score: METEOR **0.4894**, ROUGE-L **0.5418**.
 
 ---
 

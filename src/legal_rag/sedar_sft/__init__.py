@@ -19,6 +19,12 @@ from .dataset import (
     build_sedar_sft_dataset_from_config,
     remap_examples_to_sedar_contract,
 )
+from .ltr_dataset import (
+    LTR_EVIDENCE_SOURCE,
+    LtrDatasetBuildConfig,
+    build_sedar_sft_dataset_from_ltr,
+    build_sft_examples_from_ltr_rankings,
+)
 from .draft import GroundedDraft, attach_draft_attribution
 from .evidence_profile import EvidenceProfile, build_evidence_profile
 from .inference_baseline import SftOnlyBaselineReport, run_sft_only_baseline
@@ -72,7 +78,11 @@ __all__ = [
     "build_evidence_profile",
     "build_promotion_freeze",
     "build_sedar_manifest_template",
+    "LTR_EVIDENCE_SOURCE",
+    "LtrDatasetBuildConfig",
     "build_sedar_sft_dataset_from_config",
+    "build_sedar_sft_dataset_from_ltr",
+    "build_sft_examples_from_ltr_rankings",
     "inspect_sedar_training_infra",
     "load_runtime_profile",
     "plan_critic_patch",

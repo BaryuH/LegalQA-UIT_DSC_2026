@@ -35,6 +35,7 @@ from .dataset import (
     FrozenRetrievalResult,
     build_sft_dataset,
     build_sft_dataset_from_config,
+    load_prebuilt_sft_dataset,
     write_dataset_artifacts,
 )
 from .inference import (
@@ -116,6 +117,7 @@ __all__ = [
     "inspect_training_stack",
     "load_b2_freeze_fingerprint",
     "load_finetuned_reader_generator",
+    "load_prebuilt_sft_dataset",
     "require_complete_b2_freeze",
     "require_training_stack",
     "run_data_feasibility_audit",
