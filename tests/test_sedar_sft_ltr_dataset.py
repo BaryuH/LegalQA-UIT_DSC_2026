@@ -194,3 +194,15 @@ def test_sedar_ltr_config_profile() -> None:
     assert config.finetuned_reader.overlap_remediation_id == (
         "ftr03-train-overlap-exclusion-v1"
     )
+    assert config.finetuned_reader.model.revision == (
+        "258c56ed40529cced26fa7fcc3ecc0663e914c18"
+    )
+    assert config.finetuned_reader.lora.target_modules == (
+        "down_proj",
+        "gate_proj",
+        "k_proj",
+        "o_proj",
+        "q_proj",
+        "up_proj",
+        "v_proj",
+    )

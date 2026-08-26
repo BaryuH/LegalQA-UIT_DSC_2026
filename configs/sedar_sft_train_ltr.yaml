@@ -86,10 +86,10 @@ finetuned_reader:
     bm25_backend: cuda
     progress_every: 100
   model:
-    # Locked HF id from playbook; local path/revision unresolved until SS-04C.
-    base_model: models/sedar_sft/vilegalqwen3-1.7b-base
-    revision: UNRESOLVED
-    tokenizer: models/sedar_sft/vilegalqwen3-1.7b-base
+    # Locked from vilegal-sedar-v1 checkpoint_manifest (SS-04C / Path B).
+    base_model: /mnt/G/sedar-legalqa/models/vilegalqwen3-1.7b-base
+    revision: 258c56ed40529cced26fa7fcc3ecc0663e914c18
+    tokenizer: /mnt/G/sedar-legalqa/models/vilegalqwen3-1.7b-base
     loader: auto
     context_length: 4096
     dtype: bfloat16
@@ -102,7 +102,14 @@ finetuned_reader:
     r: 16
     alpha: 32
     dropout: 0.05
-    target_modules: []
+    target_modules:
+      - down_proj
+      - gate_proj
+      - k_proj
+      - o_proj
+      - q_proj
+      - up_proj
+      - v_proj
     bias: none
   training:
     seed: 42
