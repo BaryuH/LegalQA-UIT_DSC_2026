@@ -1,0 +1,30 @@
+# Reproducible alternate dense-retrieval benchmark.
+version: sedar-retrieval-v3
+stage: R3
+status: benchmark_only
+model_card: https://huggingface.co/bqbbao6/vietnamese-legal-embedding
+
+dense:
+  enabled: true
+  model: bqbbao6/vietnamese-legal-embedding
+  model_revision: 7568a60f24a415e3597a74e423728272c929eb0b
+  input_format: e5
+  query_prefix: "query: "
+  passage_prefix: "passage: "
+  max_seq_length: 512
+  embedding_dim: 768
+  dtype: bf16
+  normalize: true
+  top_n: 150
+
+fusion:
+  method: rrf
+  rrf_k: 60
+  union_cap: 250
+
+comparison:
+  baseline_model: Qwen/Qwen3-Embedding-4B
+  same_corpus: true
+  same_bm25: true
+  same_reader_checkpoint: true
+  same_evidence_budget: true

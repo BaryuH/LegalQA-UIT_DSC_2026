@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the Qwen3 dense legal index for SEDAR Retrieval TASK 07."""
+"""Build a dense legal index for SEDAR Retrieval TASK 07."""
 
 from __future__ import annotations
 
@@ -15,16 +15,21 @@ from legal_rag.sedar_retrieval.retrieval.bm25_passages import (
 )
 from legal_rag.sedar_retrieval.retrieval.dense import (
     DEFAULT_DENSE_MODEL,
+    DEFAULT_E5_PASSAGE_PREFIX,
+    DEFAULT_E5_QUERY_PREFIX,
+    DEFAULT_INPUT_FORMAT,
     DEFAULT_QUERY_INSTRUCTION,
     DENSE_CACHE_SCHEMA_VERSION,
     DENSE_INDEX_SCHEMA_VERSION,
     DENSE_INDEX_TYPE,
+    DENSE_INPUT_FORMATS,
     DenseIndexError,
     SentenceTransformerEncoder,
     build_dense_index_scaffold,
     dense_cache_fingerprint,
     dense_manifest_to_dict,
-    format_instruct_query,
+    format_passage_text,
+    format_query_text,
     length_bucket_order,
     normalize_embedding_matrix,
     require_dense_encode,
@@ -101,6 +106,9 @@ def _scaffold_manifest(
     normalized: bool,
     corpus_hash: str,
     passage_count: int,
+    input_format: str,
+    query_prefix: str | None,
+    passage_prefix: str | None,
 ) -> dict[str, Any]:
     manifest = build_dense_index_scaffold(
         model=model,
@@ -116,6 +124,14 @@ def _scaffold_manifest(
             "git_commit": git_commit_sha(),
             "corpus_hash": corpus_hash,
             "passage_count": passage_count,
+            "input_format": input_format,
+            "query_prefix": query_prefix,
+            "passage_prefix": passage_prefix,
+            "query_instruction": (
+                DEFAULT_QUERY_INSTRUCTION
+                if input_format == "qwen_instruction"
+                else None
+            ),
             "alignment_ok": False,
             "nan_inf_count": 0,
         }
@@ -129,6 +145,22 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--model", default=DEFAULT_DENSE_MODEL)
     parser.add_argument("--model-revision", default=None)
+    parser.add_argument(
+        "--input-format",
+        choices=DENSE_INPUT_FORMATS,
+        default=DEFAULT_INPUT_FORMAT,
+        help="Query/corpus text format expected by the embedding model.",
+    )
+    parser.add_argument(
+        "--query-prefix",
+        default=None,
+        help="E5 query prefix; defaults to 'query: ' in e5 mode.",
+    )
+    parser.add_argument(
+        "--passage-prefix",
+        default=None,
+        help="E5 passage prefix; defaults to 'passage: ' in e5 mode.",
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument(
         "--dtype",
@@ -165,6 +197,24 @@ def main() -> int:
         raise SystemExit(
             "A pinned --model-revision is required for a non-dry-run dense index."
         )
+    if args.input_format == "e5":
+        query_prefix = (
+            args.query_prefix
+            if args.query_prefix is not None
+            else DEFAULT_E5_QUERY_PREFIX
+        )
+        passage_prefix = (
+            args.passage_prefix
+            if args.passage_prefix is not None
+            else DEFAULT_E5_PASSAGE_PREFIX
+        )
+    else:
+        if args.query_prefix is not None or args.passage_prefix is not None:
+            raise SystemExit(
+                "--query-prefix/--passage-prefix require --input-format e5"
+            )
+        query_prefix = None
+        passage_prefix = None
 
     _prepare_output_dir(args.output_dir, force=args.force)
     run_id = new_run_id("dense_legal_index")
@@ -183,6 +233,9 @@ def main() -> int:
         dtype=args.dtype,
         normalized=normalized,
         max_seq_length=args.max_seq_length,
+        input_format=args.input_format,
+        query_prefix=query_prefix,
+        passage_prefix=passage_prefix,
     )
 
     if args.dry_run:
@@ -193,6 +246,9 @@ def main() -> int:
             normalized=normalized,
             corpus_hash=corpus_hash,
             passage_count=len(passages),
+            input_format=args.input_format,
+            query_prefix=query_prefix,
+            passage_prefix=passage_prefix,
         )
         _write_manifest(args.output_dir / "manifest.json", payload)
         print(json.dumps(payload, ensure_ascii=False))
@@ -217,7 +273,14 @@ def main() -> int:
     except ImportError:  # pragma: no cover - guarded by the encoder
         pass
 
-    texts = [passage.retrieval_text for passage in passages]
+    texts = [
+        format_passage_text(
+            passage.retrieval_text,
+            input_format=args.input_format,
+            passage_prefix=passage_prefix or DEFAULT_E5_PASSAGE_PREFIX,
+        )
+        for passage in passages
+    ]
     order = (
         tuple(range(len(texts)))
         if args.disable_length_bucketing
@@ -329,7 +392,14 @@ def main() -> int:
         )
 
     smoke_vector = encoder.encode(
-        [format_instruct_query(args.smoke_query)],
+        [
+            format_query_text(
+                args.smoke_query,
+                input_format=args.input_format,
+                instruction=DEFAULT_QUERY_INSTRUCTION,
+                query_prefix=query_prefix or DEFAULT_E5_QUERY_PREFIX,
+            )
+        ],
         batch_size=1,
     )
     if normalized:
@@ -361,6 +431,9 @@ def main() -> int:
         "dtype": args.dtype,
         "normalized": normalized,
         "max_seq_length": args.max_seq_length,
+        "input_format": args.input_format,
+        "query_prefix": query_prefix,
+        "passage_prefix": passage_prefix,
         "passage_count": len(passages),
         "embedding_dim": embedding_dim,
         "vector_dtype": "float32",
@@ -376,7 +449,15 @@ def main() -> int:
         "git_commit": git_commit_sha(),
         "model": args.model,
         "model_revision": args.model_revision,
-        "query_instruction": DEFAULT_QUERY_INSTRUCTION,
+        "query_instruction": (
+            DEFAULT_QUERY_INSTRUCTION
+            if args.input_format == "qwen_instruction"
+            else None
+        ),
+        "input_format": args.input_format,
+        "query_prefix": query_prefix,
+        "passage_prefix": passage_prefix,
+        "max_seq_length": args.max_seq_length,
         "cache_key": cache_key,
         "embedding_dim": embedding_dim,
         "dtype": args.dtype,

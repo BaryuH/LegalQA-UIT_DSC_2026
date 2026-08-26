@@ -12,13 +12,18 @@ from typing import Any
 from legal_rag.sedar_retrieval.gates import git_commit_sha, new_run_id
 from legal_rag.sedar_retrieval.retrieval.bm25_passages import corpus_fingerprint
 from legal_rag.sedar_retrieval.retrieval.dense import (
+    DEFAULT_E5_PASSAGE_PREFIX,
+    DEFAULT_E5_QUERY_PREFIX,
+    DEFAULT_INPUT_FORMAT,
+    DEFAULT_QUERY_INSTRUCTION,
     DENSE_CACHE_SCHEMA_VERSION,
     DENSE_INDEX_SCHEMA_VERSION,
     DENSE_INDEX_TYPE,
     DenseIndexError,
     SentenceTransformerEncoder,
     dense_cache_fingerprint,
-    format_instruct_query,
+    format_passage_text,
+    format_query_text,
     length_bucket_order,
     load_dense_index,
     normalize_embedding_matrix,
@@ -94,7 +99,12 @@ def main() -> int:
         default="auto",
         help="Use mmap, .npy shards, or mmap with automatic fallback to shards.",
     )
-    parser.add_argument("--max-seq-length", type=int, default=8192)
+    parser.add_argument(
+        "--max-seq-length",
+        type=int,
+        default=None,
+        help="Override the base index manifest sequence length.",
+    )
     parser.add_argument("--smoke-query", default="Điều 76")
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--local-files-only", action="store_true")
@@ -103,6 +113,8 @@ def main() -> int:
 
     if args.batch_size <= 0 or args.shard_size <= 0 or args.top_k <= 0:
         raise SystemExit("--batch-size, --shard-size, and --top-k must be positive")
+    if args.max_seq_length is not None and args.max_seq_length <= 0:
+        raise SystemExit("--max-seq-length must be positive")
 
     _prepare_output_dir(args.output_dir, force=args.force)
     require_dense_encode()
@@ -119,11 +131,58 @@ def main() -> int:
     )
     if not revision.strip():
         raise SystemExit("Adapter/base manifest must contain a model revision")
-    instruction = str(
+    input_format = str(
         adapter_manifest.get(
-            "query_instruction",
-            base_loaded.manifest.get("query_instruction"),
+            "input_format",
+            base_loaded.manifest.get("input_format", DEFAULT_INPUT_FORMAT),
         )
+    )
+    raw_instruction = adapter_manifest.get(
+        "query_instruction",
+        base_loaded.manifest.get("query_instruction"),
+    )
+    instruction = (
+        str(raw_instruction)
+        if isinstance(raw_instruction, str) and raw_instruction.strip()
+        else DEFAULT_QUERY_INSTRUCTION
+    )
+    if input_format == "e5":
+        raw_query_prefix = adapter_manifest.get(
+            "query_prefix",
+            base_loaded.manifest.get("query_prefix"),
+        )
+        raw_passage_prefix = adapter_manifest.get(
+            "passage_prefix",
+            base_loaded.manifest.get("passage_prefix"),
+        )
+        if (
+            not isinstance(raw_query_prefix, str)
+            or not raw_query_prefix.strip()
+            or not isinstance(raw_passage_prefix, str)
+            or not raw_passage_prefix.strip()
+        ):
+            raise SystemExit("E5 dense manifest prefixes must be non-blank strings")
+        query_prefix = raw_query_prefix
+        passage_prefix = raw_passage_prefix
+    elif input_format == "qwen_instruction":
+        query_prefix = None
+        passage_prefix = None
+    else:
+        raise SystemExit(f"Unsupported dense input format: {input_format!r}")
+    manifest_max_seq_length = adapter_manifest.get(
+        "max_seq_length",
+        base_loaded.manifest.get("max_seq_length", 8192),
+    )
+    if (
+        isinstance(manifest_max_seq_length, bool)
+        or not isinstance(manifest_max_seq_length, int)
+        or manifest_max_seq_length <= 0
+    ):
+        raise SystemExit("Dense manifest max_seq_length must be a positive integer")
+    max_seq_length = (
+        args.max_seq_length
+        if args.max_seq_length is not None
+        else manifest_max_seq_length
     )
     dtype = str(base_loaded.manifest.get("dtype", "bf16"))
     normalized = bool(base_loaded.manifest.get("normalized", True))
@@ -141,7 +200,7 @@ def main() -> int:
         device=args.device,
         dtype=dtype,  # type: ignore[arg-type]
         revision=revision,
-        max_seq_length=args.max_seq_length,
+        max_seq_length=max_seq_length,
         local_files_only=args.local_files_only,
     )
     try:
@@ -159,7 +218,14 @@ def main() -> int:
     except (OSError, ValueError) as exc:
         raise SystemExit(f"TASK11_REBUILD_FAILED: {exc}") from exc
 
-    texts = [passage.retrieval_text for passage in passages]
+    texts = [
+        format_passage_text(
+            passage.retrieval_text,
+            input_format=input_format,
+            passage_prefix=passage_prefix or DEFAULT_E5_PASSAGE_PREFIX,
+        )
+        for passage in passages
+    ]
     order = length_bucket_order(texts)
     embeddings: Any = None
     embedding_dim: int | None = None
@@ -267,7 +333,14 @@ def main() -> int:
         )
 
     smoke_vector = encoder.encode(
-        [format_instruct_query(args.smoke_query, instruction=instruction)],
+        [
+            format_query_text(
+                args.smoke_query,
+                input_format=input_format,
+                instruction=instruction,
+                query_prefix=query_prefix or DEFAULT_E5_QUERY_PREFIX,
+            )
+        ],
         batch_size=1,
     )
     if normalized:
@@ -285,7 +358,10 @@ def main() -> int:
         model_revision=revision,
         dtype=dtype,
         normalized=normalized,
-        max_seq_length=args.max_seq_length,
+        max_seq_length=max_seq_length,
+        input_format=input_format,
+        query_prefix=query_prefix,
+        passage_prefix=passage_prefix,
     )
     run_id = new_run_id("dense_lora_rebuild")
     payload = {
@@ -294,7 +370,13 @@ def main() -> int:
         "git_commit": git_commit_sha(),
         "model": model,
         "model_revision": revision,
-        "query_instruction": instruction,
+        "query_instruction": (
+            instruction if input_format == "qwen_instruction" else None
+        ),
+        "input_format": input_format,
+        "query_prefix": query_prefix,
+        "passage_prefix": passage_prefix,
+        "max_seq_length": max_seq_length,
         "cache_key": cache_key,
         "embedding_dim": embedding_dim,
         "dtype": dtype,
@@ -334,7 +416,10 @@ def main() -> int:
         "model_revision": revision,
         "dtype": dtype,
         "normalized": normalized,
-        "max_seq_length": args.max_seq_length,
+        "max_seq_length": max_seq_length,
+        "input_format": input_format,
+        "query_prefix": query_prefix,
+        "passage_prefix": passage_prefix,
         "passage_count": len(passages),
         "embedding_dim": embedding_dim,
         "vector_dtype": "float32",

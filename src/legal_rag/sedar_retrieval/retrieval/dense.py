@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from legal_rag.sedar_retrieval.cuda_policy import CudaDeferredError, probe_cuda
 
@@ -23,8 +23,13 @@ DEFAULT_QUERY_INSTRUCTION = (
     "Prioritize applicable rules, conditions, exceptions, definitions and "
     "referenced provisions."
 )
+DENSE_INPUT_FORMATS = ("qwen_instruction", "e5")
+DenseInputFormat = Literal["qwen_instruction", "e5"]
+DEFAULT_INPUT_FORMAT: DenseInputFormat = "qwen_instruction"
+DEFAULT_E5_QUERY_PREFIX = "query: "
+DEFAULT_E5_PASSAGE_PREFIX = "passage: "
 DENSE_INDEX_SCHEMA_VERSION = "sedar-retrieval-v3-dense-index-v1"
-DENSE_CACHE_SCHEMA_VERSION = "sedar-retrieval-v3-dense-cache-v1"
+DENSE_CACHE_SCHEMA_VERSION = "sedar-retrieval-v3-dense-cache-v2"
 DENSE_INDEX_TYPE = "faiss.IndexFlatIP"
 
 
@@ -124,6 +129,51 @@ def format_instruct_query(
     return f"Instruct: {instruction}\nQuery: {question}"
 
 
+def format_query_text(
+    question: str,
+    *,
+    input_format: str = DEFAULT_INPUT_FORMAT,
+    instruction: str = DEFAULT_QUERY_INSTRUCTION,
+    query_prefix: str = DEFAULT_E5_QUERY_PREFIX,
+) -> str:
+    """Format a query for the selected embedding model family."""
+
+    if not question.strip():
+        raise ValueError("question must not be blank")
+    if input_format == "qwen_instruction":
+        return format_instruct_query(question, instruction=instruction)
+    if input_format == "e5":
+        if not query_prefix.strip():
+            raise ValueError("query_prefix must not be blank for E5 inputs")
+        return f"{query_prefix}{question}"
+    raise ValueError(
+        f"Unsupported dense input format: {input_format!r}; "
+        f"expected one of {DENSE_INPUT_FORMATS}"
+    )
+
+
+def format_passage_text(
+    passage: str,
+    *,
+    input_format: str = DEFAULT_INPUT_FORMAT,
+    passage_prefix: str = DEFAULT_E5_PASSAGE_PREFIX,
+) -> str:
+    """Format a corpus passage for the selected embedding model family."""
+
+    if not passage.strip():
+        raise ValueError("passage must not be blank")
+    if input_format == "qwen_instruction":
+        return passage
+    if input_format == "e5":
+        if not passage_prefix.strip():
+            raise ValueError("passage_prefix must not be blank for E5 inputs")
+        return f"{passage_prefix}{passage}"
+    raise ValueError(
+        f"Unsupported dense input format: {input_format!r}; "
+        f"expected one of {DENSE_INPUT_FORMATS}"
+    )
+
+
 def length_bucket_order(texts: Sequence[str]) -> tuple[int, ...]:
     """Return a deterministic length-bucket order while preserving tie order."""
 
@@ -142,6 +192,9 @@ def dense_cache_fingerprint(
     dtype: str,
     normalized: bool,
     max_seq_length: int,
+    input_format: str = DEFAULT_INPUT_FORMAT,
+    query_prefix: str | None = None,
+    passage_prefix: str | None = None,
 ) -> str:
     """Create a stable cache key for passage IDs and encoder configuration."""
 
@@ -152,6 +205,9 @@ def dense_cache_fingerprint(
         "model": model,
         "model_revision": model_revision,
         "normalized": normalized,
+        "input_format": input_format,
+        "query_prefix": query_prefix,
+        "passage_prefix": passage_prefix,
         "schema_version": DENSE_CACHE_SCHEMA_VERSION,
     }
     serialized = json.dumps(
@@ -235,7 +291,7 @@ def _load_sentence_transformer() -> Any:
 
 
 class SentenceTransformerEncoder:
-    """Thin, auditable adapter around SentenceTransformers for Qwen embeddings."""
+    """Thin, auditable adapter around SentenceTransformers encoders."""
 
     def __init__(
         self,
@@ -441,7 +497,11 @@ def dense_manifest_to_dict(manifest: DenseIndexManifest) -> dict[str, Any]:
 
 __all__ = [
     "DEFAULT_DENSE_MODEL",
+    "DEFAULT_E5_PASSAGE_PREFIX",
+    "DEFAULT_E5_QUERY_PREFIX",
+    "DEFAULT_INPUT_FORMAT",
     "DEFAULT_QUERY_INSTRUCTION",
+    "DENSE_INPUT_FORMATS",
     "DENSE_CACHE_SCHEMA_VERSION",
     "DENSE_INDEX_SCHEMA_VERSION",
     "DENSE_INDEX_TYPE",
@@ -454,6 +514,8 @@ __all__ = [
     "build_dense_index_scaffold",
     "dense_manifest_to_dict",
     "dense_cache_fingerprint",
+    "format_passage_text",
+    "format_query_text",
     "format_instruct_query",
     "length_bucket_order",
     "load_dense_index",

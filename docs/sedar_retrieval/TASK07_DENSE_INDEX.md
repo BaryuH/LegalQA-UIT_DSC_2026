@@ -58,6 +58,82 @@ NaN/Inf count, reload top-k overlap, throughput, index size, and peak VRAM.
 Use `--embedding-storage sharded` on mounts that do not support POSIX
 `mmap`/`numpy.memmap` (for example, some `/mnt/G` filesystems).
 
+## Alternate model benchmark: bqbbao6 Vietnamese legal embedding
+
+`bqbbao6/vietnamese-legal-embedding` is an E5-based SentenceTransformer model.
+It requires `query: ` and `passage: ` prefixes, has a 512-token context limit,
+and returns 768-dimensional vectors.  Its verified Hugging Face revision is
+`7568a60f24a415e3597a74e423728272c929eb0b`.
+
+Use a new index directory; never overwrite or reuse the Qwen index/cache:
+
+```bash
+ALT_ROOT="$SEDAR_WORK_ROOT/artifacts/sedar_retrieval/experiments/bqbbao6_vietnamese_legal_embedding"
+
+python scripts/sedar_retrieval/build_dense_index.py \
+  --passages "$VIEWS/passages_r2a.jsonl" \
+  --output-dir "$ALT_ROOT/index" \
+  --model bqbbao6/vietnamese-legal-embedding \
+  --model-revision 7568a60f24a415e3597a74e423728272c929eb0b \
+  --input-format e5 \
+  --max-seq-length 512 \
+  --device cuda \
+  --dtype bf16 \
+  --batch-size 32 \
+  --shard-size 4096 \
+  --embedding-storage sharded \
+  --top-k 10 \
+  --local-files-only
+```
+
+If this is the first run on the server, omit `--local-files-only` once so
+the pinned model can be downloaded into `HF_HOME`; add it back for an offline
+rerun.
+
+The same `--input-format e5` is read from the index manifest by
+`run_dense_retrieval.py`, so query formatting stays aligned with the passage
+format.  Compare with the Qwen baseline using the same corpus, BM25 results,
+query split, reader checkpoint, and evidence budget.
+
+```bash
+ALT_EVAL="$ALT_ROOT/eval"
+BM25="$SEDAR_WORK_ROOT/artifacts/sedar_retrieval/eval/bm25_r2a_warmup500.jsonl"
+SILVER="$SEDAR_WORK_ROOT/artifacts/sedar_retrieval/eval/silver_r2a_warmup500.jsonl"
+
+python scripts/sedar_retrieval/run_dense_retrieval.py \
+  --index-dir "$ALT_ROOT/index" \
+  --passages "$VIEWS/passages_r2a.jsonl" \
+  --questions "$PROJECT_ROOT/data/warmup.json" \
+  --split warmup \
+  --top-k 150 \
+  --batch-size 32 \
+  --output "$ALT_EVAL/dense_r2a_bqbbao6_warmup500.jsonl" \
+  --local-files-only
+
+python scripts/sedar_retrieval/eval_retrieval.py \
+  --pred "$ALT_EVAL/dense_r2a_bqbbao6_warmup500.jsonl" \
+  --labels "$SILVER" \
+  --output "$ALT_EVAL/dense_r2a_bqbbao6_warmup500_metrics.json"
+
+python scripts/sedar_retrieval/fuse_candidates.py \
+  --bm25 "$BM25" \
+  --dense "$ALT_EVAL/dense_r2a_bqbbao6_warmup500.jsonl" \
+  --rrf-k 60 \
+  --union-cap 250 \
+  --output "$ALT_EVAL/rrf_r2a_bqbbao6_warmup500.jsonl"
+
+python scripts/sedar_retrieval/eval_retrieval.py \
+  --pred "$ALT_EVAL/rrf_r2a_bqbbao6_warmup500.jsonl" \
+  --labels "$SILVER" \
+  --output "$ALT_EVAL/rrf_r2a_bqbbao6_warmup500_metrics.json"
+```
+
+Do not run the existing Qwen-trained `task13_lambdarank/full_all` directly on
+these new candidates: dense score/rank features are model-dependent.  For a
+full LTR/e2e comparison, rebuild the synthetic dense + RRF candidates and the
+TASK 12/13 artifacts under the same alternate-model root, then run TASK 20
+with the unchanged reader checkpoint and evidence budget.
+
 ## Dense retrieval and evaluation
 
 ```bash

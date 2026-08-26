@@ -8,6 +8,8 @@ from legal_rag.sedar_retrieval.retrieval.dense import (
     DenseIndexError,
     dense_cache_fingerprint,
     format_instruct_query,
+    format_passage_text,
+    format_query_text,
     length_bucket_order,
     normalize_embedding_matrix,
     search_dense_index,
@@ -36,6 +38,40 @@ def test_format_instruct_query_matches_task_contract() -> None:
         "the answer."
     )
     assert formatted.endswith("Query: Điều kiện hưởng trợ cấp là gì?")
+
+
+def test_e5_format_uses_query_and_passage_prefixes() -> None:
+    assert (
+        format_query_text(
+            "Điều kiện hưởng trợ cấp là gì?",
+            input_format="e5",
+        )
+        == "query: Điều kiện hưởng trợ cấp là gì?"
+    )
+    assert (
+        format_passage_text(
+            "Điều kiện hưởng trợ cấp được quy định như sau.",
+            input_format="e5",
+        )
+        == "passage: Điều kiện hưởng trợ cấp được quy định như sau."
+    )
+
+
+def test_dense_cache_fingerprint_changes_with_input_format() -> None:
+    base = {
+        "corpus_hash": "corpus",
+        "model": "bqbbao6/vietnamese-legal-embedding",
+        "model_revision": "7568a60f24a415e3597a74e423728272c929eb0b",
+        "dtype": "bf16",
+        "normalized": True,
+        "max_seq_length": 512,
+        "input_format": "e5",
+        "query_prefix": "query: ",
+        "passage_prefix": "passage: ",
+    }
+    assert dense_cache_fingerprint(**base) != dense_cache_fingerprint(
+        **{**base, "passage_prefix": "passage = "}
+    )
 
 
 def test_length_bucket_order_is_stable() -> None:

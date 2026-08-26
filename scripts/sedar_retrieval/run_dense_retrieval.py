@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Qwen3 dense retrieval over SEDAR questions (TASK 07)."""
+"""Run dense retrieval over SEDAR questions (TASK 07)."""
 
 from __future__ import annotations
 
@@ -11,10 +11,13 @@ from typing import Any
 
 from legal_rag.sedar_retrieval.retrieval.bm25_passages import corpus_fingerprint
 from legal_rag.sedar_retrieval.retrieval.dense import (
+    DEFAULT_E5_QUERY_PREFIX,
+    DEFAULT_INPUT_FORMAT,
     DEFAULT_QUERY_INSTRUCTION,
     DENSE_INDEX_TYPE,
+    DENSE_INPUT_FORMATS,
     SentenceTransformerEncoder,
-    format_instruct_query,
+    format_query_text,
     load_dense_index,
     normalize_embedding_matrix,
     require_dense_encode,
@@ -56,7 +59,9 @@ def _write_latency(path: Path, values: list[float], *, n_queries: int) -> None:
     )
 
 
-def _apply_lora_adapter_if_present(encoder: SentenceTransformerEncoder, manifest: dict[str, object]) -> None:
+def _apply_lora_adapter_if_present(
+    encoder: SentenceTransformerEncoder, manifest: dict[str, object]
+) -> None:
     adapter_dir = manifest.get("adapter_dir")
     if not adapter_dir:
         return
@@ -125,7 +130,12 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--top-k", type=int, default=150)
     parser.add_argument("--limit", type=int, default=0)
-    parser.add_argument("--max-seq-length", type=int, default=8192)
+    parser.add_argument(
+        "--max-seq-length",
+        type=int,
+        default=None,
+        help="Override the index manifest sequence length.",
+    )
     parser.add_argument("--local-files-only", action="store_true")
     args = parser.parse_args()
 
@@ -135,7 +145,7 @@ def main() -> int:
         raise SystemExit("Provide only one of --questions or --synthetic-jsonl")
     if args.batch_size <= 0 or args.top_k <= 0:
         raise SystemExit("--batch-size and --top-k must be positive")
-    if args.max_seq_length <= 0:
+    if args.max_seq_length is not None and args.max_seq_length <= 0:
         raise SystemExit("--max-seq-length must be positive")
 
     passages = load_passages_jsonl(str(args.passages))
@@ -168,9 +178,46 @@ def main() -> int:
     revision = loaded.manifest.get("model_revision")
     if not isinstance(revision, str) or not revision.strip():
         raise SystemExit("Dense manifest must contain a pinned model_revision")
-    instruction = loaded.manifest.get("query_instruction")
-    if instruction != DEFAULT_QUERY_INSTRUCTION:
-        raise SystemExit("Dense manifest query instruction does not match the contract")
+    input_format = loaded.manifest.get("input_format", DEFAULT_INPUT_FORMAT)
+    if not isinstance(input_format, str) or input_format not in DENSE_INPUT_FORMATS:
+        raise SystemExit(
+            f"Dense manifest input_format is unsupported: {input_format!r}"
+        )
+    raw_instruction = loaded.manifest.get("query_instruction")
+    if input_format == "qwen_instruction":
+        if raw_instruction != DEFAULT_QUERY_INSTRUCTION:
+            raise SystemExit(
+                "Dense manifest query instruction does not match the contract"
+            )
+        instruction = DEFAULT_QUERY_INSTRUCTION
+        query_prefix = DEFAULT_E5_QUERY_PREFIX
+    else:
+        instruction = DEFAULT_QUERY_INSTRUCTION
+        raw_query_prefix = loaded.manifest.get("query_prefix")
+        raw_passage_prefix = loaded.manifest.get("passage_prefix")
+        if (
+            not isinstance(raw_query_prefix, str)
+            or not raw_query_prefix.strip()
+            or not isinstance(raw_passage_prefix, str)
+            or not raw_passage_prefix.strip()
+        ):
+            raise SystemExit(
+                "Dense manifest E5 query_prefix/passage_prefix must be "
+                "non-blank strings"
+            )
+        query_prefix = raw_query_prefix
+    manifest_max_seq_length = loaded.manifest.get("max_seq_length", 8192)
+    if (
+        isinstance(manifest_max_seq_length, bool)
+        or not isinstance(manifest_max_seq_length, int)
+        or manifest_max_seq_length <= 0
+    ):
+        raise SystemExit("Dense manifest max_seq_length must be a positive integer")
+    max_seq_length = (
+        args.max_seq_length
+        if args.max_seq_length is not None
+        else manifest_max_seq_length
+    )
     dtype = str(loaded.manifest.get("dtype", "bf16"))
     normalized_value = loaded.manifest.get("normalized")
     if not isinstance(normalized_value, bool):
@@ -181,7 +228,7 @@ def main() -> int:
         device=args.device,
         dtype=dtype,
         revision=revision,
-        max_seq_length=args.max_seq_length,
+        max_seq_length=max_seq_length,
         local_files_only=args.local_files_only,
     )
     _apply_lora_adapter_if_present(encoder, loaded.manifest)
@@ -197,7 +244,12 @@ def main() -> int:
     if args.limit > 0:
         queries = queries[: args.limit]
     query_texts = [
-        format_instruct_query(query.question, instruction=instruction)
+        format_query_text(
+            query.question,
+            input_format=input_format,
+            instruction=instruction,
+            query_prefix=query_prefix,
+        )
         for query in queries
     ]
     all_hits: list[tuple[Any, ...]] = []
@@ -233,6 +285,8 @@ def main() -> int:
                 "corpus_hash": corpus_hash,
                 "model": model,
                 "model_revision": revision,
+                "input_format": input_format,
+                "max_seq_length": max_seq_length,
                 "adapter_dir": loaded.manifest.get("adapter_dir"),
                 "top_k": args.top_k,
                 "latency": str(latency_path),
