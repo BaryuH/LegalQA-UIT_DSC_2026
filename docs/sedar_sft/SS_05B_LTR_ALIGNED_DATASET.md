@@ -1,5 +1,7 @@
 # SS-05B — LTR-aligned SEDAR-SFT dataset (Path B)
 
+**Index:** Tổng hợp upgrade + hướng dẫn đầy đủ → [`README.md`](README.md)
+
 **Task:** SS-05B  
 **Date:** 2026-08-26  
 **Status:** CODE PASS (local) — full train LTR rankings + QLoRA remain server ops  
