@@ -115,3 +115,14 @@ hyperparameters, and leakage policy (`split_unit=query_id`).
 - reader checksum unchanged
 
 Train/validation LambdaRank loss alone is **not** sufficient for promotion.
+
+## Promotion outcome (recorded)
+
+Silver warmup retrieval metrics alone did **not** promote R5 (LTR ≈ dense on nDCG/MRR).
+
+TASK 20 e2e with frozen SEDAR-SFT **did** promote LTR:
+
+- Warmup clean-460: LTR METEOR **0.536** / ROUGE-L **0.479** vs dense **0.522** / **0.469**
+- Public official (submitted): **0.4894** (METEOR) / **0.5418** (ROUGE-L)
+
+Full matrix: `docs/sedar_retrieval/TASK21_ABLATION_AND_PROMOTION.md`.

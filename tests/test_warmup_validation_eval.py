@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from legal_rag.evaluation import EvaluationOptions
+from legal_rag.evaluation import LOCAL_SCORER_ID, EvaluationOptions
 from legal_rag.evaluation.models import InputRecord
 from legal_rag.finetuned_reader.warmup_eval import (
     VAL01_POLICY_ID,
@@ -131,6 +131,7 @@ def test_eval_join_opens_gold_only_for_clean_ids(
             run_id="val01-fixture",
             method="hybrid_rag",
             split="warmup",
+            scorer=LOCAL_SCORER_ID,
         ),
     )
     assert report.artifact["counts"]["evaluated"] == 2
@@ -162,7 +163,12 @@ def test_public_answer_never_in_eval_artifacts(
     report = evaluate_clean_warmup(
         references=references,
         predictions_path=predictions_path,
-        options=EvaluationOptions(run_id="x", method="hybrid_rag", split="warmup"),
+        options=EvaluationOptions(
+            run_id="x",
+            method="hybrid_rag",
+            split="warmup",
+            scorer=LOCAL_SCORER_ID,
+        ),
     )
     summary = build_eval_summary(
         manifest=manifest,

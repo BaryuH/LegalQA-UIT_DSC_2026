@@ -39,6 +39,15 @@ Prefer running the full build on the server disk (`SEDAR_WORK_ROOT`).
 - TASK 13 LightGBM training on full candidate pools
 - TASK 15/16/18 LLM analyzer / rewrite / sufficiency
 
+## Server completion note (2026-08-26)
+
+Score-affecting path completed and submitted:
+
+- Champion: BM25 + dense zero-shot → RRF → LTR → `vilegal-sedar-v1`
+- Warmup e2e promote LTR; R4 LoRA and RRF-only e2e rejected
+- Public official: METEOR **0.4894**, ROUGE-L **0.5418**
+- Record: `docs/sedar_retrieval/TASK21_ABLATION_AND_PROMOTION.md`
+
 ## Key paths
 
 ```text

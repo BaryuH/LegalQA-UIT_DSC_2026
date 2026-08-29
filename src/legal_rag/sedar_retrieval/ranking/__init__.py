@@ -1,10 +1,14 @@
 """Ranking package for SEDAR Retrieval v3."""
 
 from .features import (
+    ENSEMBLE_FEATURE_NAMES,
+    ENSEMBLE_FEATURE_SCHEMA_VERSION,
     FEATURE_NAMES,
     FEATURE_SCHEMA_VERSION,
+    FeatureProfile,
     LTRFeatureRow,
     assert_train_inference_parity,
+    extract_ensemble_features,
     extract_features,
     feature_vector,
 )
@@ -17,6 +21,7 @@ from .ltr_dataset import (
     LTRFeatureBuildReport,
     SyntheticQueryView,
     build_ltr_feature_rows,
+    feature_profile_spec,
     group_feature_rows,
     load_question_map,
     load_rrf_candidates,
@@ -48,8 +53,11 @@ from .ltr_ranker import (
 
 __all__ = [
     "FEATURE_GROUPS",
+    "ENSEMBLE_FEATURE_NAMES",
+    "ENSEMBLE_FEATURE_SCHEMA_VERSION",
     "FEATURE_NAMES",
     "FEATURE_SCHEMA_VERSION",
+    "FeatureProfile",
     "LabelSource",
     "LTRCandidate",
     "LTR_DATASET_SCHEMA_VERSION",
@@ -70,8 +78,10 @@ __all__ = [
     "build_ranker_matrices",
     "build_train_split",
     "evaluate_ranker_matrices",
+    "extract_ensemble_features",
     "extract_features",
     "feature_vector",
+    "feature_profile_spec",
     "group_feature_rows",
     "load_feature_examples",
     "load_question_map",

@@ -241,6 +241,11 @@ def run_sedar_e2e(
         "train_prompt_path": str(config.train_prompt_path),
         "prompt_version": config.prompt_version,
         "max_new_tokens": config.max_new_tokens,
+        "evidence": {
+            "evidence_top_k": config.evidence.evidence_top_k,
+            "max_total_chars": config.evidence.max_total_chars,
+            "max_chunks_per_document": config.evidence.max_chunks_per_document,
+        },
         "device": config.device,
         "load_in_4bit": config.load_in_4bit,
         "split": config.split,

@@ -18,7 +18,10 @@ if __package__ in {None, ""}:
         sys.path.insert(0, str(_SRC_ROOT))
 
 from legal_rag.evaluation import (  # noqa: E402
+    LOCAL_SCORER_ID,
+    SOURCE_SCORER_ID,
     EvaluationOptions,
+    SourceScorerDependencyError,
     evaluate_records,
     write_report,
 )
@@ -43,14 +46,31 @@ def _manifest_hash(repo_root: Path, manifest: Path) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Score a complete prediction set against references using the local "
-            "exact-token METEOR and token-level ROUGE-L adapters."
+            "Score a complete prediction set against references using an explicit "
+            "versioned scorer adapter."
         )
     )
     parser.add_argument("--references", required=True, type=Path)
     parser.add_argument("--predictions", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--method", default="local")
+    parser.add_argument(
+        "--method-version",
+        default="UNRESOLVED",
+        help="Semantic model/method version recorded in the metric artifact.",
+    )
+    parser.add_argument(
+        "--scorer",
+        choices=(SOURCE_SCORER_ID, LOCAL_SCORER_ID),
+        default=SOURCE_SCORER_ID,
+        help="Scorer adapter; the source-compatible adapter is the default.",
+    )
+    parser.add_argument(
+        "--scorer-source",
+        default="UNRESOLVED",
+        type=Path,
+        help="Archived BTC scorer source path, when available.",
+    )
     parser.add_argument(
         "--split",
         required=True,
@@ -94,9 +114,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         options = EvaluationOptions(
             run_id=run_id,
             method=args.method,
+            method_version=args.method_version,
             split=args.split,
             data_manifest_hash=manifest_hash,
             prediction_artifact=args.predictions.as_posix(),
+            prediction_artifact_sha256=_sha256(args.predictions),
+            scorer=args.scorer,
+            scorer_source_path=args.scorer_source.as_posix(),
+            scorer_source_sha256=(
+                _sha256(args.scorer_source)
+                if args.scorer_source.is_file()
+                else "UNRESOLVED"
+            ),
             command="python scripts/evaluate_predictions.py " + " ".join(sys.argv[1:]),
         )
         report = evaluate_records(references, predictions, options)
@@ -106,6 +135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         InputFormatError,
         FileExistsError,
         OSError,
+        SourceScorerDependencyError,
         ValueError,
     ) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

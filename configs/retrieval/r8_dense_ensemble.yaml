@@ -1,0 +1,110 @@
+# SEDAR Retrieval v3 — R8 auxiliary legal dense ensemble.
+version: sedar-retrieval-v3
+stage: R8
+depends_on:
+  - R0
+  - R3
+status: local_code_ready_gpu_retrieval_deferred
+
+data:
+  passages_view: artifacts/sedar_retrieval/views/full_r1_r2a_retry_02/passages_r2a.jsonl
+  question_split: warmup
+  labels_role: evaluation_only
+
+retrievers:
+  bm25:
+    enabled: true
+    source_name: bm25
+    top_k: 100
+  qwen:
+    enabled: true
+    source_name: dense
+    model: Qwen/Qwen3-Embedding-4B
+    top_k: 100
+  legal:
+    enabled: true
+    source_name: legal
+    model: bqbbao6/vietnamese-legal-embedding
+    model_revision: 7568a60f24a415e3597a74e423728272c929eb0b
+    input_format: e5
+    query_prefix: "query: "
+    passage_prefix: "passage: "
+    max_seq_length: 512
+    top_k: 100
+    status: deferred_gpu_until_server
+
+fusion:
+  candidate_union:
+    method: union
+    cap: 300
+  weighted_rrf:
+    method: weighted_rrf
+    rrf_k: 60
+    union_cap: 250
+    weights:
+      bm25: 1.0
+      dense: 1.0
+      legal: 0.2
+  legal_weight_sweep:
+    - 0.05
+    - 0.10
+    - 0.15
+    - 0.20
+    - 0.30
+    - 0.50
+
+diagnostics:
+  script: scripts/sedar_retrieval/evaluate_ensemble.py
+  top_k: 100
+  cutoffs:
+    - 10
+    - 50
+    - 100
+  required_metrics:
+    - qwen_recall_at_k
+    - legal_recall_at_k
+    - qwen_union_legal_recall_at_k
+    - qwen_legal_overlap
+    - qwen_legal_jaccard
+    - unique_legal_candidate_count
+    - unique_legal_relevant_count
+    - legal_only_relevant_rate
+
+ltr:
+  feature_profile: ensemble_v2
+  feature_schema: configs/retrieval/ltr_feature_schema_v2.json
+  retrain_required: true
+  feature_groups:
+    - all
+    - no_legal
+    - no_agreement
+    - no_rank_difference
+
+promotion:
+  gate_script: scripts/sedar_retrieval/check_ensemble_promotion.py
+  min_gain: 0.003
+  required_boundaries:
+    - same_evaluation_scope
+    - same_frozen_reader
+    - same_evidence_budget
+    - complete_evaluation
+    - no_gold_leakage
+    - same_evaluator
+    - minimum_metric_gain
+
+reader:
+  frozen: true
+  change_allowed: false
+
+runtime:
+  seed: 42
+  local_cpu_stages:
+    - fusion
+    - diagnostics
+    - ltr_feature_build
+    - lambdarank_training
+  server_gpu_stages:
+    - legal_dense_index_build
+    - legal_dense_query_retrieval
+    - frozen_sedar_e2e
+  outputs_root: reports/ablations/R8

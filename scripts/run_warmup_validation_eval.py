@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -24,6 +25,14 @@ def _require_finetuned_reader_authorized(root: Path) -> None:
         )
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file_handle:
+        for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def main(argv: list[str] | None = None) -> int:
     root = _repo_root()
     if str(root) not in sys.path:
@@ -42,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         load_clean_inference_questions,
         load_clean_reference_records,
         load_clean_warmup_manifest,
+        load_prediction_run_provenance,
         select_included_ids,
         write_warmup_eval_artifacts,
     )
@@ -86,8 +96,28 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--method",
-        choices=("hybrid_rag", "finetuned_reader"),
+        choices=("hybrid_rag", "finetuned_reader", "sedar_sft"),
         default="hybrid_rag",
+    )
+    parser.add_argument(
+        "--method-version",
+        default="UNRESOLVED",
+        help=(
+            "Semantic model/method version. Required for sedar_sft and "
+            "finetuned_reader."
+        ),
+    )
+    parser.add_argument(
+        "--scorer",
+        choices=("btc_source_scorer_v1", "local_exact_token_metrics"),
+        default="btc_source_scorer_v1",
+        help="Versioned evaluation adapter; source-compatible scorer is default.",
+    )
+    parser.add_argument(
+        "--scorer-source",
+        type=Path,
+        default=Path("UNRESOLVED"),
+        help="Archived BTC scorer source path, when available.",
     )
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--run-id", default=None)
@@ -102,6 +132,15 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="Existing predictions.jsonl; skips inference when set.",
+    )
+    parser.add_argument(
+        "--prediction-run-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Immutable source inference run directory containing run_summary.json, "
+            "config.json, checkpoint_reference.json and predictions.jsonl."
+        ),
     )
     parser.add_argument(
         "--skip-error-report",
@@ -126,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
 
         predictions_path = args.predictions
         retrieval_path: Path | None = None
+        prediction_run_dir: Path | None = args.prediction_run_dir
         if predictions_path is None:
             # Inference boundary: question-only cases; no gold opened yet.
             cases = load_clean_inference_questions(
@@ -133,12 +173,12 @@ def main(argv: list[str] | None = None) -> int:
                 split="warmup",
                 included_ids=selected_ids,
             )
-            if args.method == "finetuned_reader":
+            if args.method in {"finetuned_reader", "sedar_sft"}:
                 _require_finetuned_reader_authorized(root)
                 raise WarmupEvalError(
-                    "finetuned_reader VAL-01 inference requires an unlocked "
-                    "checkpoint; pass --predictions from a validated FTR run "
-                    "or use --method hybrid_rag"
+                    "SEDAR/FTR VAL-01 inference requires an unlocked checkpoint; "
+                    "pass --predictions from a validated FTR run or use "
+                    "--method hybrid_rag"
                 )
             preparation = prepare_bm25_index_from_config(
                 args.config,
@@ -160,12 +200,23 @@ def main(argv: list[str] | None = None) -> int:
                 / "experiments.jsonl",
             )
             predictions_path = result.artifacts.predictions
+            prediction_run_dir = predictions_path.parent
             if result.artifacts.retrieval is not None:
                 retrieval_path = result.artifacts.retrieval
         else:
             predictions_path = Path(predictions_path)
             if not predictions_path.is_file():
                 raise WarmupEvalError(f"Predictions missing: {predictions_path}")
+            if prediction_run_dir is None:
+                prediction_run_dir = predictions_path.parent
+
+        if prediction_run_dir is None:
+            raise WarmupEvalError("Prediction run directory is required")
+        prediction_provenance = load_prediction_run_provenance(
+            prediction_run_dir,
+            method=args.method,
+            method_version=args.method_version,
+        )
 
         # Evaluation boundary: open gold only after predictions exist.
         references = load_clean_reference_records(
@@ -176,10 +227,36 @@ def main(argv: list[str] | None = None) -> int:
         options = EvaluationOptions(
             run_id=run_id,
             method=args.method,
+            method_version=args.method_version,
             split="warmup",
             data_manifest_hash=manifest.source_warmup_sha256,
             prediction_artifact=predictions_path.as_posix(),
-            command="python scripts/run_warmup_validation_eval.py",
+            command=(
+                "python scripts/run_warmup_validation_eval.py " + " ".join(sys.argv[1:])
+            ),
+            scorer=args.scorer,
+            scorer_source_path=args.scorer_source.as_posix(),
+            scorer_source_sha256=(
+                _sha256_file(args.scorer_source)
+                if args.scorer_source.is_file()
+                else "UNRESOLVED"
+            ),
+            pipeline_method=prediction_provenance.pipeline_method,
+            prediction_run_id=prediction_provenance.source_run_id,
+            prediction_source_run_dir=prediction_provenance.source_run_dir.as_posix(),
+            prediction_artifact_sha256=_sha256_file(predictions_path),
+            source_prediction_artifact_sha256=(
+                prediction_provenance.source_prediction_artifact_sha256
+            ),
+            checkpoint_manifest_hash=(prediction_provenance.checkpoint_manifest_hash),
+            adapter_hash=prediction_provenance.adapter_hash,
+            base_model=prediction_provenance.base_model,
+            base_revision=prediction_provenance.base_revision,
+            inference_config_hash=prediction_provenance.config_hash,
+            retrieval_config_hash=prediction_provenance.retrieval_config_hash,
+            index_fingerprint=prediction_provenance.index_fingerprint,
+            validation_manifest_sha256=_sha256_file(args.manifest),
+            included_ids_hash=manifest.included_ids_hash,
         )
         report = evaluate_clean_warmup(
             references=references,
@@ -232,8 +309,11 @@ def main(argv: list[str] | None = None) -> int:
                     "policy_id": VAL01_POLICY_ID,
                     "run_id": run_id,
                     "method": args.method,
+                    "method_version": args.method_version,
                     "selected_ids_count": len(selected_ids),
                     "included_ids_hash": manifest.included_ids_hash,
+                    "evaluator_name": report.artifact["evaluator_name"],
+                    "evaluator_version": report.artifact["evaluator_version"],
                     "metrics": report.artifact["metrics"],
                     "predictions": predictions_path.as_posix(),
                     "artifacts": {key: path.as_posix() for key, path in paths.items()},

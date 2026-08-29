@@ -105,7 +105,23 @@ outputs/<run_id>/
 
 ## Exit gate
 
-- prediction count == clean manifest ID count
-- reader adapter hash unchanged vs TASK 00
+- prediction count == clean manifest ID count (warmup) or full question-file coverage (public/private)
+- reader adapter hash unchanged vs TASK 00 / prior e2e runs
 - retrieval variant recorded in manifest
 - no gold leakage into inference artifacts
+
+## Champion outcome (TASK 21)
+
+Warmup clean-460 e2e (same reader `vilegal-sedar-v1`):
+
+| Variant | METEOR | ROUGE-L |
+|---|---:|---:|
+| Dense | 0.5222 | 0.4691 |
+| RRF | 0.5153 | 0.4526 |
+| **LTR** | **0.5360** | **0.4793** |
+
+**Promoted:** LTR `full_all` + frozen SEDAR-SFT.
+
+Public official score after submission (METEOR primary / ROUGE-L secondary, pair order as reported): **0.4894 / 0.5418**.
+
+See `docs/sedar_retrieval/TASK21_ABLATION_AND_PROMOTION.md`.

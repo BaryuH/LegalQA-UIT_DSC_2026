@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from legal_rag.config import load_config
-from legal_rag.evaluation import EvaluationOptions, evaluate_records
+from legal_rag.evaluation import LOCAL_SCORER_ID, EvaluationOptions, evaluate_records
 from legal_rag.evaluation.io import load_records
 from legal_rag.evaluation.models import InputRecord
 from legal_rag.generation import (
@@ -310,6 +310,7 @@ def test_direct_predictions_can_be_evaluated_against_approved_gold_fixture(
             run_id="direct-evaluation-gate",
             method="direct",
             split="warmup",
+            scorer=LOCAL_SCORER_ID,
         ),
     )
 

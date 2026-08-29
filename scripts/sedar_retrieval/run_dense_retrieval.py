@@ -22,6 +22,7 @@ from legal_rag.sedar_retrieval.retrieval.dense import (
     normalize_embedding_matrix,
     require_dense_encode,
     search_dense_index,
+    validate_source_model_pair,
 )
 from legal_rag.sedar_retrieval.retrieval.passage_adapter import load_passages_jsonl
 from legal_rag.sedar_retrieval.training.query_inputs import (
@@ -87,7 +88,11 @@ def _write_predictions(
     path: Path,
     queries: tuple[RetrievalQuery, ...],
     hits_by_query: tuple[tuple[Any, ...], ...],
+    *,
+    source_name: str = "dense",
 ) -> None:
+    if source_name not in {"dense", "legal"}:
+        raise ValueError("source_name must be 'dense' or 'legal'")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
         for query, hits in zip(queries, hits_by_query, strict=True):
@@ -95,13 +100,14 @@ def _write_predictions(
                 json.dumps(
                     {
                         "query_id": query.query_id,
+                        "retrieval_source": source_name,
                         "ranked_ids": [hit.passage_id for hit in hits],
                         "scores": [
                             {
                                 "passage_id": hit.passage_id,
-                                "dense": hit.score,
+                                source_name: hit.score,
                                 "rank": hit.rank,
-                                "source": "dense",
+                                "source": source_name,
                             }
                             for hit in hits
                         ],
@@ -126,6 +132,12 @@ def main() -> int:
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", default=None)
+    parser.add_argument(
+        "--source-name",
+        choices=("dense", "legal"),
+        default="dense",
+        help="Logical source name in the output artifact.",
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--top-k", type=int, default=150)
@@ -183,6 +195,14 @@ def main() -> int:
         raise SystemExit(
             f"Dense manifest input_format is unsupported: {input_format!r}"
         )
+    try:
+        validate_source_model_pair(
+            args.source_name,
+            model,
+            input_format=input_format,
+        )
+    except ValueError as exc:
+        raise SystemExit(f"DENSE_SOURCE_MODEL_MISMATCH: {exc}") from exc
     raw_instruction = loaded.manifest.get("query_instruction")
     if input_format == "qwen_instruction":
         if raw_instruction != DEFAULT_QUERY_INSTRUCTION:
@@ -274,7 +294,12 @@ def main() -> int:
         )
         latency_values.extend([batch_latency_ms] * len(batch_hits))
 
-    _write_predictions(args.output, queries, tuple(all_hits))
+    _write_predictions(
+        args.output,
+        queries,
+        tuple(all_hits),
+        source_name=args.source_name,
+    )
     latency_path = args.output.with_name(f"{args.output.stem}_latency.json")
     _write_latency(latency_path, latency_values, n_queries=len(queries))
     print(
@@ -285,6 +310,7 @@ def main() -> int:
                 "corpus_hash": corpus_hash,
                 "model": model,
                 "model_revision": revision,
+                "source_name": args.source_name,
                 "input_format": input_format,
                 "max_seq_length": max_seq_length,
                 "adapter_dir": loaded.manifest.get("adapter_dir"),

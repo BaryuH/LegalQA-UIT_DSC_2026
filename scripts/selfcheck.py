@@ -83,11 +83,17 @@ def _check_data_validation(root: Path) -> None:
 
 
 def _check_evaluator_golden() -> None:
-    from legal_rag.evaluation import InputRecord, evaluate_records
+    from legal_rag.evaluation import (
+        LOCAL_SCORER_ID,
+        EvaluationOptions,
+        InputRecord,
+        evaluate_records,
+    )
 
     report = evaluate_records(
         (InputRecord(id="golden-1", answer="Legal answer 37."),),
         (InputRecord(id="golden-1", answer="Legal answer 37."),),
+        EvaluationOptions(scorer=LOCAL_SCORER_ID),
     )
     _require(
         report.artifact["metrics"]["meteor"] == 1.0,

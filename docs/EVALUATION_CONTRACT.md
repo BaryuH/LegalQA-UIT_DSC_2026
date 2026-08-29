@@ -161,7 +161,18 @@ The task contract requires a non-empty answer for a valid final submission, but 
 
 ## 13. Local library and version
 
-The current project scaffold has no METEOR or ROUGE-L evaluator implementation and no selected metric library dependency. Therefore the local evaluator library/version is not yet fixed.
+The project has two explicitly named evaluator adapters:
+
+- `local_exact_token_metrics` / `A2-local-v1`: the historical exact-token
+  implementation. It remains available for reproducing old reports.
+- `btc_source_scorer_v1` / `A2-btc-source-scorer-v1`: an explicit source-scorer
+  adapter using `nltk.translate.meteor_score.meteor_score` over
+  `str.split()` tokens and `rouge_score.RougeScorer(["rougeL"])` with
+  `use_stemmer=False`.
+
+The second adapter is still local code. It must record the archived BTC scorer
+source path and SHA256 when such a source is available; without that evidence,
+`official_equivalence` remains `UNVERIFIED_UNTIL_BTC_SOURCE_HASH`.
 
 **Required local artifact fields once implemented:**
 
@@ -174,7 +185,9 @@ The current project scaffold has no METEOR or ROUGE-L evaluator implementation a
 - metric contract version;
 - command/config hash.
 
-The local implementation must be treated as provisional until it is checked against official examples or the official script. Installing a library does not make its output leaderboard-equivalent.
+Both local adapters must be treated as provisional until checked against
+official examples or the official script. Installing a library does not make
+its output leaderboard-equivalent.
 
 ## 14. Official-evaluator uncertainty
 

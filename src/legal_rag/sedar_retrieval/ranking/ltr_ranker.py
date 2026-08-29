@@ -22,6 +22,9 @@ FeatureGroupName = Literal[
     "no_citation",
     "no_hierarchy",
     "no_dense",
+    "no_legal",
+    "no_agreement",
+    "no_rank_difference",
 ]
 
 FEATURE_GROUPS: dict[str, frozenset[str]] = {
@@ -52,7 +55,25 @@ FEATURE_GROUPS: dict[str, frozenset[str]] = {
             "is_expired",
         }
     ),
-    "dense": frozenset({"dense_score", "dense_rank"}),
+    "dense": frozenset(
+        {"dense_score", "dense_rank", "qwen_score", "qwen_rank", "qwen_found"}
+    ),
+    "legal": frozenset({"legal_score", "legal_rank", "legal_found"}),
+    "agreement": frozenset(
+        {
+            "bm25_qwen_both",
+            "qwen_legal_both",
+            "bm25_legal_both",
+            "all_three",
+        }
+    ),
+    "rank_difference": frozenset(
+        {
+            "bm25_qwen_rank_diff",
+            "qwen_legal_rank_diff",
+            "bm25_legal_rank_diff",
+        }
+    ),
 }
 
 
@@ -161,10 +182,14 @@ class LTRTrainingResult:
 
 def resolve_feature_names(
     feature_group: FeatureGroupName = "all",
+    *,
+    feature_names: Sequence[str] | None = None,
 ) -> tuple[str, ...]:
     """Return ordered feature names for one ablation group."""
 
-    names = list(FEATURE_NAMES)
+    names = list(feature_names) if feature_names is not None else list(FEATURE_NAMES)
+    if not names or len(set(names)) != len(names):
+        raise LTRRankerError("Feature names must be a non-empty unique sequence")
     if feature_group == "all":
         return tuple(names)
     drop_key = feature_group.removeprefix("no_")
@@ -177,9 +202,16 @@ def resolve_feature_names(
     return tuple(selected)
 
 
-def load_feature_examples(path: str | Path) -> tuple[LTRFeatureExample, ...]:
+def load_feature_examples(
+    path: str | Path,
+    *,
+    feature_names: Sequence[str] | None = None,
+) -> tuple[LTRFeatureExample, ...]:
     """Load TASK 12 feature rows without reading answer fields."""
 
+    names = tuple(feature_names) if feature_names is not None else FEATURE_NAMES
+    if not names or len(set(names)) != len(names):
+        raise LTRRankerError("Feature names must be a non-empty unique sequence")
     examples: list[LTRFeatureExample] = []
     for line in iter_jsonl_lines(path):
         payload = json.loads(line)
@@ -198,7 +230,7 @@ def load_feature_examples(path: str | Path) -> tuple[LTRFeatureExample, ...]:
         if not isinstance(features, dict):
             raise LTRRankerError("Feature row features must be an object")
         cleaned: dict[str, float] = {}
-        for name in FEATURE_NAMES:
+        for name in names:
             if name not in features:
                 raise LTRRankerError(f"Feature row missing feature: {name}")
             value = features[name]
@@ -309,11 +341,15 @@ def build_train_split(
     examples: Sequence[LTRFeatureExample],
     *,
     config: LTRRankerConfig | None = None,
+    feature_names: Sequence[str] | None = None,
 ) -> LTRTrainSplit:
     """Split feature rows by query_id and materialize train/val matrices."""
 
     cfg = config or LTRRankerConfig()
-    feature_names = resolve_feature_names(cfg.feature_group)
+    selected_feature_names = resolve_feature_names(
+        cfg.feature_group,
+        feature_names=feature_names,
+    )
     train_ids, val_ids = split_query_ids(
         _sorted_query_ids(examples),
         validation_fraction=cfg.validation_fraction,
@@ -321,12 +357,12 @@ def build_train_split(
     )
     train = build_ranker_matrices(
         examples,
-        feature_names=feature_names,
+        feature_names=selected_feature_names,
         query_ids=train_ids,
     )
     validation = build_ranker_matrices(
         examples,
-        feature_names=feature_names,
+        feature_names=selected_feature_names,
         query_ids=val_ids,
     )
     return LTRTrainSplit(
@@ -412,6 +448,7 @@ def train_lambdarank(
     output_dir: Path,
     config: LTRRankerConfig | None = None,
     feature_schema_hash: str | None = None,
+    feature_schema_version: str | None = None,
     features_path: str | None = None,
 ) -> LTRTrainingResult:
     """Train LightGBM LGBMRanker and persist model + manifest."""
@@ -471,6 +508,7 @@ def train_lambdarank(
         "best_iteration": best_iteration,
         "feature_group": cfg.feature_group,
         "feature_names": list(split.train.feature_names),
+        "feature_schema_version": feature_schema_version,
     }
     metrics_path.write_text(
         json.dumps(metrics_payload, indent=2, ensure_ascii=False, sort_keys=True)
@@ -486,6 +524,7 @@ def train_lambdarank(
         "objective": "lambdarank",
         "features_path": features_path,
         "feature_schema_hash": feature_schema_hash,
+        "feature_schema_version": feature_schema_version,
         "feature_group": cfg.feature_group,
         "feature_names": list(split.train.feature_names),
         "model_path": str(model_path),

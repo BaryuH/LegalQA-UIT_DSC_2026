@@ -18,6 +18,7 @@ from typing import Any, Literal
 from legal_rag.sedar_retrieval.cuda_policy import CudaDeferredError, probe_cuda
 
 DEFAULT_DENSE_MODEL = "Qwen/Qwen3-Embedding-4B"
+DEFAULT_LEGAL_MODEL = "bqbbao6/vietnamese-legal-embedding"
 DEFAULT_QUERY_INSTRUCTION = (
     "Retrieve Vietnamese legal provisions that directly support the answer. "
     "Prioritize applicable rules, conditions, exceptions, definitions and "
@@ -31,6 +32,33 @@ DEFAULT_E5_PASSAGE_PREFIX = "passage: "
 DENSE_INDEX_SCHEMA_VERSION = "sedar-retrieval-v3-dense-index-v1"
 DENSE_CACHE_SCHEMA_VERSION = "sedar-retrieval-v3-dense-cache-v2"
 DENSE_INDEX_TYPE = "faiss.IndexFlatIP"
+
+
+def validate_source_model_pair(
+    source_name: str,
+    model: str,
+    *,
+    input_format: str | None = None,
+) -> None:
+    """Reject accidental source labels for the wrong dense model/index."""
+
+    expected = {
+        "dense": (DEFAULT_DENSE_MODEL, "qwen_instruction"),
+        "legal": (DEFAULT_LEGAL_MODEL, "e5"),
+    }
+    if source_name not in expected:
+        raise ValueError(f"Unsupported dense source name: {source_name!r}")
+    expected_model, expected_format = expected[source_name]
+    if model != expected_model:
+        raise ValueError(
+            f"Dense source {source_name!r} requires model {expected_model!r}; "
+            f"got {model!r}"
+        )
+    if input_format is not None and input_format != expected_format:
+        raise ValueError(
+            f"Dense source {source_name!r} requires input_format "
+            f"{expected_format!r}; got {input_format!r}"
+        )
 
 
 class DenseDependencyError(RuntimeError):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -32,7 +33,7 @@ from legal_rag.schemas import InferenceQuestion
 from legal_rag.splits import validate_reference_access
 
 VAL01_POLICY_ID = "sedar-warmup-local-eval-v1"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 T = TypeVar("T")
 
@@ -71,6 +72,42 @@ class CleanWarmupManifestView:
 
 
 @dataclass(frozen=True, slots=True)
+class PredictionRunProvenance:
+    """Immutable provenance loaded from the inference run that produced predictions."""
+
+    source_run_dir: Path
+    source_run_id: str
+    pipeline_method: str
+    config_hash: str
+    checkpoint_manifest_hash: str
+    adapter_hash: str
+    base_model: str
+    base_revision: str
+    retrieval_config_hash: str
+    index_fingerprint: str
+    source_prediction_artifact_sha256: str
+
+    def as_dict(self) -> dict[str, str]:
+        """Return content-free prediction provenance for evaluation artifacts."""
+
+        return {
+            "source_run_dir": self.source_run_dir.as_posix(),
+            "source_run_id": self.source_run_id,
+            "pipeline_method": self.pipeline_method,
+            "config_hash": self.config_hash,
+            "checkpoint_manifest_hash": self.checkpoint_manifest_hash,
+            "adapter_hash": self.adapter_hash,
+            "base_model": self.base_model,
+            "base_revision": self.base_revision,
+            "retrieval_config_hash": self.retrieval_config_hash,
+            "index_fingerprint": self.index_fingerprint,
+            "source_prediction_artifact_sha256": (
+                self.source_prediction_artifact_sha256
+            ),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class WarmupEvalResult:
     """Outputs from one VAL-01 evaluation boundary pass."""
 
@@ -79,6 +116,115 @@ class WarmupEvalResult:
     report: EvaluationReport
     summary: dict[str, Any]
     error_report: ErrorReport | None = None
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file_handle:
+        for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _read_json_object(path: Path) -> Mapping[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise WarmupEvalError(f"Unable to load inference provenance: {path}") from exc
+    if not isinstance(payload, Mapping):
+        raise WarmupEvalError(f"Inference provenance must be a JSON object: {path}")
+    return payload
+
+
+def load_prediction_run_provenance(
+    run_dir: Path,
+    *,
+    method: str,
+    method_version: str,
+) -> PredictionRunProvenance:
+    """Load and cross-check provenance for a prediction-producing run.
+
+    A filtered prediction file is not sufficient to identify a checkpoint.  The
+    caller must point to the immutable source run directory containing
+    ``run_summary.json``, ``config.json``, ``checkpoint_reference.json`` and
+    ``predictions.jsonl``.
+    """
+
+    run_dir = Path(run_dir)
+    summary_path = run_dir / "run_summary.json"
+    config_path = run_dir / "config.json"
+    checkpoint_path = run_dir / "checkpoint_reference.json"
+    predictions_path = run_dir / "predictions.jsonl"
+    for path in (summary_path, config_path, predictions_path):
+        if not path.is_file():
+            raise WarmupEvalError(f"Prediction run provenance file is missing: {path}")
+    if method in {"sedar_sft", "finetuned_reader"} and method_version == "UNRESOLVED":
+        raise WarmupEvalError(
+            "SEDAR/FTR evaluation requires explicit --method-version; "
+            "do not infer the model version from a folder name"
+        )
+
+    summary = _read_json_object(summary_path)
+    config = _read_json_object(config_path)
+    checkpoint = _read_json_object(checkpoint_path) if checkpoint_path.is_file() else {}
+    required_summary = ("run_id", "method", "config_hash", "index_fingerprint")
+    missing_summary = [key for key in required_summary if key not in summary]
+    if missing_summary:
+        raise WarmupEvalError(
+            "Prediction run summary missing provenance fields: "
+            + ", ".join(missing_summary)
+        )
+    config_hash = str(summary["config_hash"])
+    if str(config.get("config_hash", "")) != config_hash:
+        raise WarmupEvalError(
+            "Prediction run config hash does not match run_summary.json"
+        )
+
+    if method in {"sedar_sft", "finetuned_reader"}:
+        required_checkpoint = (
+            "checkpoint_manifest_hash",
+            "adapter_hash",
+            "base_model",
+            "base_revision",
+            "retrieval_config_hash",
+            "index_fingerprint",
+        )
+        missing_checkpoint = [
+            key for key in required_checkpoint if key not in checkpoint
+        ]
+        if missing_checkpoint:
+            raise WarmupEvalError(
+                "FTR prediction run missing checkpoint provenance fields: "
+                + ", ".join(missing_checkpoint)
+            )
+        if str(checkpoint["index_fingerprint"]) != str(summary["index_fingerprint"]):
+            raise WarmupEvalError(
+                "Checkpoint index fingerprint does not match run_summary.json"
+            )
+        checkpoint_values = {key: str(checkpoint[key]) for key in required_checkpoint}
+    else:
+        checkpoint_values = {
+            "checkpoint_manifest_hash": "NOT_APPLICABLE",
+            "adapter_hash": "NOT_APPLICABLE",
+            "base_model": "NOT_APPLICABLE",
+            "base_revision": "NOT_APPLICABLE",
+            "retrieval_config_hash": "NOT_APPLICABLE",
+            "index_fingerprint": str(summary["index_fingerprint"]),
+        }
+
+    return PredictionRunProvenance(
+        source_run_dir=run_dir.resolve(),
+        source_run_id=str(summary["run_id"]),
+        pipeline_method=str(summary["method"]),
+        config_hash=config_hash,
+        checkpoint_manifest_hash=checkpoint_values["checkpoint_manifest_hash"],
+        adapter_hash=checkpoint_values["adapter_hash"],
+        base_model=checkpoint_values["base_model"],
+        base_revision=checkpoint_values["base_revision"],
+        retrieval_config_hash=checkpoint_values["retrieval_config_hash"],
+        index_fingerprint=checkpoint_values["index_fingerprint"],
+        source_prediction_artifact_sha256=_sha256_file(predictions_path),
+    )
 
 
 def load_clean_warmup_manifest(path: Path) -> CleanWarmupManifestView:
@@ -299,10 +445,19 @@ def build_eval_summary(
             else "limit_prefix"
         ),
         "method": method,
+        "method_version": report.artifact.get("method_version", "UNRESOLVED"),
         "run_id": run_id,
         "split": "warmup",
         "predictions_path": predictions_path.as_posix(),
         "metrics_path": metrics_path.as_posix(),
+        "evaluator": {
+            "kind": report.artifact.get("evaluator_kind"),
+            "name": report.artifact.get("evaluator_name"),
+            "version": report.artifact.get("evaluator_version"),
+            "metric_contract_version": report.artifact.get("metric_contract_version"),
+            "scorer": report.artifact.get("scorer"),
+        },
+        "provenance": report.artifact.get("provenance"),
         "metrics": report.artifact.get("metrics"),
         "counts": report.artifact.get("counts"),
         "inference_used_answers": False,

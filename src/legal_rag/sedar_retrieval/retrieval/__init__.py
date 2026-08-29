@@ -13,6 +13,7 @@ from .dense import (
     DEFAULT_E5_PASSAGE_PREFIX,
     DEFAULT_E5_QUERY_PREFIX,
     DEFAULT_INPUT_FORMAT,
+    DEFAULT_LEGAL_MODEL,
     DEFAULT_QUERY_INSTRUCTION,
     DENSE_CACHE_SCHEMA_VERSION,
     DENSE_INDEX_SCHEMA_VERSION,
@@ -36,9 +37,15 @@ from .dense import (
     require_dense_encode,
     search_dense_index,
     validate_embedding_matrix,
+    validate_source_model_pair,
     write_passage_metadata,
 )
-from .fusion import FusedCandidate, RetrieverHit, reciprocal_rank_fusion
+from .fusion import (
+    FusedCandidate,
+    RetrieverHit,
+    candidate_union,
+    reciprocal_rank_fusion,
+)
 from .passage_adapter import load_passages_jsonl, passage_to_legal_chunk
 
 __all__ = [
@@ -46,6 +53,7 @@ __all__ = [
     "DEFAULT_E5_PASSAGE_PREFIX",
     "DEFAULT_E5_QUERY_PREFIX",
     "DEFAULT_INPUT_FORMAT",
+    "DEFAULT_LEGAL_MODEL",
     "DEFAULT_QUERY_INSTRUCTION",
     "DENSE_CACHE_SCHEMA_VERSION",
     "DENSE_INPUT_FORMATS",
@@ -61,6 +69,7 @@ __all__ = [
     "SentenceTransformerEncoder",
     "build_dense_index_scaffold",
     "build_passage_bm25_index",
+    "candidate_union",
     "corpus_fingerprint",
     "dense_cache_fingerprint",
     "dense_manifest_to_dict",
@@ -79,6 +88,7 @@ __all__ = [
     "search_dense_index",
     "search_passages",
     "validate_embedding_matrix",
+    "validate_source_model_pair",
     "write_index_manifest",
     "write_passage_metadata",
 ]

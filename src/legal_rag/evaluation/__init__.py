@@ -13,6 +13,8 @@ from .error_report import (
 from .evaluator import (
     EVALUATOR_NAME,
     EVALUATOR_VERSION,
+    LOCAL_SCORER_ID,
+    METRIC_CONTRACT_VERSION,
     EvaluationOptions,
     EvaluationReport,
     evaluate_records,
@@ -20,6 +22,13 @@ from .evaluator import (
 )
 from .models import InputRecord
 from .normalization import NormalizationConfig, NormalizedText, normalize_text
+from .source_scorer import (
+    SOURCE_METRIC_CONTRACT_VERSION,
+    SOURCE_SCORER_ID,
+    SOURCE_SCORER_NAME,
+    SOURCE_SCORER_VERSION,
+    SourceScorerDependencyError,
+)
 
 __all__ = [
     "AlignmentError",
@@ -29,8 +38,15 @@ __all__ = [
     "EvaluationOptions",
     "EvaluationReport",
     "InputRecord",
+    "LOCAL_SCORER_ID",
+    "METRIC_CONTRACT_VERSION",
     "NormalizationConfig",
     "NormalizedText",
+    "SOURCE_METRIC_CONTRACT_VERSION",
+    "SOURCE_SCORER_ID",
+    "SOURCE_SCORER_NAME",
+    "SOURCE_SCORER_VERSION",
+    "SourceScorerDependencyError",
     "align_records",
     "evaluate_records",
     "normalize_text",

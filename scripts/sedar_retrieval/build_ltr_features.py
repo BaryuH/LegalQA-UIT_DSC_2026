@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from legal_rag.sedar_retrieval.gates import git_commit_sha, new_run_id
-from legal_rag.sedar_retrieval.ranking.features import FEATURE_NAMES
 from legal_rag.sedar_retrieval.ranking.ltr_dataset import (
     LTR_DATASET_SCHEMA_VERSION,
     LTRFeatureBuildConfig,
     LTRFeatureBuildError,
     build_ltr_feature_rows,
+    feature_profile_spec,
     group_feature_rows,
     load_question_map,
     load_rrf_candidates,
@@ -70,10 +70,11 @@ def main() -> int:
         help="Synthetic source_split filter when label-source=positive_passage_id.",
     )
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--schema", type=Path, default=None)
     parser.add_argument(
-        "--schema",
-        type=Path,
-        default=Path("configs/retrieval/ltr_feature_schema_v1.json"),
+        "--feature-profile",
+        choices=("baseline_v1", "ensemble_v2"),
+        default="baseline_v1",
     )
     parser.add_argument("--manifest", type=Path, default=None)
     parser.add_argument("--groups-output", type=Path, default=None)
@@ -103,8 +104,17 @@ def main() -> int:
             "--synthetic is required when --label-source=positive_passage_id"
         )
 
+    schema_path = args.schema or Path(
+        "configs/retrieval/ltr_feature_schema_"
+        f"{'v2' if args.feature_profile == 'ensemble_v2' else 'v1'}.json"
+    )
+    feature_schema_version, feature_names = feature_profile_spec(args.feature_profile)
     try:
-        schema_hash = validate_feature_schema(args.schema)
+        schema_hash = validate_feature_schema(
+            schema_path,
+            expected_schema_version=feature_schema_version,
+            expected_feature_names=feature_names,
+        )
         candidates = load_rrf_candidates(args.candidates)
         if args.limit:
             candidates = {
@@ -121,6 +131,7 @@ def main() -> int:
             label_source=args.label_source,
             unlabeled_policy=args.unlabeled_policy,
             max_candidates=args.max_candidates,
+            feature_profile=args.feature_profile,
         )
         if args.label_source == "citation":
             assert args.questions is not None
@@ -177,9 +188,11 @@ def main() -> int:
         "label_mode": args.label_mode,
         "unlabeled_policy": args.unlabeled_policy,
         "max_candidates": args.max_candidates,
-        "feature_schema_path": str(args.schema),
+        "feature_profile": args.feature_profile,
+        "feature_schema_version": feature_schema_version,
+        "feature_schema_path": str(schema_path),
         "feature_schema_hash": schema_hash,
-        "feature_names": list(FEATURE_NAMES),
+        "feature_names": list(feature_names),
         "artifacts": {
             "feature_rows": str(output_path),
             "feature_groups": str(groups_path),

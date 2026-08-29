@@ -10,8 +10,10 @@ from pathlib import Path
 import pytest
 
 from legal_rag.evaluation import (
+    LOCAL_SCORER_ID,
     AlignmentError,
     DuplicateIDError,
+    EvaluationOptions,
     InputRecord,
     align_records,
     evaluate_records,
@@ -26,6 +28,7 @@ def _evaluate(reference: str, prediction: str):
     return evaluate_records(
         [InputRecord(id="case-1", answer=reference)],
         [InputRecord(id="case-1", answer=prediction)],
+        options=EvaluationOptions(scorer=LOCAL_SCORER_ID),
     )
 
 
@@ -72,6 +75,7 @@ def test_macro_aggregate_uses_scored_cases_and_records_versions() -> None:
             InputRecord(id="1", answer="Một câu."),
             InputRecord(id="2", answer="Hai."),
         ],
+        options=EvaluationOptions(scorer=LOCAL_SCORER_ID),
     )
 
     assert report.artifact["counts"]["scored"] == 2
@@ -211,6 +215,8 @@ def test_cli_writes_deterministic_metric_artifact(tmp_path: Path) -> None:
         "warmup",
         "--run-id",
         "golden-cli",
+        "--scorer",
+        LOCAL_SCORER_ID,
     ]
     completed = subprocess.run(
         command,

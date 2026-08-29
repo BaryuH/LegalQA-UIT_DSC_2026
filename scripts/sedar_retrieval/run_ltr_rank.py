@@ -42,17 +42,30 @@ def main() -> int:
     try:
         booster, manifest = load_ranker_bundle(args.model_dir)
         feature_group = str(manifest.get("feature_group", "all"))
-        feature_names = tuple(manifest.get("feature_names") or ())
+        raw_feature_names = manifest.get("feature_names")
+        if raw_feature_names is not None and not isinstance(raw_feature_names, list):
+            raise LTRRankerError("LTR manifest feature_names must be a list")
+        if raw_feature_names is not None and not all(
+            isinstance(name, str) and name.strip() for name in raw_feature_names
+        ):
+            raise LTRRankerError("LTR manifest feature_names must contain strings")
+        feature_names = tuple(raw_feature_names or ())
         if not feature_names:
             feature_names = resolve_feature_names(feature_group)  # type: ignore[arg-type]
-        examples = load_feature_examples(args.features)
+        examples = load_feature_examples(
+            args.features,
+            feature_names=feature_names,
+        )
         matrices = build_ranker_matrices(examples, feature_names=feature_names)
         scores = score_feature_matrix(booster, matrices)
         ranked = rerank_from_scores(matrices, scores, top_k=args.top_k)
 
         parity_overlap = None
         if args.parity_features is not None:
-            parity_examples = load_feature_examples(args.parity_features)
+            parity_examples = load_feature_examples(
+                args.parity_features,
+                feature_names=feature_names,
+            )
             parity_matrices = build_ranker_matrices(
                 parity_examples,
                 feature_names=feature_names,

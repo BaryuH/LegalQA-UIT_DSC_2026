@@ -7,7 +7,10 @@ import argparse
 import json
 from pathlib import Path
 
-from legal_rag.sedar_retrieval.ranking.ltr_dataset import validate_feature_schema
+from legal_rag.sedar_retrieval.ranking.ltr_dataset import (
+    feature_profile_spec,
+    validate_feature_schema,
+)
 from legal_rag.sedar_retrieval.ranking.ltr_ranker import (
     LTRRankerConfig,
     LTRRankerError,
@@ -32,14 +35,24 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--features", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--schema", type=Path, default=None)
     parser.add_argument(
-        "--schema",
-        type=Path,
-        default=Path("configs/retrieval/ltr_feature_schema_v1.json"),
+        "--feature-profile",
+        choices=("baseline_v1", "ensemble_v2"),
+        default="baseline_v1",
     )
     parser.add_argument(
         "--feature-group",
-        choices=("all", "no_lexical", "no_citation", "no_hierarchy", "no_dense"),
+        choices=(
+            "all",
+            "no_lexical",
+            "no_citation",
+            "no_hierarchy",
+            "no_dense",
+            "no_legal",
+            "no_agreement",
+            "no_rank_difference",
+        ),
         default="all",
     )
     parser.add_argument("--validation-fraction", type=float, default=0.1)
@@ -61,6 +74,11 @@ def main() -> int:
         raise SystemExit("--limit-queries must be non-negative")
 
     _prepare_output_dir(args.output_dir, force=args.force)
+    schema_path = args.schema or Path(
+        "configs/retrieval/ltr_feature_schema_"
+        f"{'v2' if args.feature_profile == 'ensemble_v2' else 'v1'}.json"
+    )
+    feature_schema_version, feature_names = feature_profile_spec(args.feature_profile)
     config = LTRRankerConfig(
         feature_group=args.feature_group,
         validation_fraction=args.validation_fraction,
@@ -76,8 +94,12 @@ def main() -> int:
         early_stopping_rounds=args.early_stopping_rounds,
     )
     try:
-        schema_hash = validate_feature_schema(args.schema)
-        examples = load_feature_examples(args.features)
+        schema_hash = validate_feature_schema(
+            schema_path,
+            expected_schema_version=feature_schema_version,
+            expected_feature_names=feature_names,
+        )
+        examples = load_feature_examples(args.features, feature_names=feature_names)
         if args.limit_queries:
             keep = {
                 query_id
@@ -85,15 +107,18 @@ def main() -> int:
                     : args.limit_queries
                 ]
             }
-            examples = tuple(
-                item for item in examples if item.query_id in keep
-            )
-        split = build_train_split(examples, config=config)
+            examples = tuple(item for item in examples if item.query_id in keep)
+        split = build_train_split(
+            examples,
+            config=config,
+            feature_names=feature_names,
+        )
         result = train_lambdarank(
             split,
             output_dir=args.output_dir,
             config=config,
             feature_schema_hash=schema_hash,
+            feature_schema_version=feature_schema_version,
             features_path=str(args.features),
         )
     except (OSError, ValueError, LTRRankerError) as exc:

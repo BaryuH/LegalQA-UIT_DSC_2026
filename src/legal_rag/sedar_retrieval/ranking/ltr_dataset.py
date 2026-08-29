@@ -22,9 +22,12 @@ from legal_rag.sedar_retrieval.query.citation_parser import (
 )
 
 from .features import (
+    ENSEMBLE_FEATURE_NAMES,
+    ENSEMBLE_FEATURE_SCHEMA_VERSION,
     FEATURE_NAMES,
     FEATURE_SCHEMA_VERSION,
-    LTRFeatureRow,
+    FeatureProfile,
+    extract_ensemble_features,
     extract_features,
 )
 
@@ -32,6 +35,18 @@ LabelMode = Literal["binary", "graded"]
 LabelSource = Literal["citation", "positive_passage_id"]
 UnlabeledPolicy = Literal["fail", "skip", "keep"]
 LTR_DATASET_SCHEMA_VERSION = "sedar-ltr-feature-dataset-v1"
+
+
+def feature_profile_spec(
+    profile: FeatureProfile,
+) -> tuple[str, tuple[str, ...]]:
+    """Return the feature schema version and names for a build profile."""
+
+    if profile == "baseline_v1":
+        return FEATURE_SCHEMA_VERSION, FEATURE_NAMES
+    if profile == "ensemble_v2":
+        return ENSEMBLE_FEATURE_SCHEMA_VERSION, ENSEMBLE_FEATURE_NAMES
+    raise LTRFeatureBuildError(f"Unsupported feature profile: {profile!r}")
 
 
 class LTRFeatureBuildError(ValueError):
@@ -50,6 +65,8 @@ class LTRCandidate:
     dense_rank: int | None = None
     rrf_score: float | None = None
     source: str = "candidate"
+    legal_score: float | None = None
+    legal_rank: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,10 +86,13 @@ class LTRFeatureBuildConfig:
     label_source: LabelSource = "citation"
     unlabeled_policy: UnlabeledPolicy = "skip"
     max_candidates: int = 0
+    feature_profile: FeatureProfile = "baseline_v1"
 
     def __post_init__(self) -> None:
         if self.max_candidates < 0:
             raise ValueError("max_candidates must be non-negative")
+        if self.feature_profile not in {"baseline_v1", "ensemble_v2"}:
+            raise ValueError(f"Unsupported feature profile: {self.feature_profile!r}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,8 +131,13 @@ def schema_sha256(path: str | Path) -> str:
     return digest.hexdigest()
 
 
-def validate_feature_schema(path: str | Path) -> str:
-    """Validate the checked-in schema against the extractor feature names."""
+def validate_feature_schema(
+    path: str | Path,
+    *,
+    expected_schema_version: str = FEATURE_SCHEMA_VERSION,
+    expected_feature_names: Sequence[str] = FEATURE_NAMES,
+) -> str:
+    """Validate a checked-in schema against one extractor profile."""
 
     schema_path = Path(path)
     try:
@@ -123,13 +148,13 @@ def validate_feature_schema(path: str | Path) -> str:
         ) from exc
     if not isinstance(payload, dict):
         raise LTRFeatureBuildError("LTR feature schema must be a JSON object")
-    if payload.get("schema_version") != FEATURE_SCHEMA_VERSION:
+    if payload.get("schema_version") != expected_schema_version:
         raise LTRFeatureBuildError(
             "LTR feature schema version does not match extractor: "
             f"{payload.get('schema_version')!r}"
         )
     names = payload.get("features")
-    if not isinstance(names, list) or tuple(names) != FEATURE_NAMES:
+    if not isinstance(names, list) or tuple(names) != tuple(expected_feature_names):
         raise LTRFeatureBuildError(
             "LTR feature schema names do not match the extractor feature names"
         )
@@ -184,6 +209,7 @@ def _candidate_from_row(
         source = "rrf"
         bm25_score = _finite_float(row.get("bm25_score"), field="bm25_score")
         dense_score = _finite_float(row.get("dense_score"), field="dense_score")
+        legal_score = _finite_float(row.get("legal_score"), field="legal_score")
         rrf_score = _finite_float(row.get("rrf_score"), field="rrf_score")
         bm25_rank = (
             _rank(row.get("bm25_rank"), fallback=rank, field="bm25_rank")
@@ -195,15 +221,22 @@ def _candidate_from_row(
             if row.get("dense_rank") is not None
             else None
         )
+        legal_rank = (
+            _rank(row.get("legal_rank"), fallback=rank, field="legal_rank")
+            if row.get("legal_rank") is not None
+            else None
+        )
     else:
         rank = _rank(row.get("rank"), fallback=fallback_rank, field="rank")
         raw_source = str(row.get("source", "candidate"))
         source = raw_source if raw_source.strip() else "candidate"
         bm25_score = _finite_float(row.get("bm25"), field="bm25")
         dense_score = _finite_float(row.get("dense"), field="dense")
+        legal_score = _finite_float(row.get("legal"), field="legal")
         rrf_score = _finite_float(row.get("rrf"), field="rrf")
         bm25_rank = rank if bm25_score is not None else None
         dense_rank = rank if dense_score is not None else None
+        legal_rank = rank if legal_score is not None else None
     return LTRCandidate(
         passage_id=str(passage_id),
         rank=rank,
@@ -211,6 +244,8 @@ def _candidate_from_row(
         bm25_rank=bm25_rank,
         dense_score=dense_score,
         dense_rank=dense_rank,
+        legal_score=legal_score,
+        legal_rank=legal_rank,
         rrf_score=rrf_score,
         source=source,
     )
@@ -387,6 +422,7 @@ def build_ltr_feature_rows(
     """Build deterministic feature rows with citation or positive-passage labels."""
 
     cfg = config or LTRFeatureBuildConfig()
+    feature_schema_version, _ = feature_profile_spec(cfg.feature_profile)
     if cfg.label_source == "citation":
         if questions is None:
             raise LTRFeatureBuildError(
@@ -450,8 +486,7 @@ def build_ltr_feature_rows(
             label_provenance = "positive_passage_id"
             if positive_passage_id not in passages:
                 raise LTRFeatureBuildError(
-                    f"Positive passage_id is absent from corpus: "
-                    f"{positive_passage_id}"
+                    f"Positive passage_id is absent from corpus: {positive_passage_id}"
                 )
 
         selected = sorted(
@@ -473,27 +508,52 @@ def build_ltr_feature_rows(
                     f"{candidate.passage_id}"
                 )
             is_effective, is_expired = _status_features(passage)
-            feature_row: LTRFeatureRow = extract_features(
-                query_id=query_id,
-                query=query_text,
-                passage_id=candidate.passage_id,
-                passage_text=passage.retrieval_text,
-                bm25_score=candidate.bm25_score,
-                bm25_rank=candidate.bm25_rank,
-                dense_score=candidate.dense_score,
-                dense_rank=candidate.dense_rank,
-                rrf_score=candidate.rrf_score,
-                document_name=passage.document_name,
-                article_number=passage.article_number,
-                clause_number=passage.clause_number,
-                article_title=passage.article_title,
-                is_effective=is_effective,
-                is_expired=is_expired,
-                query_article=query_article,
-                query_clause=query_clause,
-                query_year=query_year,
-                query_doc_number=query_doc_number,
-            )
+            if cfg.feature_profile == "baseline_v1":
+                feature_row = extract_features(
+                    query_id=query_id,
+                    query=query_text,
+                    passage_id=candidate.passage_id,
+                    passage_text=passage.retrieval_text,
+                    bm25_score=candidate.bm25_score,
+                    bm25_rank=candidate.bm25_rank,
+                    dense_score=candidate.dense_score,
+                    dense_rank=candidate.dense_rank,
+                    rrf_score=candidate.rrf_score,
+                    document_name=passage.document_name,
+                    article_number=passage.article_number,
+                    clause_number=passage.clause_number,
+                    article_title=passage.article_title,
+                    is_effective=is_effective,
+                    is_expired=is_expired,
+                    query_article=query_article,
+                    query_clause=query_clause,
+                    query_year=query_year,
+                    query_doc_number=query_doc_number,
+                )
+            else:
+                feature_row = extract_ensemble_features(
+                    query_id=query_id,
+                    query=query_text,
+                    passage_id=candidate.passage_id,
+                    passage_text=passage.retrieval_text,
+                    bm25_score=candidate.bm25_score,
+                    bm25_rank=candidate.bm25_rank,
+                    qwen_score=candidate.dense_score,
+                    qwen_rank=candidate.dense_rank,
+                    legal_score=candidate.legal_score,
+                    legal_rank=candidate.legal_rank,
+                    rrf_score=candidate.rrf_score,
+                    document_name=passage.document_name,
+                    article_number=passage.article_number,
+                    clause_number=passage.clause_number,
+                    article_title=passage.article_title,
+                    is_effective=is_effective,
+                    is_expired=is_expired,
+                    query_article=query_article,
+                    query_clause=query_clause,
+                    query_year=query_year,
+                    query_doc_number=query_doc_number,
+                )
             if cfg.label_source == "citation":
                 grade = _citation_grade(citations, passage)
                 if grade is None:
@@ -522,7 +582,7 @@ def build_ltr_feature_rows(
                     "label": label,
                     "label_provenance": label_provenance,
                     "features": feature_row.features,
-                    "schema_version": FEATURE_SCHEMA_VERSION,
+                    "schema_version": feature_schema_version,
                 }
             )
 
@@ -570,6 +630,7 @@ __all__ = [
     "LTRFeatureBuildReport",
     "SyntheticQueryView",
     "build_ltr_feature_rows",
+    "feature_profile_spec",
     "group_feature_rows",
     "load_question_map",
     "load_rrf_candidates",
