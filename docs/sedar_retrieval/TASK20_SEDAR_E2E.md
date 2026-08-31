@@ -54,6 +54,10 @@ Repeat with:
 - `rrf_r2a_dense_warmup500.jsonl` + `--retrieval-variant rrf_dense`
 - `ltr_warmup500.jsonl` + `--retrieval-variant ltr_full_all`
 
+Before changing candidate cutoffs or retriever models, run the clean-warmup
+scope and rank-distribution audit documented in
+`docs/sedar_retrieval/RETRIEVAL_RECALL_AUDIT.md`.
+
 ## Evaluate downstream (METEOR / ROUGE-L)
 
 After inference, score with VAL-01 using the **source run directory**:

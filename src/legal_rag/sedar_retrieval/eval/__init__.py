@@ -30,6 +30,12 @@ from .retrieval_metrics import (
     evaluate_retrieval,
     metrics_to_dict,
 )
+from .retrieval_recall_audit import (
+    DEFAULT_CUTOFFS,
+    RetrievalRecallAuditError,
+    RetrievalRecallAuditReport,
+    audit_warmup_retrieval_recall,
+)
 
 __all__ = [
     "EvidenceBlockView",
@@ -50,6 +56,10 @@ __all__ = [
     "RetrievalErrorAnalysisError",
     "RetrievalErrorAnalysisReport",
     "analyze_warmup_retrieval_errors",
+    "DEFAULT_CUTOFFS",
+    "RetrievalRecallAuditError",
+    "RetrievalRecallAuditReport",
+    "audit_warmup_retrieval_recall",
     "evaluate_ensemble_promotion",
     "metrics_to_dict",
 ]
