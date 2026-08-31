@@ -7,6 +7,7 @@ from .error_report import (
     ErrorReport,
     ErrorReportError,
     EvidencePreview,
+    RetrievalTrace,
     generate_error_report,
     write_error_report,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "ErrorReport",
     "ErrorReportError",
     "EvidencePreview",
+    "RetrievalTrace",
     "generate_error_report",
     "write_error_report",
 ]

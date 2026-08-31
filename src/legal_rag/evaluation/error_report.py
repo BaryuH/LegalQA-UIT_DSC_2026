@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -68,6 +68,18 @@ class EvidencePreview:
 
 
 @dataclass(frozen=True, slots=True)
+class RetrievalTrace:
+    """Evaluation-only retrieval trace from a prediction run."""
+
+    status: str
+    raw_hit_ids: tuple[str, ...] = ()
+    packed_chunk_ids: tuple[str, ...] = ()
+    packed_dropped_ids: tuple[str, ...] = ()
+    packed_truncated_ids: tuple[str, ...] = ()
+    evidence_previews: tuple[EvidencePreview, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ErrorCase:
     """One joined prediction/reference/retrieval/metric case."""
 
@@ -80,6 +92,10 @@ class ErrorCase:
     retrieval_status: str
     evidence_previews: tuple[EvidencePreview, ...]
     error_type: str
+    raw_hit_ids: tuple[str, ...] = ()
+    packed_chunk_ids: tuple[str, ...] = ()
+    packed_dropped_ids: tuple[str, ...] = ()
+    packed_truncated_ids: tuple[str, ...] = ()
 
     @property
     def evidence_text(self) -> str:
@@ -110,9 +126,10 @@ class ErrorReport:
             "",
             (
                 "| rank | id | METEOR | ROUGE-L | error_type | retrieval | "
-                "evidence previews | prediction | reference |"
+                "raw hit IDs | packed chunk IDs | evidence previews | "
+                "prediction | reference |"
             ),
-            "|---:|---|---:|---:|---|---|---|---|---|",
+            "|---:|---|---:|---:|---|---|---|---|---|---|---|",
         ]
         for rank, case in enumerate(self.cases, start=1):
             lines.append(
@@ -125,6 +142,8 @@ class ErrorReport:
                         _metric_cell(case.rouge_l),
                         _markdown_cell(case.error_type),
                         _markdown_cell(case.retrieval_status),
+                        _markdown_cell(_join_ids(case.raw_hit_ids)),
+                        _markdown_cell(_join_ids(case.packed_chunk_ids)),
                         _markdown_cell(case.evidence_text),
                         _markdown_cell(case.prediction or "<missing>"),
                         _markdown_cell(case.reference),
@@ -147,6 +166,10 @@ class ErrorReport:
                 "rouge_l",
                 "error_type",
                 "retrieval_status",
+                "raw_hit_ids",
+                "packed_chunk_ids",
+                "packed_dropped_ids",
+                "packed_truncated_ids",
                 "evidence_previews",
                 "prediction",
                 "reference",
@@ -161,6 +184,10 @@ class ErrorReport:
                     "" if case.rouge_l is None else case.rouge_l,
                     case.error_type,
                     case.retrieval_status,
+                    _join_ids(case.raw_hit_ids),
+                    _join_ids(case.packed_chunk_ids),
+                    _join_ids(case.packed_dropped_ids),
+                    _join_ids(case.packed_truncated_ids),
                     case.evidence_text,
                     "" if case.prediction is None else case.prediction,
                     case.reference,
@@ -180,6 +207,10 @@ def _markdown_cell(value: str) -> str:
 
 def _metric_cell(value: float | None) -> str:
     return "" if value is None else f"{value:.6f}"
+
+
+def _join_ids(values: Sequence[str]) -> str:
+    return " ".join(values)
 
 
 def _read_json(path: str | Path) -> Mapping[str, object]:
@@ -290,24 +321,79 @@ def _metrics_rows(
     return payload, _unique_rows(tuple(rows), "metric")
 
 
+def _id_tuple(
+    value: object,
+    *,
+    field: str,
+    identifier: str,
+) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ErrorReportError(f"{field} must be a list for retrieval id {identifier}")
+    result: list[str] = []
+    seen: set[str] = set()
+    for position, item in enumerate(value):
+        try:
+            item_id = canonical_id(item)
+        except ValueError as exc:
+            raise ErrorReportError(
+                f"{field}[{position}] has an invalid ID for retrieval id {identifier}"
+            ) from exc
+        if item_id in seen:
+            raise ErrorReportError(
+                f"Duplicate {field} ID {item_id!r} for retrieval id {identifier}"
+            )
+        seen.add(item_id)
+        result.append(item_id)
+    return tuple(result)
+
+
 def _retrieval_rows(
     path: str | Path | None,
     *,
     top_evidence_k: int,
     preview_chars: int,
-) -> dict[str, tuple[str, tuple[EvidencePreview, ...]]]:
+) -> dict[str, RetrievalTrace]:
     if path is None:
         return {}
     if top_evidence_k <= 0 or preview_chars <= 0:
         raise ValueError("Evidence limits must be greater than zero")
-    result: dict[str, tuple[str, tuple[EvidencePreview, ...]]] = {}
+    result: dict[str, RetrievalTrace] = {}
     for index, row in enumerate(_read_jsonl(path)):
         identifier = _row_id(row, f"retrieval[{index}]")
         if identifier in result:
             raise ErrorReportError(f"Duplicate retrieval id: {identifier}")
+        raw_hit_ids = _id_tuple(
+            row.get("raw_hit_ids"),
+            field="raw_hit_ids",
+            identifier=identifier,
+        )
+        packed_chunk_ids = _id_tuple(
+            row.get("packed_chunk_ids"),
+            field="packed_chunk_ids",
+            identifier=identifier,
+        )
+        packed_dropped_ids = _id_tuple(
+            row.get("packed_dropped_ids"),
+            field="packed_dropped_ids",
+            identifier=identifier,
+        )
+        packed_truncated_ids = _id_tuple(
+            row.get("packed_truncated_ids"),
+            field="packed_truncated_ids",
+            identifier=identifier,
+        )
         packed_raw = row.get("packed_evidence")
         previews: list[EvidencePreview] = []
-        status = str(row.get("status", "unknown"))
+        status_value = row.get("status")
+        status = (
+            str(status_value)
+            if status_value is not None
+            else "success"
+            if raw_hit_ids or packed_chunk_ids
+            else "unknown"
+        )
         if packed_raw is not None:
             try:
                 packed = PackedEvidence.model_validate(packed_raw)
@@ -328,9 +414,35 @@ def _retrieval_rows(
                 )
             if status == "success" and not previews:
                 status = "miss"
+            if not packed_chunk_ids:
+                packed_chunk_ids = tuple(packed.included_ids)
+            if not packed_dropped_ids:
+                packed_dropped_ids = tuple(packed.dropped_ids)
+            if not packed_truncated_ids:
+                packed_truncated_ids = tuple(packed.truncated_ids)
+        elif packed_chunk_ids:
+            previews.extend(
+                EvidencePreview(
+                    rank=position,
+                    chunk_id=chunk_id,
+                    document_id="<unresolved>",
+                    preview="packed_chunk_id_only",
+                )
+                for position, chunk_id in enumerate(
+                    packed_chunk_ids[:top_evidence_k],
+                    start=1,
+                )
+            )
         elif status == "success":
             status = "no_packed_evidence"
-        result[identifier] = (status, tuple(previews))
+        result[identifier] = RetrievalTrace(
+            status=status,
+            raw_hit_ids=raw_hit_ids,
+            packed_chunk_ids=packed_chunk_ids,
+            packed_dropped_ids=packed_dropped_ids,
+            packed_truncated_ids=packed_truncated_ids,
+            evidence_previews=tuple(previews),
+        )
     return result
 
 
@@ -359,6 +471,7 @@ def generate_error_report(
     default_error_type: str = "OTHER",
     top_evidence_k: int = 3,
     preview_chars: int = 320,
+    retrieval_ids: Collection[str] | None = None,
     allow_private: bool = False,
 ) -> ErrorReport:
     """Join evaluation-only references with predictions, metrics, and retrieval."""
@@ -410,16 +523,35 @@ def generate_error_report(
         preview_chars=preview_chars,
     )
     extra_retrieval = set(retrieval) - set(reference_rows)
-    if extra_retrieval:
+    if retrieval_ids is None and extra_retrieval:
         raise ErrorReportError(
             "Retrieval IDs not present in references: "
             + ", ".join(sorted(extra_retrieval))
         )
+    if retrieval_ids is not None:
+        selected_retrieval_ids = set(retrieval_ids)
+        missing_scope = set(reference_rows) - selected_retrieval_ids
+        if missing_scope:
+            raise ErrorReportError(
+                "Retrieval scope is missing evaluation IDs: "
+                + ", ".join(sorted(missing_scope))
+            )
+        missing_retrieval = set(reference_rows) - set(retrieval)
+        if missing_retrieval:
+            raise ErrorReportError(
+                "Retrieval is missing evaluation IDs: "
+                + ", ".join(sorted(missing_retrieval))
+            )
+        retrieval = {
+            identifier: trace
+            for identifier, trace in retrieval.items()
+            if identifier in selected_retrieval_ids
+        }
 
     cases: list[ErrorCase] = []
     for identifier in sorted(reference_rows):
         metric = metric_rows[identifier]
-        retrieval_status, previews = retrieval.get(identifier, ("not_available", ()))
+        trace = retrieval.get(identifier, RetrievalTrace(status="not_available"))
         cases.append(
             ErrorCase(
                 id=identifier,
@@ -432,9 +564,13 @@ def generate_error_report(
                 meteor=_metric_value(metric.get("meteor"), "meteor"),
                 rouge_l=_metric_value(metric.get("rouge_l"), "rouge_l"),
                 metric_status=str(metric.get("status", "unknown")),
-                retrieval_status=retrieval_status,
-                evidence_previews=previews,
+                retrieval_status=trace.status,
+                evidence_previews=trace.evidence_previews,
                 error_type=selected_manual.get(identifier, default_error_type),
+                raw_hit_ids=trace.raw_hit_ids,
+                packed_chunk_ids=trace.packed_chunk_ids,
+                packed_dropped_ids=trace.packed_dropped_ids,
+                packed_truncated_ids=trace.packed_truncated_ids,
             )
         )
     return ErrorReport(

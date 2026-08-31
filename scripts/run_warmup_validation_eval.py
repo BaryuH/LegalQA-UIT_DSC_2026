@@ -33,6 +33,35 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _resolve_retrieval_path(
+    explicit_path: Path | None,
+    prediction_run_dir: Path | None,
+    *,
+    required: bool,
+) -> Path | None:
+    """Resolve a run-local retrieval trace before opening evaluation gold."""
+
+    if explicit_path is not None:
+        if not explicit_path.is_file():
+            raise RuntimeError(f"Retrieval artifact is missing: {explicit_path}")
+        return explicit_path
+    if prediction_run_dir is not None:
+        candidate = prediction_run_dir / "retrieval.jsonl"
+        if candidate.is_file():
+            return candidate
+    if required:
+        location = (
+            str(prediction_run_dir / "retrieval.jsonl")
+            if prediction_run_dir is not None
+            else "<prediction-run-dir>/retrieval.jsonl"
+        )
+        raise RuntimeError(
+            "Retrieval artifact is required for the evaluation error report: "
+            f"{location}. Pass --retrieval or use --skip-error-report."
+        )
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     root = _repo_root()
     if str(root) not in sys.path:
@@ -143,6 +172,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--retrieval",
+        type=Path,
+        default=None,
+        help=(
+            "Evaluation-only retrieval trace; defaults to retrieval.jsonl in "
+            "--prediction-run-dir."
+        ),
+    )
+    parser.add_argument(
         "--skip-error-report",
         action="store_true",
         help="Skip Markdown/CSV error diagnostics.",
@@ -212,6 +250,11 @@ def main(argv: list[str] | None = None) -> int:
 
         if prediction_run_dir is None:
             raise WarmupEvalError("Prediction run directory is required")
+        retrieval_path = _resolve_retrieval_path(
+            args.retrieval,
+            prediction_run_dir,
+            required=not args.skip_error_report,
+        )
         prediction_provenance = load_prediction_run_provenance(
             prediction_run_dir,
             method=args.method,
@@ -271,6 +314,7 @@ def main(argv: list[str] | None = None) -> int:
             run_id=run_id,
             predictions_path=predictions_path,
             metrics_path=metrics_path,
+            retrieval_path=retrieval_path,
             report=report,
             inference_used_answers=False,
             references_opened_before_predictions=False,
@@ -292,6 +336,7 @@ def main(argv: list[str] | None = None) -> int:
                 references_eval_only_path=paths["references_eval_only"],
                 metrics_path=paths["metrics"],
                 retrieval_path=retrieval_path,
+                retrieval_ids=selected_ids,
                 split="warmup",
             )
             paths["error_report_md"] = eval_dir / "error_report.md"

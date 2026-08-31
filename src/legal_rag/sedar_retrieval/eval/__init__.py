@@ -18,6 +18,11 @@ from .evidence_metrics import (
     EvidenceQualityBundle,
     evaluate_evidence_packs,
 )
+from .retrieval_error_analysis import (
+    RetrievalErrorAnalysisError,
+    RetrievalErrorAnalysisReport,
+    analyze_warmup_retrieval_errors,
+)
 from .retrieval_metrics import (
     QueryRelevance,
     RankedList,
@@ -42,6 +47,9 @@ __all__ = [
     "load_ranked_source",
     "load_relevance_labels",
     "PromotionCheck",
+    "RetrievalErrorAnalysisError",
+    "RetrievalErrorAnalysisReport",
+    "analyze_warmup_retrieval_errors",
     "evaluate_ensemble_promotion",
     "metrics_to_dict",
 ]

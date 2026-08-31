@@ -146,6 +146,62 @@ def test_error_report_requires_evaluation_reference_role(tmp_path: Path) -> None
         )
 
 
+def test_error_report_joins_sedar_e2e_trace_fields(tmp_path: Path) -> None:
+    predictions, references, metrics, retrieval = _fixture(tmp_path)
+    _write_jsonl(
+        retrieval,
+        [
+            {
+                "id": "case-a",
+                "raw_hit_ids": ["candidate-a", "candidate-b"],
+                "packed_chunk_ids": ["candidate-a"],
+                "packed_dropped_ids": ["candidate-b"],
+                "packed_truncated_ids": [],
+            },
+            {"id": "case-b", "status": "error"},
+        ],
+    )
+
+    report = generate_error_report(
+        predictions,
+        references,
+        metrics,
+        retrieval_path=retrieval,
+    )
+
+    case = next(item for item in report.cases if item.id == "case-a")
+    assert case.retrieval_status == "success"
+    assert case.raw_hit_ids == ("candidate-a", "candidate-b")
+    assert case.packed_chunk_ids == ("candidate-a",)
+    assert case.packed_dropped_ids == ("candidate-b",)
+    assert "candidate-a" in case.evidence_text
+
+
+def test_error_report_scopes_unfiltered_source_trace_to_clean_ids(
+    tmp_path: Path,
+) -> None:
+    predictions, references, metrics, retrieval = _fixture(tmp_path)
+    _write_jsonl(
+        retrieval,
+        [
+            {"id": "case-a", "packed_chunk_ids": ["chunk-a"]},
+            {"id": "case-b", "packed_chunk_ids": ["chunk-b"]},
+            {"id": "excluded-public-id", "packed_chunk_ids": ["public-chunk"]},
+        ],
+    )
+
+    report = generate_error_report(
+        predictions,
+        references,
+        metrics,
+        retrieval_path=retrieval,
+        retrieval_ids=("case-a", "case-b"),
+    )
+
+    assert {case.id for case in report.cases} == {"case-a", "case-b"}
+    assert all("public-chunk" not in case.evidence_text for case in report.cases)
+
+
 def test_private_report_is_disabled_before_reference_read(tmp_path: Path) -> None:
     predictions, references, metrics, retrieval = _fixture(tmp_path)
     payload = json.loads(metrics.read_text(encoding="utf-8"))

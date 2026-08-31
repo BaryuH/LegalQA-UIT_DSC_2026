@@ -81,6 +81,44 @@ hash, B2 index fingerprint, prediction hashes, and evaluator version. If the
 archived BTC scorer source is available, pass it with `--scorer-source`; the
 artifact remains explicitly unverified until its hash is recorded.
 
+## Retrieval trace and A/B/C diagnosis
+
+When `--prediction-run-dir` is supplied, VAL-01 automatically joins
+`retrieval.jsonl` from that directory into `error_report.md` and
+`error_report.csv`. SEDAR TASK20 traces use `raw_hit_ids` and
+`packed_chunk_ids`; the join does not require an embedded `packed_evidence`
+object. If the source run contains more IDs than the clean manifest, VAL-01
+scopes the trace to the selected clean IDs. Pass `--retrieval <path>` only
+when the trace is stored elsewhere.
+
+Run the following against the clean champion LTR run, not the rejected
+ensemble run:
+
+```bash
+export CHAMPION_RUN="$SEDAR_WORK_ROOT/outputs/task20/task20_ltr_clean460_repro_20260830"
+export CHAMPION_EVAL="$SEDAR_WORK_ROOT/artifacts/sedar_sft/validation/eval/val01_task20_ltr_clean460_repro_20260830"
+export EVAL_ROOT="$SEDAR_WORK_ROOT/artifacts/sedar_retrieval/eval"
+export VIEWS="$SEDAR_WORK_ROOT/artifacts/sedar_retrieval/views/full_r1_r2a_retry_02"
+
+python scripts/sedar_retrieval/analyze_retrieval_errors.py \
+  --run-dir "$CHAMPION_RUN" \
+  --metrics "$CHAMPION_EVAL/metrics.json" \
+  --bm25 "$EVAL_ROOT/bm25_r2a_warmup500.jsonl" \
+  --qwen "$EVAL_ROOT/dense_r2a_warmup500.jsonl" \
+  --labels "$EVAL_ROOT/silver_r2a_warmup500.jsonl" \
+  --passages "$VIEWS/passages_r2a.jsonl" \
+  --output "$CHAMPION_EVAL/retrieval_error_analysis.json" \
+  --force
+```
+
+The analysis is restricted to `split=warmup`, `id_source=clean_manifest`, and
+silver citation labels. `A_RETRIEVAL_MISS` means the provision is absent from
+BM25∪Qwen top-100; `B_RERANK_MISS` means it enters that union but is absent
+from LTR top-20; `B_PACK_MISS` means it survives LTR but not packed top-4;
+`C_READER_ISSUE` means packed evidence exists but the answer has low METEOR
+(default `<0.25`) or a repetition signal. The JSON contains IDs and metrics,
+not question, reference, or prediction text.
+
 ## Artifacts
 
 ```text

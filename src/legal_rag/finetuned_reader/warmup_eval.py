@@ -420,6 +420,7 @@ def build_eval_summary(
     run_id: str,
     predictions_path: Path,
     metrics_path: Path,
+    retrieval_path: Path | None = None,
     report: EvaluationReport,
     inference_used_answers: bool,
     references_opened_before_predictions: bool,
@@ -450,6 +451,9 @@ def build_eval_summary(
         "split": "warmup",
         "predictions_path": predictions_path.as_posix(),
         "metrics_path": metrics_path.as_posix(),
+        "retrieval_path": (
+            retrieval_path.as_posix() if retrieval_path is not None else None
+        ),
         "evaluator": {
             "kind": report.artifact.get("evaluator_kind"),
             "name": report.artifact.get("evaluator_name"),
@@ -513,6 +517,7 @@ def build_error_report_for_clean_eval(
     references_eval_only_path: Path,
     metrics_path: Path,
     retrieval_path: Path | None = None,
+    retrieval_ids: Sequence[str] | None = None,
     split: str = "warmup",
 ) -> ErrorReport:
     """Join per-case diagnostics inside the evaluation boundary only."""
@@ -522,6 +527,7 @@ def build_error_report_for_clean_eval(
         references_eval_only_path,
         metrics_path,
         retrieval_path=retrieval_path,
+        retrieval_ids=retrieval_ids,
         split=split,
     )
 

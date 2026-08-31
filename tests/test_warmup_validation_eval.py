@@ -28,6 +28,7 @@ from legal_rag.finetuned_reader.warmup_validation import (
     write_clean_warmup_validation_artifacts,
 )
 from legal_rag.schemas import InferenceQuestion
+from scripts.run_warmup_validation_eval import _resolve_retrieval_path
 
 
 def _write_questions(path: Path, records: dict[str, dict[str, str]]) -> Path:
@@ -247,6 +248,19 @@ def test_limit_prefix(clean_fixture: dict[str, Path]) -> None:
     selected = select_included_ids(manifest.included_ids, limit=1)
     assert len(selected) == 1
     assert selected[0] == sorted(manifest.included_ids)[0]
+
+
+def test_resolve_retrieval_path_uses_prediction_run_trace(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    retrieval = run_dir / "retrieval.jsonl"
+    retrieval.write_text("{}\n", encoding="utf-8")
+
+    assert _resolve_retrieval_path(None, run_dir, required=True) == retrieval
+    assert _resolve_retrieval_path(None, tmp_path / "missing", required=False) is None
+
+    with pytest.raises(RuntimeError, match="Retrieval artifact is required"):
+        _resolve_retrieval_path(None, tmp_path / "missing", required=True)
 
 
 def test_write_eval_only_references_shape(tmp_path: Path) -> None:
