@@ -11,7 +11,119 @@ This audit implements the first two retrieval-improvement gates:
 The audit is evaluation-only. It does not write questions, references, or
 prediction text, and it must not be used to build an inference index or prompt.
 
-## Run on the champion LTR output
+Set the shared server paths once:
+
+```bash
+export PROJECT_ROOT=/mnt/G/LegalQA-UIT_DSC_2026
+export SEDAR_WORK_ROOT=/mnt/G/sedar-legalqa
+export PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/src"
+export EVAL_ROOT="$SEDAR_WORK_ROOT/artifacts/sedar_retrieval/eval"
+export VIEWS="$SEDAR_WORK_ROOT/artifacts/sedar_retrieval/views/full_r1_r2a_retry_02"
+export CHAMPION_RUN="$SEDAR_WORK_ROOT/outputs/task20/task20_ltr_clean460_repro_20260830"
+export CHAMPION_EVAL="$SEDAR_WORK_ROOT/artifacts/sedar_sft/validation/eval/val01_task20_ltr_clean460_repro_20260830"
+
+cd "$PROJECT_ROOT"
+```
+
+## P0 — Audit and rebuild silver labels
+
+The old label builder mapped an article number globally and selected the first
+three matching passages. That can create false negatives when several legal
+documents contain the same article number. Audit the existing artifact before
+rebuilding it:
+
+```bash
+export LABELS="$EVAL_ROOT/silver_r2a_warmup500.jsonl"
+export LABEL_AUDIT="$EVAL_ROOT/silver_label_audit_clean460.json"
+
+python scripts/sedar_retrieval/audit_silver_labels.py \
+  --run-dir "$CHAMPION_RUN" \
+  --labels "$LABELS" \
+  --passages "$VIEWS/passages_r2a.jsonl" \
+  --sample-size 20 \
+  --output "$LABEL_AUDIT"
+```
+
+This artifact contains only IDs, document/article scope counters, and
+warnings. A suspicious legacy pattern is `multi_document_query_count` close
+to the silver count together with
+`selected_from_global_article_first_three_rate` near `1.0`.
+
+Rebuild to a new file; do not overwrite the legacy labels:
+
+```bash
+export LABELS_V2="$EVAL_ROOT/silver_r2a_warmup500_v2.jsonl"
+
+python scripts/sedar_retrieval/build_silver_labels.py \
+  --questions "$PROJECT_ROOT/data/warmup.json" \
+  --passages "$VIEWS/passages_r2a.jsonl" \
+  --output "$LABELS_V2"
+
+python scripts/sedar_retrieval/audit_silver_labels.py \
+  --run-dir "$CHAMPION_RUN" \
+  --labels "$LABELS_V2" \
+  --passages "$VIEWS/passages_r2a.jsonl" \
+  --sample-size 20 \
+  --output "$EVAL_ROOT/silver_label_audit_clean460_v2.json"
+```
+
+Labels v2 resolve `document identity + article number`. If that scope is
+missing or ambiguous, the row is explicitly `unlabeled`; no corpus-wide
+article-number fallback is allowed. The builder and audit use the repository
+JSONL reader, so legal text containing U+2028/U+2029 is not split incorrectly.
+
+## P1 — Export deep BM25/Qwen rankings
+
+Run this after P0 has produced and audited labels v2. Keep the deeper exports
+in a new directory:
+
+```bash
+export DEEP_EVAL="$EVAL_ROOT/recall_top500_20260831"
+mkdir -p "$DEEP_EVAL"
+export BM25_CACHE_ROOT="$SEDAR_WORK_ROOT/artifacts/sedar_retrieval/indexes/bm25_full"
+```
+
+BM25:
+
+```bash
+python scripts/sedar_retrieval/build_bm25_index.py \
+  --passages "$VIEWS/passages_r2a.jsonl" \
+  --cache-root "$BM25_CACHE_ROOT" \
+  --smoke-query "Điều 76"
+
+python scripts/sedar_retrieval/run_bm25_retrieval.py \
+  --passages "$VIEWS/passages_r2a.jsonl" \
+  --cache-root "$BM25_CACHE_ROOT" \
+  --questions "$PROJECT_ROOT/data/warmup.json" \
+  --split warmup \
+  --top-k 500 \
+  --output "$DEEP_EVAL/bm25_r2a_warmup500_top500.jsonl"
+```
+
+Qwen/Dense (replace `DENSE_INDEX_DIR` with the existing index directory):
+
+```bash
+export DENSE_INDEX_DIR=/path/to/existing/dense/index
+
+python scripts/sedar_retrieval/run_dense_retrieval.py \
+  --index-dir "$DENSE_INDEX_DIR" \
+  --passages "$VIEWS/passages_r2a.jsonl" \
+  --questions "$PROJECT_ROOT/data/warmup.json" \
+  --split warmup \
+  --top-k 500 \
+  --batch-size 32 \
+  --device cuda \
+  --local-files-only \
+  --output "$DEEP_EVAL/dense_r2a_warmup500_top500.jsonl"
+```
+
+The dense runner checks the index/corpus fingerprint before encoding. Reduce
+`--batch-size` if GPU memory is insufficient. Verify that both files contain
+the intended query count and no duplicate IDs before running the recall audit.
+At cutoff 500, `is_lower_bound` should be false when every source query has
+500 unique results.
+
+## Final recall audit after P1
 
 ```bash
 export PROJECT_ROOT=/mnt/G/LegalQA_UIT_DSC_2026
@@ -27,12 +139,12 @@ cd "$PROJECT_ROOT"
 python scripts/sedar_retrieval/audit_retrieval_recall.py \
   --run-dir "$CHAMPION_RUN" \
   --metrics "$CHAMPION_EVAL/metrics.json" \
-  --bm25 "$EVAL_ROOT/bm25_r2a_warmup500.jsonl" \
-  --qwen "$EVAL_ROOT/dense_r2a_warmup500.jsonl" \
-  --labels "$EVAL_ROOT/silver_r2a_warmup500.jsonl" \
+  --bm25 "$DEEP_EVAL/bm25_r2a_warmup500_top500.jsonl" \
+  --qwen "$DEEP_EVAL/dense_r2a_warmup500_top500.jsonl" \
+  --labels "$EVAL_ROOT/silver_r2a_warmup500_v2.jsonl" \
   --passages "$VIEWS/passages_r2a.jsonl" \
   --cutoffs 10,20,50,100,200,500 \
-  --output "$CHAMPION_EVAL/retrieval_recall_audit.json"
+  --output "$DEEP_EVAL/retrieval_recall_audit.json"
 ```
 
 Use `--force` only when intentionally regenerating the same evaluation

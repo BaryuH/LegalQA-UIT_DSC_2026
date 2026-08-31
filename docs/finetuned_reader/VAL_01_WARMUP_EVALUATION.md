@@ -105,7 +105,7 @@ python scripts/sedar_retrieval/analyze_retrieval_errors.py \
   --metrics "$CHAMPION_EVAL/metrics.json" \
   --bm25 "$EVAL_ROOT/bm25_r2a_warmup500.jsonl" \
   --qwen "$EVAL_ROOT/dense_r2a_warmup500.jsonl" \
-  --labels "$EVAL_ROOT/silver_r2a_warmup500.jsonl" \
+  --labels "$EVAL_ROOT/silver_r2a_warmup500_v2.jsonl" \
   --passages "$VIEWS/passages_r2a.jsonl" \
   --output "$CHAMPION_EVAL/retrieval_error_analysis.json" \
   --force

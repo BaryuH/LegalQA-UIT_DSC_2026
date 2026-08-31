@@ -104,7 +104,7 @@ python scripts/sedar_retrieval/evaluate_ensemble.py \
   --bm25 "$EVAL_ROOT/bm25_r2a_warmup500.jsonl" \
   --qwen "$EVAL_ROOT/dense_r2a_warmup500.jsonl" \
   --legal "$LEGAL_ROOT/eval/legal_r2a_warmup500.jsonl" \
-  --labels "$EVAL_ROOT/silver_r2a_warmup500.jsonl" \
+  --labels "$EVAL_ROOT/silver_r2a_warmup500_v2.jsonl" \
   --top-k 100 \
   --cutoffs 10,50,100 \
   --output "$LEGAL_ROOT/eval/ensemble_diagnostics_warmup500.json"

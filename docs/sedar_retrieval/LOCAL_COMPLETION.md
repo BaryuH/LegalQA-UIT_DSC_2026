@@ -71,7 +71,7 @@ python scripts/sedar_retrieval/build_corpus.py --max-documents 50 --output-dir a
 python scripts/sedar_retrieval/build_retrieval_views.py --nodes .../nodes.jsonl --output-dir artifacts/sedar_retrieval/views/local_scaffold_v1
 python scripts/sedar_retrieval/build_bm25_index.py --passages .../passages_r2a.jsonl
 python scripts/sedar_retrieval/run_bm25_retrieval.py --passages .../passages_r2a.jsonl --limit 50 --output artifacts/sedar_retrieval/retrieval/local_r2a_warmup50.jsonl
-python scripts/sedar_retrieval/build_silver_labels.py --passages .../passages_r2a.jsonl
+python scripts/sedar_retrieval/build_silver_labels.py --passages .../passages_r2a.jsonl --output .../warmup_silver_labels_v2.jsonl
 python scripts/sedar_retrieval/eval_retrieval.py --pred ... --labels ... --output artifacts/sedar_retrieval/eval/local_r2a_metrics.json
 python scripts/sedar_retrieval/build_reference_graph.py --nodes .../nodes.jsonl --output artifacts/sedar_retrieval/graphs/local_scaffold_v1_refs.jsonl
 python scripts/sedar_retrieval/fuse_candidates.py --bm25 ... --output ...

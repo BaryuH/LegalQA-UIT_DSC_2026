@@ -36,6 +36,15 @@ from .retrieval_recall_audit import (
     RetrievalRecallAuditReport,
     audit_warmup_retrieval_recall,
 )
+from .silver_label_audit import (
+    SilverLabelAuditError,
+    SilverLabelAuditReport,
+    audit_silver_labels,
+)
+from .silver_labels import (
+    SILVER_LABEL_SCHEMA_VERSION,
+    build_silver_labels_from_answers,
+)
 
 __all__ = [
     "EvidenceBlockView",
@@ -60,6 +69,11 @@ __all__ = [
     "RetrievalRecallAuditError",
     "RetrievalRecallAuditReport",
     "audit_warmup_retrieval_recall",
+    "SilverLabelAuditError",
+    "SilverLabelAuditReport",
+    "audit_silver_labels",
+    "SILVER_LABEL_SCHEMA_VERSION",
+    "build_silver_labels_from_answers",
     "evaluate_ensemble_promotion",
     "metrics_to_dict",
 ]

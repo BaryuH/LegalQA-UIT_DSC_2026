@@ -87,7 +87,7 @@ relevance.  `eval_retrieval.py` still uses silver labels, not these zeros.
 # On warmup500 (non-synthetic) after building warmup LTR features + ranking
 python scripts/sedar_retrieval/eval_retrieval.py \
   --pred "$EVAL/ltr_warmup500.jsonl" \
-  --labels "$EVAL/silver_r2a_warmup500.jsonl" \
+  --labels "$EVAL/silver_r2a_warmup500_v2.jsonl" \
   --output "$EVAL/ltr_warmup500_metrics.json"
 ```
 

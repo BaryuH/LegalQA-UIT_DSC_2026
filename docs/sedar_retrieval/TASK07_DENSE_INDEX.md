@@ -98,7 +98,7 @@ query split, reader checkpoint, and evidence budget.
 ```bash
 ALT_EVAL="$ALT_ROOT/eval"
 BM25="$SEDAR_WORK_ROOT/artifacts/sedar_retrieval/eval/bm25_r2a_warmup500.jsonl"
-SILVER="$SEDAR_WORK_ROOT/artifacts/sedar_retrieval/eval/silver_r2a_warmup500.jsonl"
+SILVER="$SEDAR_WORK_ROOT/artifacts/sedar_retrieval/eval/silver_r2a_warmup500_v2.jsonl"
 
 python scripts/sedar_retrieval/run_dense_retrieval.py \
   --index-dir "$ALT_ROOT/index" \
@@ -153,7 +153,7 @@ latency p50/p95.
 ```bash
 python scripts/sedar_retrieval/eval_retrieval.py \
   --pred "$EVAL/dense_r2a_warmup500.jsonl" \
-  --labels "$EVAL/silver_r2a_warmup500.jsonl" \
+  --labels "$EVAL/silver_r2a_warmup500_v2.jsonl" \
   --output "$EVAL/dense_r2a_warmup500_metrics.json"
 ```
 

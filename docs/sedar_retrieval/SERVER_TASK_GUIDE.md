@@ -216,11 +216,16 @@ python scripts/sedar_retrieval/run_bm25_retrieval.py \
 python scripts/sedar_retrieval/build_silver_labels.py \
   --passages artifacts/sedar_retrieval/views/full_r1_r2a/passages_r2a.jsonl \
   --questions data/warmup.json \
-  --output artifacts/sedar_retrieval/eval/warmup_silver_labels_full.jsonl
+  --output artifacts/sedar_retrieval/eval/warmup_silver_labels_full_v2.jsonl
+
+python scripts/sedar_retrieval/audit_silver_labels.py \
+  --labels artifacts/sedar_retrieval/eval/warmup_silver_labels_full_v2.jsonl \
+  --passages artifacts/sedar_retrieval/views/full_r1_r2a/passages_r2a.jsonl \
+  --output artifacts/sedar_retrieval/eval/silver_label_audit_full_v2.json
 
 python scripts/sedar_retrieval/eval_retrieval.py \
   --pred artifacts/sedar_retrieval/retrieval/full_bm25_warmup.jsonl \
-  --labels artifacts/sedar_retrieval/eval/warmup_silver_labels_full.jsonl \
+  --labels artifacts/sedar_retrieval/eval/warmup_silver_labels_full_v2.jsonl \
   --output artifacts/sedar_retrieval/eval/full_bm25_metrics.json
 ```
 
@@ -310,7 +315,7 @@ python scripts/sedar_retrieval/fuse_candidates.py \
 
 python scripts/sedar_retrieval/eval_retrieval.py \
   --pred artifacts/sedar_retrieval/retrieval/full_rrf_warmup.jsonl \
-  --labels artifacts/sedar_retrieval/eval/warmup_silver_labels_full.jsonl \
+  --labels artifacts/sedar_retrieval/eval/warmup_silver_labels_full_v2.jsonl \
   --output artifacts/sedar_retrieval/eval/full_rrf_metrics.json
 ```
 
@@ -659,6 +664,7 @@ File: `configs/retrieval/gates.yaml`
 - `build_bm25_index.py` / `run_bm25_retrieval.py`
 - `fuse_candidates.py`
 - `eval_retrieval.py` / `build_silver_labels.py`
+- `audit_silver_labels.py`
 - `build_reference_graph.py`
 - `freeze_r0.py` (R0 scaffold; cần gắn SEDAR reader thật trên server)
 - modules: corpus, eval, fusion, features, citation, curation, dense scaffold
