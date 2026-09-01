@@ -64,6 +64,23 @@ def test_article_heading_accepts_dash_separators() -> None:
     ]
 
 
+def test_article_heading_accepts_blank_lines_between_keyword_and_number() -> None:
+    passage = (
+        "Điều\r\n\r\n1. Phạm vi điều chỉnh\r\nNội dung Điều 1.\r\n"
+        "Điều\n\n2 — Đối tượng áp dụng\nNội dung Điều 2."
+    )
+    nodes = parse_legal_document(_doc(passage))
+    articles = [node for node in nodes if node.level == "article"]
+
+    assert [article.article_number for article in articles] == ["1", "2"]
+    assert [article.article_title for article in articles] == [
+        "Phạm vi điều chỉnh",
+        "Đối tượng áp dụng",
+    ]
+    assert "Nội dung Điều 1." in articles[0].raw_text
+    assert "Nội dung Điều 2." in articles[1].raw_text
+
+
 def test_clauses_and_vietnamese_point_d() -> None:
     passage = (
         "Điều 15. Thử việc\n"

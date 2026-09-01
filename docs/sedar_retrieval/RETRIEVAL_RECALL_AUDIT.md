@@ -97,7 +97,9 @@ canonical `nodes.jsonl`, R1, and R2a views do not, rebuild the derived corpus
 with the current parser before changing the label resolver. The parser accepts
 LF/CRLF/CR, Unicode line/paragraph separators U+2028/U+2029, and the common
 period, colon, hyphen, en-dash, and em-dash separators after `Điều N`. Use a
-new canonical/view output directory; do not overwrite an existing experiment.
+The parser also accepts blank lines between a standalone `Điều` marker and its
+article number. Use a new canonical/view output directory; do not overwrite an
+existing experiment.
 After the passage corpus changes, rebuild BM25 and dense indexes before
 comparing retrieval recall because their corpus fingerprints no longer match.
 

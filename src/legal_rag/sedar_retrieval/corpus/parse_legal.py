@@ -29,7 +29,8 @@ _ARTICLE_RE = re.compile(
 )
 _ARTICLE_ONLY_RE = re.compile(r"^\s*điều\s*$", flags=re.IGNORECASE | re.UNICODE)
 _ARTICLE_NUMBER_RE = re.compile(
-    r"^\s*(?P<number>\d+[A-Za-z]?)(?:\s*[.:]\s*(?P<title>.*))?\s*$",
+    r"^\s*(?P<number>\d+[A-Za-z]?)"
+    r"(?:\s*[-–—.:]\s*(?P<title>.*))?\s*$",
     flags=re.UNICODE,
 )
 _CLAUSE_RE = re.compile(
@@ -110,6 +111,16 @@ def _heading_kind(text: str) -> str | None:
     if _POINT_RE.fullmatch(text):
         return "point"
     return None
+
+
+def _next_nonempty_line_index(
+    lines: tuple[_Line, ...],
+    start_index: int,
+) -> int | None:
+    index = start_index
+    while index < len(lines) and not lines[index].text.strip():
+        index += 1
+    return index if index < len(lines) else None
 
 
 def _span_until(
@@ -239,13 +250,15 @@ def parse_legal_document(document: LegalDocument) -> tuple[CanonicalNode, ...]:
         if article_match is not None:
             number = article_match.group("number")
             article_title = (article_match.group("title") or "").strip() or None
-        elif _ARTICLE_ONLY_RE.fullmatch(line.text) and index + 1 < len(lines):
-            number_match = _ARTICLE_NUMBER_RE.fullmatch(lines[index + 1].text)
-            if number_match is not None:
-                number = number_match.group("number")
-                article_title = (number_match.group("title") or "").strip() or None
-                heading_end = lines[index + 1].end
-                advance = 2
+        elif _ARTICLE_ONLY_RE.fullmatch(line.text):
+            number_index = _next_nonempty_line_index(lines, index + 1)
+            if number_index is not None:
+                number_match = _ARTICLE_NUMBER_RE.fullmatch(lines[number_index].text)
+                if number_match is not None:
+                    number = number_match.group("number")
+                    article_title = (number_match.group("title") or "").strip() or None
+                    heading_end = lines[number_index].end
+                    advance = number_index - index + 1
 
         if number is not None:
             article_id = _unique_id(_node_id(document.id, "art", number), used_ids)
