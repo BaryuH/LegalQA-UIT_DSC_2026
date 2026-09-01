@@ -24,7 +24,7 @@ _SECTION_RE = re.compile(
 )
 _ARTICLE_RE = re.compile(
     r"^\s*điều\s+(?P<number>\d+[A-Za-z]?)"
-    r"(?:\s*[.:]\s*(?P<title>.*))?\s*$",
+    r"(?:\s*[-–—.:]\s*(?P<title>.*))?\s*$",
     flags=re.IGNORECASE | re.UNICODE,
 )
 _ARTICLE_ONLY_RE = re.compile(r"^\s*điều\s*$", flags=re.IGNORECASE | re.UNICODE)

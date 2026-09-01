@@ -47,6 +47,23 @@ def test_unicode_line_separators_split_article_headings() -> None:
     assert "Nội dung Điều 2." in articles[1].raw_text
 
 
+def test_article_heading_accepts_dash_separators() -> None:
+    passage = (
+        "Điều 1 - Quy định thứ nhất\nNội dung 1.\n"
+        "Điều 2 – Quy định thứ hai\nNội dung 2.\n"
+        "Điều 3 — Quy định thứ ba\nNội dung 3."
+    )
+    nodes = parse_legal_document(_doc(passage))
+    articles = [node for node in nodes if node.level == "article"]
+
+    assert [article.article_number for article in articles] == ["1", "2", "3"]
+    assert [article.article_title for article in articles] == [
+        "Quy định thứ nhất",
+        "Quy định thứ hai",
+        "Quy định thứ ba",
+    ]
+
+
 def test_clauses_and_vietnamese_point_d() -> None:
     passage = (
         "Điều 15. Thử việc\n"
