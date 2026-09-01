@@ -233,6 +233,7 @@ def _build_label_row(
     document_mentions = tuple(item for item in citations if item.document_number)
     scopes_by_id = {scope.document_id: scope for scope in scopes}
     resolved_scopes: list[dict[str, str]] = []
+    unresolved_scopes: list[dict[str, str]] = []
     relevant_ids: list[str] = []
     unresolved_count = 0
     resolution_reasons: Counter[str] = Counter()
@@ -249,6 +250,13 @@ def _build_label_row(
         if document_id is None:
             unresolved_count += 1
             resolution_reasons[resolution] += 1
+            unresolved_scopes.append(
+                {
+                    "article_number": article_number,
+                    "resolution": resolution,
+                    "reason": resolution,
+                }
+            )
             continue
         scope = scopes_by_id.get(document_id)
         article_ids = (
@@ -259,6 +267,14 @@ def _build_label_row(
         if not article_ids:
             unresolved_count += 1
             resolution_reasons["article_not_in_passages"] += 1
+            unresolved_scopes.append(
+                {
+                    "document_id": document_id,
+                    "article_number": article_number,
+                    "resolution": resolution,
+                    "reason": "article_not_in_passages",
+                }
+            )
             continue
         resolution_reasons[resolution] += 1
         resolved_scopes.append(
@@ -293,6 +309,7 @@ def _build_label_row(
             "provenance": "silver",
             "resolution_status": "resolved",
             "resolved_scopes": resolved_scopes,
+            "unresolved_scopes": unresolved_scopes,
             "citation_summary": citation_summary,
             "resolution_reasons": serialized_reasons,
             "note": "evaluation_only_silver_document_article_scoped",
@@ -307,6 +324,7 @@ def _build_label_row(
         "provenance": "unlabeled",
         "resolution_status": "unresolved",
         "resolved_scopes": resolved_scopes,
+        "unresolved_scopes": unresolved_scopes,
         "citation_summary": citation_summary,
         "resolution_reasons": serialized_reasons,
         "note": note,

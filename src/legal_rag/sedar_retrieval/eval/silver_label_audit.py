@@ -86,6 +86,10 @@ def audit_silver_labels(
     scope_violations: list[dict[str, object]] = []
     unresolved_sample: list[dict[str, object]] = []
     resolution_reason_counts: Counter[str] = Counter()
+    resolution_reason_query_counts: Counter[str] = Counter()
+    resolution_reason_query_id_sample: dict[str, list[str]] = defaultdict(list)
+    unresolved_query_reason_counts: Counter[str] = Counter()
+    unresolved_query_id_sample_by_reason: dict[str, list[str]] = defaultdict(list)
     seen_query_ids: set[str] = set()
     silver_query_count = 0
     known_label_ids = 0
@@ -93,6 +97,7 @@ def audit_silver_labels(
     selected_query_count = 0
     scope_violation_count = 0
     unresolved_resolution_metadata_missing_count = 0
+    unresolved_with_article_query_count = 0
 
     for line in iter_jsonl_lines(labels_source):
         row = json.loads(line)
@@ -111,7 +116,9 @@ def audit_silver_labels(
         schema_version = row.get("schema_version")
         if schema_version is not None:
             label_schema_versions[str(schema_version)] += 1
+        is_unlabeled = row.get("provenance") != "silver"
         raw_reasons = row.get("resolution_reasons")
+        query_reasons: set[str] = set()
         if isinstance(raw_reasons, Mapping):
             for reason, count in raw_reasons.items():
                 if isinstance(count, bool) or not isinstance(count, int) or count < 0:
@@ -119,15 +126,36 @@ def audit_silver_labels(
                         f"resolution_reasons counts must be non-negative integers "
                         f"for query {query_id}"
                     )
-                resolution_reason_counts[str(reason)] += count
-        elif row.get("provenance") != "silver":
+                normalized_reason = str(reason)
+                resolution_reason_counts[normalized_reason] += count
+                if count:
+                    query_reasons.add(normalized_reason)
+        elif raw_reasons is not None:
+            raise SilverLabelAuditError(
+                f"resolution_reasons must be an object for query {query_id}"
+            )
+
+        if is_unlabeled and not query_reasons:
             note = row.get("note")
             if note is not None:
-                resolution_reason_counts[str(note)] += 1
+                normalized_note = str(note)
+                resolution_reason_counts[normalized_note] += 1
+                query_reasons.add(normalized_note)
             else:
                 unresolved_resolution_metadata_missing_count += 1
 
-        if row.get("provenance") != "silver":
+        for reason in sorted(query_reasons):
+            resolution_reason_query_counts[reason] += 1
+            if len(resolution_reason_query_id_sample[reason]) < sample_size:
+                resolution_reason_query_id_sample[reason].append(query_id)
+
+        if is_unlabeled:
+            for reason in sorted(query_reasons):
+                unresolved_query_reason_counts[reason] += 1
+                if len(unresolved_query_id_sample_by_reason[reason]) < sample_size:
+                    unresolved_query_id_sample_by_reason[reason].append(query_id)
+            if any(reason != "no_article_citation" for reason in query_reasons):
+                unresolved_with_article_query_count += 1
             if len(unresolved_sample) < sample_size:
                 sample_row: dict[str, object] = {
                     "query_id": query_id,
@@ -141,6 +169,13 @@ def audit_silver_labels(
                 raw_scopes = row.get("resolved_scopes")
                 if isinstance(raw_scopes, list):
                     sample_row["resolved_scopes"] = raw_scopes
+                raw_unresolved_scopes = row.get("unresolved_scopes")
+                if raw_unresolved_scopes is not None:
+                    if not isinstance(raw_unresolved_scopes, list):
+                        raise SilverLabelAuditError(
+                            f"unresolved_scopes must be a list for query {query_id}"
+                        )
+                    sample_row["unresolved_scopes"] = raw_unresolved_scopes
                 unresolved_sample.append(sample_row)
             continue
 
@@ -241,11 +276,24 @@ def audit_silver_labels(
         "selected_query_count": selected_query_count,
         "silver_query_count": silver_query_count,
         "unlabeled_query_count": selected_query_count - silver_query_count,
+        "unresolved_with_article_query_count": unresolved_with_article_query_count,
         "unresolved_resolution_metadata_missing_count": (
             unresolved_resolution_metadata_missing_count
         ),
         "label_schema_versions": dict(sorted(label_schema_versions.items())),
         "resolution_reason_counts": dict(sorted(resolution_reason_counts.items())),
+        "resolution_reason_query_counts": dict(
+            sorted(resolution_reason_query_counts.items())
+        ),
+        "resolution_reason_query_id_sample": dict(
+            sorted(resolution_reason_query_id_sample.items())
+        ),
+        "unresolved_query_reason_counts": dict(
+            sorted(unresolved_query_reason_counts.items())
+        ),
+        "unresolved_query_id_sample_by_reason": dict(
+            sorted(unresolved_query_id_sample_by_reason.items())
+        ),
         "unresolved_query_sample": unresolved_sample,
         "relevant_id_count_histogram": dict(sorted(relevant_count_histogram.items())),
         "document_count_histogram": dict(sorted(document_count_histogram.items())),

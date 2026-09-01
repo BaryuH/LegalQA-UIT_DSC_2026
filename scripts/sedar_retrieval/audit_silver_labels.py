@@ -59,7 +59,13 @@ def main(argv: list[str] | None = None) -> int:
                 "clean_query_count": payload["clean_query_count"],
                 "silver_query_count": payload["silver_query_count"],
                 "unlabeled_query_count": payload["unlabeled_query_count"],
+                "unresolved_with_article_query_count": payload[
+                    "unresolved_with_article_query_count"
+                ],
                 "resolution_reason_counts": payload["resolution_reason_counts"],
+                "unresolved_query_reason_counts": payload[
+                    "unresolved_query_reason_counts"
+                ],
                 "multi_document_query_count": payload["multi_document_query_count"],
                 "missing_passage_id_count": payload["missing_passage_id_count"],
                 "warnings": warning_count,

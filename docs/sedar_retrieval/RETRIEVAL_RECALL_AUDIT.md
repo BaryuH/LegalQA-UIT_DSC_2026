@@ -74,14 +74,23 @@ article-number fallback is allowed. The builder and audit use the repository
 JSONL reader, so legal text containing U+2028/U+2029 is not split incorrectly.
 
 The v2 audit also reports `resolution_reason_counts` and an
-`unresolved_query_sample`. These fields contain query IDs, scope metadata, and
-reason codes only; they never contain reference-answer text. Use
+`unresolved_query_sample`. It additionally reports
+`unresolved_query_reason_counts` and
+`unresolved_query_id_sample_by_reason`; the
+former counts queries, while `resolution_reason_counts` counts citation
+mentions. These fields contain query IDs, scope metadata, and reason codes
+only; they never contain reference-answer text. Use
 `document_identity_not_found`, `document_number_not_in_corpus`, and
 `ambiguous_document_*` to inspect the 170 ambiguous rows. Keep a row
 `unlabeled` unless the cited document identity can be established
 deterministically; rows with `no_article_citation` remain unlabeled.
-For the complete clean-460 unresolved inventory (170 ambiguous + 40 without
-an article citation), rerun this audit with `--sample-size 210`.
+For the complete clean-460 unresolved inventory, set `--sample-size` at least
+to the reported `unlabeled_query_count` (use `460` to avoid truncation when
+the count changes).
+For `article_not_in_passages`, inspect the row's `unresolved_scopes`:
+`document_id` identifies the resolved document and `article_number` identifies
+the missing article in the selected passage view. This distinguishes corpus
+coverage/index-view gaps from document-resolution failures.
 
 ## P1 — Export deep BM25/Qwen rankings
 

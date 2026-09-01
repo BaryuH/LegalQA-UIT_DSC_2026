@@ -174,6 +174,11 @@ def test_builder_scopes_articles_to_cited_document(tmp_path: Path) -> None:
         "resolved_document_number": 3,
     }
     assert audit["unresolved_query_sample"][0]["query_id"] == "q-ambiguous"
+    assert audit["unresolved_with_article_query_count"] == 1
+    assert audit["unresolved_query_reason_counts"] == {"document_identity_not_found": 1}
+    assert audit["unresolved_query_id_sample_by_reason"] == {
+        "document_identity_not_found": ["q-ambiguous"]
+    }
     assert all("answer" not in sample for sample in audit["unresolved_query_sample"])
     assert "Theo Điều" not in json.dumps(audit, ensure_ascii=False)
 
@@ -212,6 +217,53 @@ def test_builder_keeps_articleless_answer_unlabeled(tmp_path: Path) -> None:
     assert row["note"] == "no_article_citation"
     assert row["relevant_ids"] == []
     assert row["resolution_reasons"] == {"no_article_citation": 1}
+
+
+def test_builder_records_article_not_in_passages_scope(tmp_path: Path) -> None:
+    _, passages_path, _ = _write_fixture(tmp_path)
+    questions_path = tmp_path / "missing-article-questions.json"
+    questions_path.write_text(
+        json.dumps(
+            {"q-article-missing": {"answer": "Theo Điều 99 Thông tư 55/2021/TT-BCA."}},
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "missing-article-labels-v2.jsonl"
+
+    stats = build_silver_labels_from_answers(
+        questions_path=questions_path,
+        passages_path=passages_path,
+        output_path=output_path,
+    )
+    row = json.loads(output_path.read_text(encoding="utf-8").strip())
+    audit = audit_silver_labels(
+        labels_path=output_path,
+        passages_path=passages_path,
+        sample_size=1,
+    ).as_dict()
+
+    assert stats["labeled"] == 0
+    assert stats["unlabeled"] == 1
+    assert row["unresolved_scopes"] == [
+        {
+            "document_id": "doc-a",
+            "article_number": "99",
+            "resolution": "resolved_document_number",
+            "reason": "article_not_in_passages",
+        }
+    ]
+    assert audit["unresolved_with_article_query_count"] == 1
+    assert audit["unresolved_query_reason_counts"] == {"article_not_in_passages": 1}
+    assert audit["unresolved_query_id_sample_by_reason"] == {
+        "article_not_in_passages": ["q-article-missing"]
+    }
+    assert (
+        audit["unresolved_query_sample"][0]["unresolved_scopes"]
+        == row["unresolved_scopes"]
+    )
+    assert "Điều 99" not in json.dumps(audit, ensure_ascii=False)
 
 
 def test_builder_rejects_empty_passage_corpus(tmp_path: Path) -> None:
