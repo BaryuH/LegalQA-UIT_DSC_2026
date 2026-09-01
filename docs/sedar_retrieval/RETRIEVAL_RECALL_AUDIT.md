@@ -92,6 +92,14 @@ For `article_not_in_passages`, inspect the row's `unresolved_scopes`:
 the missing article in the selected passage view. This distinguishes corpus
 coverage/index-view gaps from document-resolution failures.
 
+If the raw selected-context source contains an article heading but the
+canonical `nodes.jsonl`, R1, and R2a views do not, rebuild the derived corpus
+with the current parser before changing the label resolver. The parser accepts
+LF/CRLF/CR and Unicode line/paragraph separators U+2028/U+2029. Use a new
+canonical/view output directory; do not overwrite an existing experiment.
+After the passage corpus changes, rebuild BM25 and dense indexes before
+comparing retrieval recall because their corpus fingerprints no longer match.
+
 ## P1 — Export deep BM25/Qwen rankings
 
 Run this after P0 has produced and audited labels v2. Keep the deeper exports

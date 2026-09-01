@@ -62,12 +62,19 @@ class _ParseState:
 
 def _iter_lines(text: str) -> tuple[_Line, ...]:
     lines: list[_Line] = []
-    for match in re.finditer(r"[^\r\n]*(?:\r\n|\r|\n|$)", text):
+    for match in re.finditer(
+        r"[^\r\n\u2028\u2029]*(?:\r\n|\r|\n|\u2028|\u2029|$)",
+        text,
+    ):
         if match.start() == len(text) and not match.group():
             break
         raw = match.group()
         lines.append(
-            _Line(start=match.start(), end=match.end(), text=raw.rstrip("\r\n"))
+            _Line(
+                start=match.start(),
+                end=match.end(),
+                text=raw.rstrip("\r\n\u2028\u2029"),
+            )
         )
     return tuple(lines)
 
@@ -163,10 +170,10 @@ def parse_legal_document(document: LegalDocument) -> tuple[CanonicalNode, ...]:
         chapter = _CHAPTER_RE.fullmatch(line.text)
         if chapter is not None:
             label = chapter.group("label")
-            title = (chapter.group("title") or "").strip() or None
+            chapter_title = (chapter.group("title") or "").strip() or None
             node_id = _unique_id(_node_id(document.id, "chuong", label), used_ids)
             state.chapter_id = node_id
-            state.chapter_title = title
+            state.chapter_title = chapter_title
             state.section_id = None
             state.section_title = None
             state.article_id = None
@@ -182,7 +189,7 @@ def parse_legal_document(document: LegalDocument) -> tuple[CanonicalNode, ...]:
                     document_id=document.id,
                     document_name=document.name,
                     chapter_id=node_id,
-                    chapter_title=title,
+                    chapter_title=chapter_title,
                     raw_text=text[line.start : heading_end] or line.text,
                     parse_status="ok",
                     source=source,
@@ -195,11 +202,11 @@ def parse_legal_document(document: LegalDocument) -> tuple[CanonicalNode, ...]:
         section = _SECTION_RE.fullmatch(line.text)
         if section is not None:
             label = section.group("label")
-            title = (section.group("title") or "").strip() or None
+            section_title = (section.group("title") or "").strip() or None
             node_id = _unique_id(_node_id(document.id, "muc", label), used_ids)
             parent = state.chapter_id or nodes[0].node_id
             state.section_id = node_id
-            state.section_title = title
+            state.section_title = section_title
             state.article_id = None
             state.article_number = None
             state.article_title = None
@@ -214,7 +221,7 @@ def parse_legal_document(document: LegalDocument) -> tuple[CanonicalNode, ...]:
                     chapter_id=state.chapter_id,
                     chapter_title=state.chapter_title,
                     section_id=node_id,
-                    section_title=title,
+                    section_title=section_title,
                     raw_text=text[line.start : heading_end] or line.text,
                     parse_status="ok",
                     source=source,
@@ -225,18 +232,18 @@ def parse_legal_document(document: LegalDocument) -> tuple[CanonicalNode, ...]:
             continue
 
         number: str | None = None
-        title: str | None = None
+        article_title: str | None = None
         heading_end = line.end
         advance = 1
         article_match = _ARTICLE_RE.fullmatch(line.text)
         if article_match is not None:
             number = article_match.group("number")
-            title = (article_match.group("title") or "").strip() or None
+            article_title = (article_match.group("title") or "").strip() or None
         elif _ARTICLE_ONLY_RE.fullmatch(line.text) and index + 1 < len(lines):
             number_match = _ARTICLE_NUMBER_RE.fullmatch(lines[index + 1].text)
             if number_match is not None:
                 number = number_match.group("number")
-                title = (number_match.group("title") or "").strip() or None
+                article_title = (number_match.group("title") or "").strip() or None
                 heading_end = lines[index + 1].end
                 advance = 2
 
@@ -245,7 +252,7 @@ def parse_legal_document(document: LegalDocument) -> tuple[CanonicalNode, ...]:
             parent = state.section_id or state.chapter_id or nodes[0].node_id
             state.article_id = article_id
             state.article_number = number
-            state.article_title = title
+            state.article_title = article_title
             span = _span_until(lines, index, ("chapter", "section", "article"))
             raw = text[span[0] : span[1]]
             nodes.append(
@@ -261,7 +268,7 @@ def parse_legal_document(document: LegalDocument) -> tuple[CanonicalNode, ...]:
                     section_title=state.section_title,
                     article_id=article_id,
                     article_number=number,
-                    article_title=title,
+                    article_title=article_title,
                     raw_text=raw if raw.strip() else line.text,
                     parse_status="ok",
                     source=source,
@@ -303,10 +310,7 @@ def parse_legal_document(document: LegalDocument) -> tuple[CanonicalNode, ...]:
             _node_id(document.id, "retained", str(start)), used_ids
         )
         parent = (
-            state.article_id
-            or state.section_id
-            or state.chapter_id
-            or nodes[0].node_id
+            state.article_id or state.section_id or state.chapter_id or nodes[0].node_id
         )
         nodes.append(
             CanonicalNode(
@@ -374,9 +378,7 @@ def _parse_clauses_and_points(
         assert match is not None
         number = match.group("number")
         clause_id = _unique_id(
-            _node_id(
-                document.id, "art", state.article_number or "?", "cl", number
-            ),
+            _node_id(document.id, "art", state.article_number or "?", "cl", number),
             used_ids,
         )
         clause_end = (

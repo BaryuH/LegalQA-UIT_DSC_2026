@@ -32,6 +32,21 @@ def test_standard_article_with_title() -> None:
     assert "Nội dung điều." in articles[0].raw_text
 
 
+def test_unicode_line_separators_split_article_headings() -> None:
+    passage = (
+        "Điều 1. Phạm vi điều chỉnh\u2028"
+        "Nội dung Điều 1.\u2029"
+        "Điều 2. Đối tượng áp dụng\u2028"
+        "Nội dung Điều 2."
+    )
+    nodes = parse_legal_document(_doc(passage))
+    articles = [node for node in nodes if node.level == "article"]
+
+    assert [article.article_number for article in articles] == ["1", "2"]
+    assert "Nội dung Điều 1." in articles[0].raw_text
+    assert "Nội dung Điều 2." in articles[1].raw_text
+
+
 def test_clauses_and_vietnamese_point_d() -> None:
     passage = (
         "Điều 15. Thử việc\n"
@@ -76,14 +91,14 @@ def test_malformed_numbering_is_retained_not_dropped() -> None:
     nodes = parse_legal_document(_doc(passage))
     retained = [n for n in nodes if n.parse_status == "retained"]
     assert retained
-    assert all("Phần mở đầu" in n.raw_text or "Nội dung" in n.raw_text for n in retained)
+    assert all(
+        "Phần mở đầu" in n.raw_text or "Nội dung" in n.raw_text for n in retained
+    )
 
 
 def test_retrieval_and_reader_text_separation() -> None:
     passage = (
-        "Chương I - Quy định chung\n"
-        "Điều 1. Phạm vi điều chỉnh\n"
-        "1. Nội dung khoản 1.\n"
+        "Chương I - Quy định chung\nĐiều 1. Phạm vi điều chỉnh\n1. Nội dung khoản 1.\n"
     )
     nodes = parse_legal_document(_doc(passage))
     passages = nodes_to_passages(nodes, levels=("article", "clause"))
