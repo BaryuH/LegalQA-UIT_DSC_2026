@@ -64,13 +64,24 @@ python scripts/sedar_retrieval/audit_silver_labels.py \
   --labels "$LABELS_V2" \
   --passages "$VIEWS/passages_r2a.jsonl" \
   --sample-size 20 \
-  --output "$EVAL_ROOT/silver_label_audit_clean460_v2.json"
+  --output "$EVAL_ROOT/silver_label_audit_clean460_v2.json" \
+  --force
 ```
 
 Labels v2 resolve `document identity + article number`. If that scope is
 missing or ambiguous, the row is explicitly `unlabeled`; no corpus-wide
 article-number fallback is allowed. The builder and audit use the repository
 JSONL reader, so legal text containing U+2028/U+2029 is not split incorrectly.
+
+The v2 audit also reports `resolution_reason_counts` and an
+`unresolved_query_sample`. These fields contain query IDs, scope metadata, and
+reason codes only; they never contain reference-answer text. Use
+`document_identity_not_found`, `document_number_not_in_corpus`, and
+`ambiguous_document_*` to inspect the 170 ambiguous rows. Keep a row
+`unlabeled` unless the cited document identity can be established
+deterministically; rows with `no_article_citation` remain unlabeled.
+For the complete clean-460 unresolved inventory (170 ambiguous + 40 without
+an article citation), rerun this audit with `--sample-size 210`.
 
 ## P1 — Export deep BM25/Qwen rankings
 
@@ -156,8 +167,9 @@ artifact.
 
 - BM25 uses its first `K` IDs;
 - Qwen uses its first `K` IDs;
-- the candidate union is the ordered union of both lists and can contain up
-  to `2K` unique IDs.
+- the candidate union is the ordered union of `BM25@K` and `Qwen@K` and can
+  contain up to `2K` unique IDs; recall evaluates the full union, not only
+  the first `K` concatenated IDs.
 
 The command does not rerun BM25, Qwen, or LTR. If a source JSONL contains only
 100 IDs per query, recall at 200 and 500 is marked as a lower bound and a

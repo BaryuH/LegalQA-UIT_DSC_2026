@@ -145,17 +145,73 @@ def test_builder_scopes_articles_to_cited_document(tmp_path: Path) -> None:
         "total": 4,
         "resolved_citations": 4,
         "ambiguous_citations": 1,
+        "resolution_reason_counts": {
+            "document_identity_not_found": 1,
+            "resolved_document_name": 1,
+            "resolved_document_number": 3,
+        },
         "schema_version": SILVER_LABEL_SCHEMA_VERSION,
     }
     assert rows["q-scoped"]["relevant_ids"] == ["doc-a-art-12"]
     assert rows["q-scoped"]["provenance"] == "silver"
     assert rows["q-ambiguous"]["relevant_ids"] == []
     assert rows["q-ambiguous"]["provenance"] == "unlabeled"
+    assert rows["q-ambiguous"]["resolution_reasons"] == {
+        "document_identity_not_found": 1
+    }
     assert rows["q-name"]["relevant_ids"] == ["doc-d-art-7"]
     assert rows["q-multi"]["relevant_ids"] == ["doc-a-art-12", "doc-c-art-3"]
     assert all(
         row["schema_version"] == SILVER_LABEL_SCHEMA_VERSION for row in rows.values()
     )
+    audit = audit_silver_labels(
+        labels_path=output_path,
+        passages_path=passages_path,
+    ).as_dict()
+    assert audit["resolution_reason_counts"] == {
+        "document_identity_not_found": 1,
+        "resolved_document_name": 1,
+        "resolved_document_number": 3,
+    }
+    assert audit["unresolved_query_sample"][0]["query_id"] == "q-ambiguous"
+    assert all("answer" not in sample for sample in audit["unresolved_query_sample"])
+    assert "Theo Điều" not in json.dumps(audit, ensure_ascii=False)
+
+
+def test_builder_keeps_articleless_answer_unlabeled(tmp_path: Path) -> None:
+    _, passages_path, _ = _write_fixture(tmp_path)
+    questions_path = tmp_path / "articleless-questions.json"
+    questions_path.write_text(
+        json.dumps(
+            {
+                "q-no-article": {
+                    "answer": (
+                        "Theo Thông tư 55/2021/TT-BCA, quy định này được áp dụng."
+                    )
+                }
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "articleless-labels-v2.jsonl"
+
+    stats = build_silver_labels_from_answers(
+        questions_path=questions_path,
+        passages_path=passages_path,
+        output_path=output_path,
+    )
+    row = json.loads(output_path.read_text(encoding="utf-8").strip())
+
+    assert stats["labeled"] == 0
+    assert stats["unlabeled"] == 1
+    assert stats["resolved_citations"] == 0
+    assert stats["ambiguous_citations"] == 0
+    assert row["provenance"] == "unlabeled"
+    assert row["note"] == "no_article_citation"
+    assert row["relevant_ids"] == []
+    assert row["resolution_reasons"] == {"no_article_citation": 1}
 
 
 def test_builder_rejects_empty_passage_corpus(tmp_path: Path) -> None:

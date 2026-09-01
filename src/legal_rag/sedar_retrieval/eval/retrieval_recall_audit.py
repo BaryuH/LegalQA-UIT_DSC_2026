@@ -167,11 +167,22 @@ def _curve_entry(
     match_sets: Mapping[str, Mapping[str, frozenset[str]]],
     cutoff: int,
     depth_sufficient_query_count: int,
+    truncate_to_cutoff: bool = True,
 ) -> dict[str, object]:
+    """Calculate recall for rankings at one cutoff.
+
+    Candidate-union rankings are built separately as
+    ``BM25@K ∪ Qwen@K``. They already contain both source cutoffs, so they
+    must not be truncated to the first ``K`` concatenated IDs here.
+    """
+
     counts = {level: 0 for level in _LEVELS}
     coverage_values: list[float] = []
     for query_id in query_ids:
-        ranked = _unique_preserve_order(ranked_by_query[query_id][:cutoff])
+        source_ranked = ranked_by_query[query_id]
+        if truncate_to_cutoff:
+            source_ranked = source_ranked[:cutoff]
+        ranked = _unique_preserve_order(source_ranked)
         targets = match_sets[query_id]
         for level in _LEVELS:
             if set(ranked) & targets[level]:
@@ -570,6 +581,7 @@ def audit_warmup_retrieval_recall(
                 match_sets=match_sets,
                 cutoff=cutoff,
                 depth_sufficient_query_count=union_depth_sufficient,
+                truncate_to_cutoff=False,
             )
         )
         contribution.append(

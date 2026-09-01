@@ -15,10 +15,39 @@ from legal_rag.sedar_retrieval.corpus.schema import (
 )
 from legal_rag.sedar_retrieval.eval.retrieval_recall_audit import (
     RetrievalRecallAuditError,
+    _curve_entry,
+    _union_for_query,
     audit_warmup_retrieval_recall,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_candidate_union_preserves_both_source_cutoffs() -> None:
+    union = _union_for_query(
+        ("bm25-1", "bm25-2"),
+        ("qwen-1", "target"),
+        cutoff=2,
+    )
+    match_sets = {
+        "q": {
+            level: frozenset({"target"})
+            for level in ("exact_passage", "article", "document", "provision")
+        }
+    }
+
+    result = _curve_entry(
+        ranked_by_query={"q": union},
+        query_ids=("q",),
+        match_sets=match_sets,
+        cutoff=2,
+        depth_sufficient_query_count=1,
+        truncate_to_cutoff=False,
+    )
+
+    assert union == ("bm25-1", "bm25-2", "qwen-1", "target")
+    assert result["exact_passage_hit_count"] == 1
+    assert result["exact_passage_recall"] == pytest.approx(1.0)
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -114,7 +143,7 @@ def _build_fixture(tmp_path: Path) -> dict[str, Path]:
     _write_jsonl(
         bm25,
         [
-            {"query_id": "q-a", "ranked_ids": ["p-x", "p-a"]},
+            {"query_id": "q-a", "ranked_ids": ["p-x", "p-y"]},
             {"query_id": "q-b", "ranked_ids": ["p-b", "p-z"]},
             {"query_id": "q-c", "ranked_ids": ["p-x"]},
         ],
@@ -123,7 +152,7 @@ def _build_fixture(tmp_path: Path) -> dict[str, Path]:
     _write_jsonl(
         qwen,
         [
-            {"query_id": "q-a", "ranked_ids": ["p-y", "p-z"]},
+            {"query_id": "q-a", "ranked_ids": ["p-y", "p-a"]},
             {"query_id": "q-b", "ranked_ids": ["p-z", "p-y"]},
             {"query_id": "q-c", "ranked_ids": ["p-x"]},
         ],

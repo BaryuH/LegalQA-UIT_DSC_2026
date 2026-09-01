@@ -84,12 +84,15 @@ def audit_silver_labels(
     missing_passages: list[dict[str, str]] = []
     multi_document_sample: list[dict[str, object]] = []
     scope_violations: list[dict[str, object]] = []
+    unresolved_sample: list[dict[str, object]] = []
+    resolution_reason_counts: Counter[str] = Counter()
     seen_query_ids: set[str] = set()
     silver_query_count = 0
     known_label_ids = 0
     first_three_hits = 0
     selected_query_count = 0
     scope_violation_count = 0
+    unresolved_resolution_metadata_missing_count = 0
 
     for line in iter_jsonl_lines(labels_source):
         row = json.loads(line)
@@ -108,7 +111,37 @@ def audit_silver_labels(
         schema_version = row.get("schema_version")
         if schema_version is not None:
             label_schema_versions[str(schema_version)] += 1
+        raw_reasons = row.get("resolution_reasons")
+        if isinstance(raw_reasons, Mapping):
+            for reason, count in raw_reasons.items():
+                if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                    raise SilverLabelAuditError(
+                        f"resolution_reasons counts must be non-negative integers "
+                        f"for query {query_id}"
+                    )
+                resolution_reason_counts[str(reason)] += count
+        elif row.get("provenance") != "silver":
+            note = row.get("note")
+            if note is not None:
+                resolution_reason_counts[str(note)] += 1
+            else:
+                unresolved_resolution_metadata_missing_count += 1
+
         if row.get("provenance") != "silver":
+            if len(unresolved_sample) < sample_size:
+                sample_row: dict[str, object] = {
+                    "query_id": query_id,
+                    "note": str(row.get("note") or ""),
+                }
+                if isinstance(raw_reasons, Mapping):
+                    sample_row["resolution_reasons"] = {
+                        str(reason): int(count)
+                        for reason, count in sorted(raw_reasons.items())
+                    }
+                raw_scopes = row.get("resolved_scopes")
+                if isinstance(raw_scopes, list):
+                    sample_row["resolved_scopes"] = raw_scopes
+                unresolved_sample.append(sample_row)
             continue
 
         silver_query_count += 1
@@ -193,6 +226,8 @@ def audit_silver_labels(
         warnings.append("labels_reference_missing_passages")
     if scope_violations:
         warnings.append("v2_labels_have_scope_violations")
+    if unresolved_resolution_metadata_missing_count:
+        warnings.append("unresolved_labels_missing_resolution_metadata")
     if clean_query_ids is not None and selected_query_count != len(clean_query_ids):
         warnings.append("labels_missing_clean_query_ids")
     report = {
@@ -206,7 +241,12 @@ def audit_silver_labels(
         "selected_query_count": selected_query_count,
         "silver_query_count": silver_query_count,
         "unlabeled_query_count": selected_query_count - silver_query_count,
+        "unresolved_resolution_metadata_missing_count": (
+            unresolved_resolution_metadata_missing_count
+        ),
         "label_schema_versions": dict(sorted(label_schema_versions.items())),
+        "resolution_reason_counts": dict(sorted(resolution_reason_counts.items())),
+        "unresolved_query_sample": unresolved_sample,
         "relevant_id_count_histogram": dict(sorted(relevant_count_histogram.items())),
         "document_count_histogram": dict(sorted(document_count_histogram.items())),
         "article_count_histogram": dict(sorted(article_count_histogram.items())),

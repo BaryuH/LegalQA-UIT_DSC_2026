@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -167,11 +167,13 @@ def _resolve_article_document(
         article_end,
     )
     local_distances: dict[str, int] = {}
+    local_number_mention_count = 0
     for mention in document_mentions:
         mention_start = mention.start
         mention_end = mention.end
         if mention_end <= segment_start or mention_start >= segment_end:
             continue
+        local_number_mention_count += 1
         candidates = _document_ids_for_number(mention.document_number, scopes)
         distance = min(
             abs(article_start - mention_end),
@@ -192,14 +194,16 @@ def _resolve_article_document(
         }
         if len(best_documents) == 1:
             return next(iter(best_documents)), "resolved_document_number"
-        return None, "ambiguous_document_scope"
+        return None, "ambiguous_document_number"
 
     segment = answer[segment_start:segment_end]
+    if local_number_mention_count:
+        return None, "document_number_not_in_corpus"
     alias_candidates = _document_ids_for_text(segment, scopes)
     if len(alias_candidates) == 1:
         return next(iter(alias_candidates)), "resolved_document_name"
     if len(alias_candidates) > 1:
-        return None, "ambiguous_document_scope"
+        return None, "ambiguous_document_name"
 
     global_candidates = {
         document_id
@@ -213,7 +217,9 @@ def _resolve_article_document(
         global_candidates = set(_document_ids_for_text(answer, scopes))
     if len(global_candidates) == 1:
         return next(iter(global_candidates)), "resolved_global_document"
-    return None, "ambiguous_document_scope"
+    if len(global_candidates) > 1:
+        return None, "ambiguous_document_scope"
+    return None, "document_identity_not_found"
 
 
 def _build_label_row(
@@ -229,6 +235,7 @@ def _build_label_row(
     resolved_scopes: list[dict[str, str]] = []
     relevant_ids: list[str] = []
     unresolved_count = 0
+    resolution_reasons: Counter[str] = Counter()
 
     for article in article_mentions:
         document_id, resolution = _resolve_article_document(
@@ -241,6 +248,7 @@ def _build_label_row(
         article_number = str(article.article)
         if document_id is None:
             unresolved_count += 1
+            resolution_reasons[resolution] += 1
             continue
         scope = scopes_by_id.get(document_id)
         article_ids = (
@@ -250,7 +258,9 @@ def _build_label_row(
         )
         if not article_ids:
             unresolved_count += 1
+            resolution_reasons["article_not_in_passages"] += 1
             continue
+        resolution_reasons[resolution] += 1
         resolved_scopes.append(
             {
                 "document_id": document_id,
@@ -262,6 +272,16 @@ def _build_label_row(
             if passage_id not in relevant_ids:
                 relevant_ids.append(passage_id)
 
+    if not article_mentions:
+        resolution_reasons["no_article_citation"] += 1
+
+    citation_summary = {
+        "article_mentions": len(article_mentions),
+        "document_mentions": len(document_mentions),
+        "resolved_article_mentions": len(resolved_scopes),
+        "unresolved_article_mentions": unresolved_count,
+    }
+    serialized_reasons = dict(sorted(resolution_reasons.items()))
     fully_resolved = (
         bool(article_mentions) and unresolved_count == 0 and bool(relevant_ids)
     )
@@ -273,6 +293,8 @@ def _build_label_row(
             "provenance": "silver",
             "resolution_status": "resolved",
             "resolved_scopes": resolved_scopes,
+            "citation_summary": citation_summary,
+            "resolution_reasons": serialized_reasons,
             "note": "evaluation_only_silver_document_article_scoped",
         }
         return resolved_row, len(article_mentions), 0
@@ -285,9 +307,15 @@ def _build_label_row(
         "provenance": "unlabeled",
         "resolution_status": "unresolved",
         "resolved_scopes": resolved_scopes,
+        "citation_summary": citation_summary,
+        "resolution_reasons": serialized_reasons,
         "note": note,
     }
-    return unresolved_row, 0, unresolved_count or len(article_mentions)
+    return (
+        unresolved_row,
+        len(resolved_scopes),
+        unresolved_count or len(article_mentions),
+    )
 
 
 def build_silver_labels_from_answers(
@@ -317,6 +345,7 @@ def build_silver_labels_from_answers(
     n_unlabeled = 0
     resolved_citations = 0
     ambiguous_citations = 0
+    resolution_reason_counts: Counter[str] = Counter()
     with output_path.open("w", encoding="utf-8") as handle:
         for index, (qid, payload) in enumerate(
             sorted(questions.items(), key=lambda x: x[0])
@@ -337,6 +366,10 @@ def build_silver_labels_from_answers(
                 n_unlabeled += 1
             resolved_citations += resolved_count
             ambiguous_citations += ambiguous_count
+            raw_reasons = row.get("resolution_reasons", {})
+            if isinstance(raw_reasons, Mapping):
+                for reason, count in raw_reasons.items():
+                    resolution_reason_counts[str(reason)] += int(count)
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     return {
         "labeled": n_labeled,
@@ -344,5 +377,6 @@ def build_silver_labels_from_answers(
         "total": n_labeled + n_unlabeled,
         "resolved_citations": resolved_citations,
         "ambiguous_citations": ambiguous_citations,
+        "resolution_reason_counts": dict(sorted(resolution_reason_counts.items())),
         "schema_version": SILVER_LABEL_SCHEMA_VERSION,
     }
