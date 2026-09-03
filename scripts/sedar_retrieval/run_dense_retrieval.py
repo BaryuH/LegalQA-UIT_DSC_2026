@@ -133,6 +133,17 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", default=None)
     parser.add_argument(
+        "--model-path",
+        type=Path,
+        default=None,
+        help=(
+            "Optional local snapshot directory to load the query encoder from. "
+            "The manifest's model name and pinned revision are still validated "
+            "and recorded; only the loader path differs. Use the same directory "
+            "that built the index."
+        ),
+    )
+    parser.add_argument(
         "--source-name",
         choices=("dense", "legal"),
         default="dense",
@@ -243,11 +254,21 @@ def main() -> int:
     if not isinstance(normalized_value, bool):
         raise SystemExit("Dense manifest normalized must be boolean")
     normalized = normalized_value
+    if args.model_path is not None:
+        if not args.model_path.is_dir():
+            raise SystemExit(f"--model-path is not a directory: {args.model_path}")
+        load_target = str(args.model_path)
+        # Local directory: load from disk and do not re-enter hub resolution.
+        load_revision = None
+    else:
+        load_target = model
+        load_revision = revision
+
     encoder = SentenceTransformerEncoder(
-        model=model,
+        model=load_target,
         device=args.device,
         dtype=dtype,
-        revision=revision,
+        revision=load_revision,
         max_seq_length=max_seq_length,
         local_files_only=args.local_files_only,
     )

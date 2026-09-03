@@ -146,6 +146,18 @@ def main() -> int:
     parser.add_argument("--model", default=DEFAULT_DENSE_MODEL)
     parser.add_argument("--model-revision", default=None)
     parser.add_argument(
+        "--model-path",
+        type=Path,
+        default=None,
+        help=(
+            "Optional local snapshot directory to load the weights from. "
+            "--model stays the logical model name, so the manifest and the "
+            "index cache fingerprint are unchanged; only the loader path "
+            "differs. Use this on an offline host where resolving the repo id "
+            "through the Hugging Face cache fails."
+        ),
+    )
+    parser.add_argument(
         "--input-format",
         choices=DENSE_INPUT_FORMATS,
         default=DEFAULT_INPUT_FORMAT,
@@ -256,11 +268,33 @@ def main() -> int:
 
     require_dense_encode()
     faiss, np = _optional_runtime_imports()
+    if args.model_path is not None:
+        if not args.model_path.is_dir():
+            raise SystemExit(f"--model-path is not a directory: {args.model_path}")
+        load_target = str(args.model_path)
+        # A local directory is loaded straight from disk; passing a revision
+        # alongside it would send SentenceTransformers back through the hub.
+        load_revision = None
+        print(
+            json.dumps(
+                {
+                    "model_load_source": "local_path",
+                    "model_logical_name": args.model,
+                    "model_path": load_target,
+                    "model_revision_recorded": args.model_revision,
+                },
+                ensure_ascii=False,
+            )
+        )
+    else:
+        load_target = args.model
+        load_revision = args.model_revision
+
     encoder = SentenceTransformerEncoder(
-        model=args.model,
+        model=load_target,
         device=args.device,
         dtype=args.dtype,
-        revision=args.model_revision,
+        revision=load_revision,
         max_seq_length=args.max_seq_length,
         local_files_only=args.local_files_only,
     )
