@@ -1,5 +1,31 @@
 #!/usr/bin/env python3
-"""Evaluate retrieval predictions with SEDAR Retrieval v3 metrics (TASK 02)."""
+"""Evaluate retrieval predictions with SEDAR Retrieval v3 metrics (TASK 02).
+
+Level-aware since the M1 fix: ``--passages`` is required so that
+``document_recall_at`` / ``article_recall_at`` / ``clause_recall_at`` and
+``wrong_document_rate`` are actually computed.  Before the fix these mappings
+were never passed, so every level recall reported ``0.0`` and ``recall_at`` /
+``mrr_at_10`` / ``ndcg_at_10`` only credited an exact ``passage_id`` match.
+Because silver labels prefer article-level passage IDs while the retrieval
+views index both ``article`` and ``clause`` levels, a system that returned the
+correct clause of the correct article scored as a total miss.
+
+Article identity is always document-scoped: the fallback key is
+``{document_id}::art::{article_number}``, never a bare article number, so two
+different documents that share ``Điều 76`` are never merged.
+
+``mrr_at_10`` / ``ndcg_at_10`` inside ``evaluate_retrieval`` only ever consider
+``relevant_ids``, so they stay exact-passage even with the level maps wired.
+This script therefore reports two bundles:
+
+``exact``
+    the historical semantics — one specific passage_id must be retrieved.
+``article_expanded``
+    ``relevant_ids`` widened to every passage sharing an article with a labeled
+    passage, so ``recall_at`` / ``mrr_at_10`` / ``ndcg_at_10`` become
+    article-level. Use this bundle for ranking gates; ``article_recall_at`` in
+    either bundle answers the recall question.
+"""
 
 from __future__ import annotations
 
@@ -13,22 +39,165 @@ from legal_rag.sedar_retrieval.eval.retrieval_metrics import (
     evaluate_retrieval,
     metrics_to_dict,
 )
-from legal_rag.sedar_retrieval.io.jsonl import load_jsonl_records
+from legal_rag.sedar_retrieval.io.jsonl import iter_jsonl_lines, load_jsonl_records
+
+DEFAULT_CUTOFFS = "4,10,20,50,100"
 
 
 def _load_jsonl(path: Path) -> list[dict[str, object]]:
     return load_jsonl_records(path)
 
 
+def _parse_cutoffs(raw: str) -> tuple[int, ...]:
+    values: list[int] = []
+    for item in raw.split(","):
+        text = item.strip()
+        if not text:
+            continue
+        try:
+            value = int(text)
+        except ValueError as exc:
+            raise SystemExit(f"Invalid --cutoffs entry: {item!r}") from exc
+        if value <= 0:
+            raise SystemExit("--cutoffs entries must be positive")
+        values.append(value)
+    if not values:
+        raise SystemExit("--cutoffs must contain at least one positive integer")
+    return tuple(sorted(set(values)))
+
+
+def _load_level_maps(
+    passages_path: Path,
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """Stream the passage view and build passage_id -> level identity maps.
+
+    Read as raw JSON rather than through the pydantic model: this only needs
+    five fields and the view can hold hundreds of thousands of rows.
+    """
+
+    to_document: dict[str, str] = {}
+    to_article: dict[str, str] = {}
+    to_clause: dict[str, str] = {}
+
+    for line in iter_jsonl_lines(passages_path):
+        row = json.loads(line)
+        passage_id = str(row.get("passage_id", "")).strip()
+        if not passage_id:
+            raise SystemExit(f"Passage row without passage_id in {passages_path}")
+        document_id = str(row.get("document_id", "")).strip()
+        if not document_id:
+            raise SystemExit(f"Passage {passage_id!r} has no document_id")
+        if passage_id in to_document:
+            raise SystemExit(f"Duplicate passage_id in view: {passage_id!r}")
+        to_document[passage_id] = document_id
+
+        article_id = row.get("article_id")
+        article_number = row.get("article_number")
+        if article_id:
+            # Document-scoped by construction (canonical IDs embed the document).
+            to_article[passage_id] = str(article_id)
+        elif article_number:
+            # Fallback stays document-scoped: never a bare article number.
+            to_article[passage_id] = f"{document_id}::art::{article_number}"
+
+        clause_id = row.get("clause_id")
+        if clause_id:
+            to_clause[passage_id] = str(clause_id)
+
+    if not to_document:
+        raise SystemExit(f"Passage view is empty: {passages_path}")
+    return to_document, to_article, to_clause
+
+
+def _article_members(
+    passage_to_article: dict[str, str],
+) -> dict[str, frozenset[str]]:
+    """Return article key -> every passage_id belonging to that article."""
+
+    grouped: dict[str, set[str]] = {}
+    for passage_id, article_key in passage_to_article.items():
+        grouped.setdefault(article_key, set()).add(passage_id)
+    return {key: frozenset(values) for key, values in grouped.items()}
+
+
+def _expand_labels_to_article(
+    labels: list[QueryRelevance],
+    *,
+    passage_to_article: dict[str, str],
+    article_members: dict[str, frozenset[str]],
+) -> list[QueryRelevance]:
+    """Widen relevant_ids to every sibling passage of each labeled article.
+
+    A labeled article-level passage and its own clauses are the same legal
+    provision, so crediting either is correct. Passages without an article
+    mapping are kept as-is.
+    """
+
+    expanded: list[QueryRelevance] = []
+    for item in labels:
+        widened: set[str] = set(item.relevant_ids)
+        for passage_id in item.relevant_ids:
+            article_key = passage_to_article.get(passage_id)
+            if article_key is None:
+                continue
+            widened |= article_members.get(article_key, frozenset())
+        expanded.append(
+            QueryRelevance(
+                query_id=item.query_id,
+                relevant_ids=frozenset(widened),
+                graded=item.graded,
+                provenance=item.provenance,
+                relevant_document_ids=item.relevant_document_ids,
+            )
+        )
+    return expanded
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pred", type=Path, required=True)
     parser.add_argument("--labels", type=Path, required=True)
+    parser.add_argument(
+        "--passages",
+        type=Path,
+        required=True,
+        help=(
+            "Canonical passage view (passages_r2a.jsonl) used to build the "
+            "document/article/clause level mappings. Required: without it the "
+            "level recalls silently report 0.0 and only exact passage_id "
+            "matches are credited."
+        ),
+    )
+    parser.add_argument(
+        "--cutoffs",
+        default=DEFAULT_CUTOFFS,
+        help=(
+            "Comma-separated cutoffs. Keep 4 in the list: it is the evidence "
+            f"pack cutoff and the reader's upper bound. Default: {DEFAULT_CUTOFFS}"
+        ),
+    )
+    parser.add_argument("--mrr-cutoff", type=int, default=10)
+    parser.add_argument("--ndcg-cutoff", type=int, default=10)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow overwriting an existing metrics artifact.",
+    )
     args = parser.parse_args()
+
+    if args.mrr_cutoff <= 0 or args.ndcg_cutoff <= 0:
+        raise SystemExit("--mrr-cutoff and --ndcg-cutoff must be positive")
+    if args.output.exists() and not args.force:
+        raise SystemExit(f"Refusing to overwrite artifact: {args.output}")
+
+    cutoffs = _parse_cutoffs(args.cutoffs)
 
     preds_raw = _load_jsonl(args.pred)
     labels_raw = _load_jsonl(args.labels)
+    passage_to_document, passage_to_article, passage_to_clause = _load_level_maps(
+        args.passages
+    )
 
     predictions = [
         RankedList(
@@ -58,8 +227,64 @@ def main() -> int:
             "Label/prediction query_id mismatch after intersection "
             f"({len(labels)} labels vs {len(predictions)} preds)"
         )
-    bundle = evaluate_retrieval(predictions, labels)
-    metrics = metrics_to_dict(bundle)
+
+    # Fail closed on labels whose relevant IDs are absent from the view: that
+    # means the labels and the ranking were built against different corpora.
+    unknown = sorted(
+        {
+            passage_id
+            for item in labels
+            for passage_id in item.relevant_ids
+            if passage_id not in passage_to_document
+        }
+    )
+    if unknown:
+        raise SystemExit(
+            "Label relevant_ids missing from the passage view "
+            f"({len(unknown)} IDs, e.g. {unknown[:5]}). "
+            "Labels, rankings and --passages must share one corpus fingerprint."
+        )
+
+    def _evaluate(label_rows: list[QueryRelevance]) -> dict[str, object]:
+        return metrics_to_dict(
+            evaluate_retrieval(
+                predictions,
+                label_rows,
+                cutoffs=cutoffs,
+                passage_to_document=passage_to_document,
+                passage_to_article=passage_to_article,
+                passage_to_clause=passage_to_clause,
+                mrr_cutoff=args.mrr_cutoff,
+                ndcg_cutoff=args.ndcg_cutoff,
+            )
+        )
+
+    article_members = _article_members(passage_to_article)
+    labels_expanded = _expand_labels_to_article(
+        labels,
+        passage_to_article=passage_to_article,
+        article_members=article_members,
+    )
+
+    metrics = _evaluate(labels)
+    metrics["article_expanded"] = _evaluate(labels_expanded)
+    metrics["evaluator"] = {
+        "level_aware": True,
+        "cutoffs": list(cutoffs),
+        "mrr_cutoff": args.mrr_cutoff,
+        "ndcg_cutoff": args.ndcg_cutoff,
+        "passages_path": str(args.passages),
+        "article_key_policy": "article_id_or_document_scoped_article_number",
+        "passage_count": len(passage_to_document),
+        "article_mapped_passages": len(passage_to_article),
+        "clause_mapped_passages": len(passage_to_clause),
+        "bundles": {
+            "top_level": "exact passage_id relevance (historical semantics)",
+            "article_expanded": (
+                "relevant_ids widened to article siblings; use for ranking gates"
+            ),
+        },
+    }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(metrics, indent=2, ensure_ascii=False) + "\n",
