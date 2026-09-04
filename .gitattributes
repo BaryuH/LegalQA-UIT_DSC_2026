@@ -1,0 +1,8 @@
+# core.autocrlf=true on this Windows checkout hands shell scripts back as CRLF,
+# and a CRLF shebang fails on the Linux GPU server with
+#   /usr/bin/env: 'bash\r': No such file or directory
+# Scope this to shell scripts only: widening it to yaml/jsonl would renormalise
+# most of the repo in one commit for no functional gain (those parsers accept
+# CRLF).
+*.sh text eol=lf
+*.bash text eol=lf
