@@ -218,14 +218,38 @@ def _header_value(value: str) -> str:
 
 
 def _document_metadata(
-    chunk: LegalChunk, documents: Mapping[str, LegalDocument] | None
+    chunk: LegalChunk,
+    documents: Mapping[str, LegalDocument] | None,
+    document_names: Mapping[str, str] | None = None,
 ) -> tuple[str, str]:
+    """Resolve the ``Văn bản`` / ``Nguồn`` header lines for one chunk.
+
+    Name resolution order:
+
+    1. a full ``LegalDocument`` (best: carries the link as well);
+    2. ``document_names`` — a document_id -> display name map, for callers that
+       hold the real document name but not a whole ``LegalDocument``;
+    3. the zip member or file name.
+
+    Step 2 exists because the SEDAR passage path has ``document_name`` on every
+    ``CanonicalPassage`` yet had no way to hand it over, so the reader was shown
+    ``Văn bản: <zip member>.txt`` instead of ``Nghị định 153/2020/NĐ-CP``. That
+    matters beyond cosmetics: ``sedar_sft/verifier.py`` drops any legal
+    identifier the answer cites that is absent from the evidence text, so a
+    missing document name actively strips correct citations from answers.
+    """
+
     document = documents.get(chunk.document_id) if documents is not None else None
     if document is not None:
         name = document.name
         source = document.link or document.source_path
     else:
-        name = chunk.source_member or Path(chunk.source_path).name
+        named = (
+            document_names.get(chunk.document_id)
+            if document_names is not None
+            else None
+        )
+        name = named or chunk.source_member or Path(chunk.source_path).name
         source = chunk.source_path
     if chunk.source_member and document is None:
         source = f"{source}::{chunk.source_member}"
@@ -236,8 +260,9 @@ def _header(
     position: int,
     chunk: LegalChunk,
     documents: Mapping[str, LegalDocument] | None,
+    document_names: Mapping[str, str] | None = None,
 ) -> str:
-    document_name, source = _document_metadata(chunk, documents)
+    document_name, source = _document_metadata(chunk, documents, document_names)
     section = _header_value(chunk.section_label or "Không xác định")
     return "\n".join(
         (
@@ -297,6 +322,8 @@ def pack_evidence(
     max_total_chars: int,
     max_chunks_per_document: int,
     documents: Mapping[str, LegalDocument] | None = None,
+    document_names: Mapping[str, str] | None = None,
+    target_blocks: int | None = None,
 ) -> PackedEvidence:
     """Pack ranked chunks into a stable, header-inclusive character budget.
 
@@ -304,6 +331,15 @@ def pack_evidence(
     document win the per-document cap. A chunk that cannot fit whole is included as a
     heading-preserving tail truncation when possible; otherwise it is dropped. Scores
     are retained in ``included_hits`` but never rendered in the default format.
+
+    ``target_blocks`` separates *how many candidates the caller offers* from *how
+    many blocks the pack should end up with*. Without it, a caller that wants four
+    blocks must pass exactly four hits, and every hit dropped by
+    ``max_chunks_per_document`` or by the character budget shrinks the pack with no
+    backfill — three same-document hits in a top-4 silently yields a two-block pack.
+    Pass a wider candidate window plus ``target_blocks=4`` and the constraints are
+    applied first, then the pack stops once four blocks are in. Left ``None`` the
+    behaviour is unchanged.
     """
 
     if max_total_chars <= 0:
@@ -331,6 +367,11 @@ def pack_evidence(
 
     for hit in ordered_hits:
         chunk = resolved[hit.chunk_id]
+        if target_blocks is not None and len(blocks) >= target_blocks:
+            dropped_ids.append(hit.chunk_id)
+            dropped_reasons[hit.chunk_id] = "target_blocks_reached"
+            continue
+
         document_count = document_counts.get(chunk.document_id, 0)
         if document_count >= max_chunks_per_document:
             dropped_ids.append(hit.chunk_id)
@@ -338,7 +379,7 @@ def pack_evidence(
             continue
 
         position = len(blocks) + 1
-        header = _header(position, chunk, documents)
+        header = _header(position, chunk, documents, document_names)
         full_block = f"{header}\n{chunk.raw_text}"
         separator_chars = 2 if blocks else 0
         remaining = (
@@ -384,6 +425,11 @@ def pack_evidence(
         "dropped_count": len(dropped_ids),
         "truncated_count": len(truncated_ids),
         "scores_rendered": False,
+        "target_blocks": -1 if target_blocks is None else target_blocks,
+        "target_blocks_met": (
+            True if target_blocks is None else len(included_hits) >= target_blocks
+        ),
+        "document_names_supplied": document_names is not None,
     }
     return PackedEvidence(
         included_ids=tuple(included_ids),

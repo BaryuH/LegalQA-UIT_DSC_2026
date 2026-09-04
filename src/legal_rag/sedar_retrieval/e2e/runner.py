@@ -224,6 +224,11 @@ def run_sedar_e2e(
                 "evidence_top_k": config.evidence.evidence_top_k,
                 "max_total_chars": config.evidence.max_total_chars,
                 "max_chunks_per_document": config.evidence.max_chunks_per_document,
+                "candidate_window": config.evidence.effective_window,
+                "backfill_enabled": config.evidence.backfill_enabled,
+                "body_source": config.evidence.body_source,
+                "dedup_article_mode": config.evidence.dedup_article_mode,
+                "include_document_name": config.evidence.include_document_name,
             },
         }
     )
@@ -245,6 +250,11 @@ def run_sedar_e2e(
             "evidence_top_k": config.evidence.evidence_top_k,
             "max_total_chars": config.evidence.max_total_chars,
             "max_chunks_per_document": config.evidence.max_chunks_per_document,
+            "candidate_window": config.evidence.effective_window,
+            "backfill_enabled": config.evidence.backfill_enabled,
+            "body_source": config.evidence.body_source,
+            "dedup_article_mode": config.evidence.dedup_article_mode,
+            "include_document_name": config.evidence.include_document_name,
         },
         "device": config.device,
         "load_in_4bit": config.load_in_4bit,

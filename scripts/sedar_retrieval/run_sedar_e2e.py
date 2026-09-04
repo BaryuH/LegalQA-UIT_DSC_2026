@@ -58,6 +58,46 @@ def main() -> int:
     parser.add_argument("--evidence-top-k", type=int, default=4)
     parser.add_argument("--max-total-chars", type=int, default=4000)
     parser.add_argument("--max-chunks-per-document", type=int, default=2)
+    parser.add_argument(
+        "--candidate-window",
+        type=int,
+        default=0,
+        help=(
+            "Ranked candidates handed to the packer. 0 = same as "
+            "--evidence-top-k, the historical behaviour: anything dropped by "
+            "the per-document cap or the character budget shrinks the pack with "
+            "no backfill. Set it wider (e.g. 16) to fill up to "
+            "--evidence-top-k blocks after those constraints are applied."
+        ),
+    )
+    parser.add_argument(
+        "--body-source",
+        choices=("raw_text", "reader_text"),
+        default="raw_text",
+        help=(
+            "Which passage field the reader sees. reader_text prepends "
+            "'Điều N. <tiêu đề>' on article-level passages."
+        ),
+    )
+    parser.add_argument(
+        "--include-document-name",
+        action="store_true",
+        help=(
+            "Render the real document name on the 'Văn bản' header line "
+            "instead of the zip member. Off by default so the control run "
+            "reproduces the champion: the frozen reader was fine-tuned on the "
+            "old header format."
+        ),
+    )
+    parser.add_argument(
+        "--dedup-article-mode",
+        choices=("off", "article", "clause", "first"),
+        default="off",
+        help=(
+            "Collapse candidates from the same article before packing, so an "
+            "article and its own clause do not spend two of the blocks."
+        ),
+    )
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("--device", default="cuda")
     parser.add_argument(
@@ -77,6 +117,12 @@ def main() -> int:
         raise SystemExit("--limit must be non-negative")
     if args.evidence_top_k <= 0 or args.max_total_chars <= 0:
         raise SystemExit("Evidence budget arguments must be positive")
+    if args.candidate_window < 0:
+        raise SystemExit("--candidate-window must be non-negative")
+    if 0 < args.candidate_window < args.evidence_top_k:
+        raise SystemExit(
+            "--candidate-window must be zero or at least --evidence-top-k"
+        )
     if args.id_source == "clean_manifest" and args.manifest is None:
         args.manifest = Path(
             "artifacts/sedar_sft/validation/clean_warmup_manifest.json"
@@ -102,6 +148,10 @@ def main() -> int:
             evidence_top_k=args.evidence_top_k,
             max_total_chars=args.max_total_chars,
             max_chunks_per_document=args.max_chunks_per_document,
+            candidate_window=args.candidate_window,
+            body_source=args.body_source,
+            dedup_article_mode=args.dedup_article_mode,
+            include_document_name=args.include_document_name,
         ),
         max_new_tokens=args.max_new_tokens,
         stop_sequences=(),
