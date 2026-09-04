@@ -106,10 +106,19 @@ def rerank_rankings(
                 f"candidates on query {query_id!r}"
             )
 
-        # Sort by descending score, passage_id as a deterministic tiebreak.
+        # Sort by descending score only. Python's sort is stable, so exact
+        # ties keep the incoming retriever order.
+        #
+        # This matters more than it looks: sentence-transformers applies a
+        # sigmoid when the model has one label, so a reranker like
+        # bge-reranker-v2-m3 saturates - an irrelevant passage scores 0.000 and
+        # a relevant one 0.997. Much of a top-100 tail therefore ties exactly.
+        # Breaking those ties on passage_id would scramble them into ID order
+        # and throw away the retriever's ranking, which is the only signal left
+        # once the cross-encoder has stopped discriminating.
         order = sorted(
             zip(head, (float(value) for value in raw_scores), strict=True),
-            key=lambda item: (-item[1], item[0]),
+            key=lambda item: -item[1],
         )
         results.append(
             RerankedQuery(

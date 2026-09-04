@@ -75,7 +75,15 @@ def test_tail_beyond_top_k_keeps_original_order(passages, questions) -> None:
     assert row.tail_count == 3
 
 
-def test_ties_break_deterministically(passages, questions) -> None:
+def test_ties_keep_the_retriever_order(passages, questions) -> None:
+    """Exact ties must preserve the incoming order, not sort by passage_id.
+
+    sentence-transformers applies a sigmoid when the model has a single label,
+    so bge-reranker-v2-m3 saturates: an irrelevant passage scores 0.000 and a
+    relevant one 0.997. Much of a top-100 tail ties exactly, and the retriever
+    order is the only signal left there.
+    """
+
     rankings = {"q1": ["p3", "p1", "p2"]}
     (row,) = rerank_rankings(
         rankings,
@@ -84,7 +92,22 @@ def test_ties_break_deterministically(passages, questions) -> None:
         score_fn=lambda q, texts: [1.0] * len(texts),
         top_k=3,
     )
-    assert row.ranked_ids == ("p1", "p2", "p3")
+    assert row.ranked_ids == ("p3", "p1", "p2")
+
+
+def test_saturated_tail_keeps_retriever_order(passages, questions) -> None:
+    """One clear winner promoted; the saturated remainder stays as retrieved."""
+
+    rankings = {"q1": ["p1", "p2", "p3", "p4"]}
+    scores = {"p1": 0.0, "p2": 0.0, "p3": 0.997, "p4": 0.0}
+    (row,) = rerank_rankings(
+        rankings,
+        questions,
+        passages,
+        score_fn=lambda q, texts, _ids=rankings["q1"]: [scores[i] for i in _ids],
+        top_k=4,
+    )
+    assert row.ranked_ids == ("p3", "p1", "p2", "p4")
 
 
 def test_scorer_receives_reader_text_not_retrieval_text(passages, questions) -> None:
