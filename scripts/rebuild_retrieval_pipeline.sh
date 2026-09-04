@@ -554,6 +554,7 @@ python scripts/sedar_retrieval/audit_retrieval_recall.py \
     --labels "${SILVER_LABELS}" \
     --passages "${PASSAGES_R2A}" \
     --cutoffs "${AUDIT_CUTOFFS}" \
+    --scope-anchor-only \
     --output "${RECALL_AUDIT}" \
     --force
 

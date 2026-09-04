@@ -358,8 +358,15 @@ def audit_warmup_retrieval_recall(
     labels_path: str | Path,
     passages_path: str | Path,
     cutoffs: Sequence[int] = DEFAULT_CUTOFFS,
+    scope_anchor_only: bool = False,
 ) -> RetrievalRecallAuditReport:
-    """Validate clean-warmup scope and produce source rank-distribution metrics."""
+    """Validate clean-warmup scope and produce source rank-distribution metrics.
+
+    When ``scope_anchor_only`` is true, the champion ``run_dir`` supplies only
+    the clean-query scope and evaluation metadata. Its retrieval and packed
+    passage IDs may belong to a previous corpus and are reported as
+    non-comparable instead of being validated against the current passage view.
+    """
 
     cutoff_values = _validate_cutoffs(cutoffs)
     run_path = Path(run_dir)
@@ -481,10 +488,11 @@ def audit_warmup_retrieval_recall(
     ]
     unknown_trace = sorted(set(trace_flattened) - set(passage_map))
     unknown_packed = sorted(set(packed_flattened) - set(passage_map))
-    if unknown_trace:
-        unknown_ids["trace"] = unknown_trace[:10]
-    if unknown_packed:
-        unknown_ids["packed"] = unknown_packed[:10]
+    if not scope_anchor_only:
+        if unknown_trace:
+            unknown_ids["trace"] = unknown_trace[:10]
+        if unknown_packed:
+            unknown_ids["packed"] = unknown_packed[:10]
     if unknown_ids:
         details = "; ".join(
             f"{name}={values}" for name, values in sorted(unknown_ids.items())
@@ -494,6 +502,11 @@ def audit_warmup_retrieval_recall(
         )
 
     warnings: list[str] = []
+    if scope_anchor_only:
+        warnings.append(
+            "champion retrieval trace is used only as a clean-query scope "
+            "anchor; its passage IDs are not comparable with the current corpus"
+        )
     trace_alignment, alignment_warnings = _trace_alignment(
         config=config,
         run_dir=run_path,
@@ -518,10 +531,11 @@ def audit_warmup_retrieval_recall(
             f"{packed_not_in_raw_count} traces contain packed IDs absent from raw hits"
         )
 
+    trace_source_name = "anchor_trace" if scope_anchor_only else "ltr_trace"
     source_depths = {
         "bm25": _source_depth_summary(bm25, sorted(run_ids)),
         "qwen": _source_depth_summary(qwen, sorted(run_ids)),
-        "ltr_trace": _source_depth_summary(
+        trace_source_name: _source_depth_summary(
             {query_id: trace[query_id].raw_hit_ids for query_id in run_ids},
             sorted(run_ids),
         ),
@@ -641,7 +655,9 @@ def audit_warmup_retrieval_recall(
             "source_depth": {
                 "bm25": len(_unique_preserve_order(bm25[query_id])),
                 "qwen": len(_unique_preserve_order(qwen[query_id])),
-                "ltr_trace": len(_unique_preserve_order(trace[query_id].raw_hit_ids)),
+                trace_source_name: len(
+                    _unique_preserve_order(trace[query_id].raw_hit_ids)
+                ),
             },
         }
         if provenance != "silver" or not relevant_ids:
@@ -693,6 +709,7 @@ def audit_warmup_retrieval_recall(
         "label_provenance": "silver_only",
         "gold_answer_text_used": False,
         "gold_answer_text_written": False,
+        "scope_anchor_mode": "scope_only" if scope_anchor_only else "strict",
         "run_id": str(run_summary.get("run_id", "")),
         "run_dir": str(run_path),
         "metrics_path": str(metrics_path),
@@ -711,8 +728,24 @@ def audit_warmup_retrieval_recall(
         "cutoffs": list(cutoff_values),
         "scope_validation": scope_summary,
         "trace_validation": {
+            "trace_role": (
+                "clean_query_scope_anchor"
+                if scope_anchor_only
+                else "current_corpus_retrieval"
+            ),
             "non_success_trace_count": non_success_trace_count,
             "packed_not_in_raw_count": packed_not_in_raw_count,
+            "corpus_compatibility": {
+                "status": (
+                    "mismatch_allowed"
+                    if scope_anchor_only and (unknown_trace or unknown_packed)
+                    else "matched"
+                ),
+                "unknown_trace_id_count": len(unknown_trace),
+                "unknown_trace_id_sample": unknown_trace[:10],
+                "unknown_packed_id_count": len(unknown_packed),
+                "unknown_packed_id_sample": unknown_packed[:10],
+            },
             "ltr_alignment": trace_alignment,
         },
         "source_depths": source_depths,

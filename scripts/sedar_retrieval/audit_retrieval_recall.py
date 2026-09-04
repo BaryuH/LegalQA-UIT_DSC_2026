@@ -52,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--run-dir",
         type=Path,
         required=True,
-        help="Champion TASK20 run directory.",
+        help=("Champion TASK20 run directory used as the clean-query scope anchor."),
     )
     parser.add_argument("--metrics", type=Path, required=True)
     parser.add_argument("--bm25", type=Path, required=True)
@@ -67,6 +67,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--scope-anchor-only",
+        action="store_true",
+        help=(
+            "Use --run-dir only for clean-query scope and evaluation metadata. "
+            "Allow its retrieval/packed IDs to belong to a previous corpus."
+        ),
+    )
     return parser
 
 
@@ -110,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
             labels_path=args.labels,
             passages_path=args.passages,
             cutoffs=args.cutoffs,
+            scope_anchor_only=args.scope_anchor_only,
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
         payload = report.as_dict()

@@ -175,8 +175,16 @@ python scripts/sedar_retrieval/audit_retrieval_recall.py \
   --labels "$EVAL_ROOT/silver_r2a_warmup500_v2.jsonl" \
   --passages "$VIEWS/passages_r2a.jsonl" \
   --cutoffs 10,20,50,100,200,500 \
+  --scope-anchor-only \
   --output "$DEEP_EVAL/retrieval_recall_audit.json"
 ```
+
+Use `--scope-anchor-only` when `--run-dir` is the frozen champion from an
+earlier passage corpus. In this mode the champion provides only the clean-query
+scope and evaluation metadata; its retrieval/packed passage IDs are recorded
+as non-comparable and are not checked against the current passage view. The
+BM25, Qwen, and candidate-union curves still require every source ID to exist
+in the current `--passages` view. Omit the flag for a same-corpus audit.
 
 Use `--force` only when intentionally regenerating the same evaluation
 artifact.
@@ -197,7 +205,10 @@ deeper retrieval export must be generated first.
 
 ## Reading the report
 
-`scope_validation` must show no missing IDs for the 460-query run. The
+`scope_validation` must show no missing IDs for the 460-query run. When
+`--scope-anchor-only` is used, `scope_anchor_mode` must be `scope_only` and
+`trace_validation.corpus_compatibility.status` records whether the frozen
+champion trace contains IDs absent from the current passage view. The
 `trace_validation.ltr_alignment` status should be `matched` when the
 `retrieval_path` in `config.json` can be resolved on the current host.
 

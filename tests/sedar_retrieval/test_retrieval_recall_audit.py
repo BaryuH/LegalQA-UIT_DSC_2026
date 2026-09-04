@@ -190,7 +190,11 @@ def _build_fixture(tmp_path: Path) -> dict[str, Path]:
     }
 
 
-def _audit(fixture: dict[str, Path]) -> dict[str, object]:
+def _audit(
+    fixture: dict[str, Path],
+    *,
+    scope_anchor_only: bool = False,
+) -> dict[str, object]:
     return audit_warmup_retrieval_recall(
         run_dir=fixture["run_dir"],
         metrics_path=fixture["metrics"],
@@ -199,6 +203,7 @@ def _audit(fixture: dict[str, Path]) -> dict[str, object]:
         labels_path=fixture["labels"],
         passages_path=fixture["passages"],
         cutoffs=(1, 2, 3),
+        scope_anchor_only=scope_anchor_only,
     ).as_dict()
 
 
@@ -229,6 +234,47 @@ def test_audit_validates_scope_and_emits_recall_curves(
     assert cases["q-a"]["source_contribution"]["1"] == "neither"
     assert cases["q-b"]["source_contribution"]["1"] == "bm25_only"
     assert cases["q-c"]["first_rank"] is None
+
+
+def test_scope_anchor_allows_trace_from_previous_corpus(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_fixture(tmp_path)
+    _write_jsonl(
+        fixture["run_dir"] / "retrieval.jsonl",
+        [
+            {
+                "id": "q-a",
+                "raw_hit_ids": ["old-passage", "p-a"],
+                "packed_chunk_ids": ["old-passage"],
+            },
+            {"id": "q-b", "raw_hit_ids": ["p-b"], "packed_chunk_ids": ["p-b"]},
+            {"id": "q-c", "raw_hit_ids": ["p-x"], "packed_chunk_ids": ["p-x"]},
+        ],
+    )
+    _write_jsonl(
+        fixture["run_dir"] / "ltr.jsonl",
+        [
+            {"query_id": "q-a", "ranked_ids": ["old-passage", "p-a"]},
+            {"query_id": "q-b", "ranked_ids": ["p-b"]},
+            {"query_id": "q-c", "ranked_ids": ["p-x"]},
+        ],
+    )
+
+    with pytest.raises(RetrievalRecallAuditError, match="absent from passages"):
+        _audit(fixture)
+
+    report = _audit(fixture, scope_anchor_only=True)
+
+    assert report["scope_anchor_mode"] == "scope_only"
+    assert report["trace_validation"]["trace_role"] == "clean_query_scope_anchor"
+    compatibility = report["trace_validation"]["corpus_compatibility"]
+    assert compatibility["status"] == "mismatch_allowed"
+    assert compatibility["unknown_trace_id_count"] == 1
+    assert compatibility["unknown_packed_id_count"] == 1
+    assert "anchor_trace" in report["source_depths"]
+    assert "ltr_trace" not in report["source_depths"]
+    assert report["warnings"]
 
 
 def test_audit_reports_trace_alignment_warning(tmp_path: Path) -> None:
