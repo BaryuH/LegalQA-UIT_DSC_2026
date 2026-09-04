@@ -224,6 +224,60 @@ thật. `wrong_document_rate = 0.0` xác nhận việc scope theo document hoạ
 
 ---
 
+## 2b. Kết quả đo được sau khi sửa M1 (2026-09-04)
+
+Chạy trên clean-460 (274 query có nhãn), corpus `parser_blankline_20260901`.
+
+```text
+he thong          art@4    art@10   art@20   art@50   art@100  art@500  MRR@10
+rrf bm25_w=0.25   0.7920   0.8832   0.9197   0.9416   0.9562   0.9745   0.6645
+rrf bm25_w=0.5    0.7847   0.8686   0.9197   0.9453   0.9599   0.9745   0.6431
+Qwen only         0.7774   0.8686   0.9161   0.9380   0.9526   0.9745   0.6620
+rrf bm25_w=1.0    0.7153   0.8431   0.9051   0.9453   0.9562   0.9745   0.6095
+BM25 only         0.5219   0.6350   0.7190   0.7993   0.8650   0.9343   0.4200
+```
+
+**R1 đã giải quyết.** Kiểm định McNemar ghép cặp trên article-hit@4:
+
+```text
+Qwen vs RRF 1.0/1.0   31 thang / 14 thua, 45 doi chieu   p = 0.0161  CO Y NGHIA
+RRF 0.25 vs Qwen      11 thang /  7 thua, 18 doi chieu   p = 0.4807  khong
+```
+
+Quyết định: bỏ RRF 1.0/1.0 khỏi đường xếp hạng, xếp bằng Qwen, giữ BM25 trong
+candidate union (nó dẫn ở @50/@100). Trọng số 0.25 **không** được chứng minh
+nên không đưa vào — thêm một tầng phải bảo trì mà không có lợi ích đã kiểm chứng.
+
+### Sàn nhiễu — quy tắc bắt buộc cho mọi phase còn lại
+
+18/274 query lật giữa hai ranking chỉ chênh 1.5 điểm tổng hợp. McNemar ở cỡ mẫu
+này cần tỷ lệ khoảng 14/4, tức ròng ~10 query:
+
+> **Cải tiến dưới ~+0.04 art@4 không thể chứng minh được trên clean-460 với
+> 274 nhãn.** So sánh bằng chênh lệch tổng hợp là tự lừa mình.
+
+Ba hệ quả:
+
+- Nhóm **L4-L10** phải đo **theo cụm**, không đo lẻ — từng cái gần như chắc
+  chắn nằm dưới sàn.
+- **Q1/Q2** có giá trị thứ hai ngoài phủ nhãn: thêm nhãn là thêm lực kiểm định.
+- Chỉ **R3 cross-encoder** (trần +0.128 đến +0.164) có biên đủ rộng để tự
+  chứng minh trên tập này.
+
+### Headroom
+
+```text
+art@4   0.7920   reader thuc nhan
+art@20  0.9197   rerank hoan hao top-20   -> +0.128
+art@100 0.9562   rerank hoan hao top-100  -> +0.164
+art@500 0.9745   tran cua tap ung vien
+```
+
+`art@500` bằng nhau ở mọi biến thể RRF: đổi thứ tự không đổi tập ứng viên.
+Muốn vượt 0.9745 phải lấy sâu hơn hoặc sửa index (R4).
+
+---
+
 ## 3. Bảng tổng hợp lỗi
 
 | Mã | Lỗi | Mức | Vị trí | Cần retrain? |
@@ -245,7 +299,7 @@ thật. `wrong_document_rate = 0.0` xác nhận việc scope theo document hoạ
 | **L8** | Thiếu feature độ dài passage + aggregation theo article/document | Cao | `features.py` | có |
 | **L9** | Feature tính trên `retrieval_text` đã bọc document context | Trung | `ltr_dataset.py:516` | có |
 | **L10** | `_citation_context` chỉ lấy citation đầu tiên | Thấp | `ltr_dataset.py:353` | có |
-| **R1** | RRF không trọng số dù `weights` đã implement | Trung | `retrieval/fusion.py:90` | không |
+| **R1** ✅ | RRF không trọng số dù `weights` đã implement | Trung | `retrieval/fusion.py:90` | không |
 | **R2** | Depth không thống nhất: 250 / 1000 / 150 / 100 / 4 | Trung | nhiều nơi | không |
 | **R3** | Không có cross-encoder rerank ở bất kỳ đâu | **Cao** | thiếu hẳn | không |
 | **R4** | R2a nhân đôi tên văn bản trong `retrieval_text` | Trung | `corpus/context_augment.py` | có, cả 2 index |
