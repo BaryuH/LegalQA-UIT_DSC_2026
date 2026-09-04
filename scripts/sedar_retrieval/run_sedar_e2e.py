@@ -99,6 +99,26 @@ def main() -> int:
         ),
     )
     parser.add_argument("--max-new-tokens", type=int, default=512)
+    parser.add_argument(
+        "--no-repeat-ngram-size",
+        type=int,
+        default=None,
+        help=(
+            "Block repeating any n-gram of this size. Generation is greedy "
+            "(do_sample=False), and pushing max-new-tokens past the length the "
+            "reader was fine-tuned on drives it into loops: at 1536 tokens on "
+            "clean-460, 158 of 212 lengthened answers repeated a 5-gram, and "
+            "that group gained METEOR +0.0362 while losing ROUGE-L -0.0818. "
+            "The 54 clean continuations gained on both metrics, so the capacity "
+            "is there and the loops are a decoding problem. Try 6."
+        ),
+    )
+    parser.add_argument(
+        "--repetition-penalty",
+        type=float,
+        default=None,
+        help="Logit penalty for already-generated tokens. Try 1.05-1.15.",
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument(
         "--load-in-4bit",
@@ -117,6 +137,10 @@ def main() -> int:
         raise SystemExit("--limit must be non-negative")
     if args.evidence_top_k <= 0 or args.max_total_chars <= 0:
         raise SystemExit("Evidence budget arguments must be positive")
+    if args.no_repeat_ngram_size is not None and args.no_repeat_ngram_size < 0:
+        raise SystemExit("--no-repeat-ngram-size must be non-negative")
+    if args.repetition_penalty is not None and args.repetition_penalty <= 0:
+        raise SystemExit("--repetition-penalty must be positive")
     if args.candidate_window < 0:
         raise SystemExit("--candidate-window must be non-negative")
     if 0 < args.candidate_window < args.evidence_top_k:
@@ -156,6 +180,8 @@ def main() -> int:
         max_new_tokens=args.max_new_tokens,
         stop_sequences=(),
         device=args.device,
+        no_repeat_ngram_size=args.no_repeat_ngram_size,
+        repetition_penalty=args.repetition_penalty,
         load_in_4bit=args.load_in_4bit,
         manifest_path=args.manifest.resolve() if args.manifest is not None else None,
         split=args.split,
@@ -178,6 +204,8 @@ def main() -> int:
             max_new_tokens=config.max_new_tokens,
             device=config.device,
             load_in_4bit=config.load_in_4bit,
+            no_repeat_ngram_size=config.no_repeat_ngram_size,
+            repetition_penalty=config.repetition_penalty,
         )
 
     try:

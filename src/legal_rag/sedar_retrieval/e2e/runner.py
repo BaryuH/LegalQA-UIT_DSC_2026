@@ -51,6 +51,8 @@ class SedarE2EConfig:
     stop_sequences: tuple[str, ...]
     device: str
     load_in_4bit: bool | None
+    no_repeat_ngram_size: int | None = None
+    repetition_penalty: float | None = None
     manifest_path: Path | None = None
     split: str = "warmup"
     id_source: str = "clean_manifest"
@@ -230,6 +232,10 @@ def run_sedar_e2e(
                 "dedup_article_mode": config.evidence.dedup_article_mode,
                 "include_document_name": config.evidence.include_document_name,
             },
+            "decoding": {
+                "no_repeat_ngram_size": config.no_repeat_ngram_size,
+                "repetition_penalty": config.repetition_penalty,
+            },
         }
     )
     run_config: dict[str, Any] = {
@@ -255,6 +261,10 @@ def run_sedar_e2e(
             "body_source": config.evidence.body_source,
             "dedup_article_mode": config.evidence.dedup_article_mode,
             "include_document_name": config.evidence.include_document_name,
+        },
+        "decoding": {
+            "no_repeat_ngram_size": config.no_repeat_ngram_size,
+            "repetition_penalty": config.repetition_penalty,
         },
         "device": config.device,
         "load_in_4bit": config.load_in_4bit,

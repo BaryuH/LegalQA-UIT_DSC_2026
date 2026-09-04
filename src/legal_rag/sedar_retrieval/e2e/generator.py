@@ -46,6 +46,8 @@ def load_sedar_sft_generator(
     device: str = "auto",
     load_in_4bit: bool | None = None,
     require_sedar_extras: bool = False,
+    no_repeat_ngram_size: int | None = None,
+    repetition_penalty: float | None = None,
 ) -> FineTunedReaderGenerator:
     """Validate a SEDAR-SFT checkpoint and load the local generative backend."""
 
@@ -70,6 +72,8 @@ def load_sedar_sft_generator(
         checkpoint,
         device=device,
         load_in_4bit=selected_load_in_4bit,
+        no_repeat_ngram_size=no_repeat_ngram_size,
+        repetition_penalty=repetition_penalty,
     )
     return FineTunedReaderGenerator(
         backend=backend,
@@ -90,6 +94,8 @@ def load_generative_reader_generator(
     device: str = "auto",
     load_in_4bit: bool | None = None,
     profile: str | None = None,
+    no_repeat_ngram_size: int | None = None,
+    repetition_penalty: float | None = None,
 ) -> FineTunedReaderGenerator:
     """Load either a finetuned_reader or sedar_sft generative checkpoint."""
 
@@ -115,6 +121,8 @@ def load_generative_reader_generator(
             stop_sequences=stop_sequences,
             device=device,
             load_in_4bit=load_in_4bit,
+            no_repeat_ngram_size=no_repeat_ngram_size,
+            repetition_penalty=repetition_penalty,
         )
     return load_finetuned_reader_generator(
         str(checkpoint_dir),
@@ -124,6 +132,8 @@ def load_generative_reader_generator(
         stop_sequences=stop_sequences,
         device=device,
         load_in_4bit=bool(load_in_4bit),
+        no_repeat_ngram_size=no_repeat_ngram_size,
+        repetition_penalty=repetition_penalty,
     )
 
 

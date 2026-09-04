@@ -36,12 +36,43 @@ class TransformersCausalBackend:
     """Local-only Transformers + PEFT backend; imports are intentionally lazy."""
 
     def __init__(
-        self, model: object, tokenizer: object, *, model_name: str, revision: str
+        self,
+        model: object,
+        tokenizer: object,
+        *,
+        model_name: str,
+        revision: str,
+        no_repeat_ngram_size: int | None = None,
+        repetition_penalty: float | None = None,
     ):
+        """Decoding controls live on the backend, not in the call signature.
+
+        Keeping them here leaves the ``CausalBackend`` protocol untouched, so
+        the mock backends in tests are unaffected. Both default to ``None``,
+        which reproduces the previous pure-greedy behaviour exactly: nothing
+        extra is passed to ``model.generate``.
+
+        Why they exist: generation is greedy (``do_sample=False``,
+        ``temperature: 0.0``). Raising max_new_tokens past the length the model
+        was fine-tuned on (median training answer 345 whitespace tokens) sends
+        greedy decoding into loops. Measured on clean-460 at 1536 tokens, 158 of
+        212 lengthened answers showed a repeated 5-gram; that group gained
+        METEOR +0.0362 while losing ROUGE-L -0.0818, whereas the 54 clean
+        continuations gained on both (+0.0898 / +0.0131). The loss pattern is
+        METEOR's recall weighting (alpha 0.9) rewarding filler, so the fix
+        belongs at the decoder.
+        """
+
+        if no_repeat_ngram_size is not None and no_repeat_ngram_size < 0:
+            raise ValueError("no_repeat_ngram_size must be non-negative")
+        if repetition_penalty is not None and repetition_penalty <= 0:
+            raise ValueError("repetition_penalty must be positive")
         self._model: Any = model
         self._tokenizer: Any = tokenizer
         self.model = model_name
         self.model_version = revision
+        self.no_repeat_ngram_size = no_repeat_ngram_size
+        self.repetition_penalty = repetition_penalty
 
     @classmethod
     def from_checkpoint(
@@ -50,6 +81,8 @@ class TransformersCausalBackend:
         *,
         device: str = "auto",
         load_in_4bit: bool = False,
+        no_repeat_ngram_size: int | None = None,
+        repetition_penalty: float | None = None,
     ) -> TransformersCausalBackend:
         try:
             from importlib import import_module
@@ -165,7 +198,14 @@ class TransformersCausalBackend:
         if not load_in_4bit and selected_device in {"cpu", "cuda"}:
             model.to(selected_device)
         model.eval()
-        return cls(model, tokenizer, model_name=str(base_path), revision=revision)
+        return cls(
+            model,
+            tokenizer,
+            model_name=str(base_path),
+            revision=revision,
+            no_repeat_ngram_size=no_repeat_ngram_size,
+            repetition_penalty=repetition_penalty,
+        )
 
     def generate(
         self,
@@ -179,11 +219,17 @@ class TransformersCausalBackend:
         encoded = tokenizer(prompt, return_tensors="pt")
         input_device = next(model.parameters()).device
         encoded = {key: value.to(input_device) for key, value in encoded.items()}
-        output = model.generate(
-            **encoded,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-        )
+        generate_kwargs: dict[str, Any] = {
+            "max_new_tokens": max_new_tokens,
+            "do_sample": False,
+        }
+        # Only pass the controls when set, so an unset backend produces the
+        # exact token sequence it produced before this was added.
+        if self.no_repeat_ngram_size:
+            generate_kwargs["no_repeat_ngram_size"] = self.no_repeat_ngram_size
+        if self.repetition_penalty is not None:
+            generate_kwargs["repetition_penalty"] = self.repetition_penalty
+        output = model.generate(**encoded, **generate_kwargs)
         prompt_length = encoded["input_ids"].shape[-1]
         generated = output[0][prompt_length:]
         text = tokenizer.decode(generated, skip_special_tokens=True).strip()
@@ -225,6 +271,12 @@ class FineTunedReaderGenerator:
                 "checkpoint_manifest_hash": self.checkpoint.manifest_hash,
                 "max_new_tokens": self.max_new_tokens,
                 "stop_sequences": list(self.stop_sequences),
+                "no_repeat_ngram_size": getattr(
+                    self.backend, "no_repeat_ngram_size", None
+                ),
+                "repetition_penalty": getattr(
+                    self.backend, "repetition_penalty", None
+                ),
             },
         )
 
@@ -238,6 +290,8 @@ def load_finetuned_reader_generator(
     stop_sequences: Sequence[str] = (),
     device: str = "auto",
     load_in_4bit: bool = False,
+    no_repeat_ngram_size: int | None = None,
+    repetition_penalty: float | None = None,
 ) -> FineTunedReaderGenerator:
     """Validate provenance before loading the base model + adapter."""
 
@@ -250,6 +304,8 @@ def load_finetuned_reader_generator(
         checkpoint,
         device=device,
         load_in_4bit=load_in_4bit,
+        no_repeat_ngram_size=no_repeat_ngram_size,
+        repetition_penalty=repetition_penalty,
     )
     return FineTunedReaderGenerator(
         backend=backend,
