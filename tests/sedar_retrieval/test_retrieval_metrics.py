@@ -79,3 +79,137 @@ def test_metrics_dict_stable_keys() -> None:
     first = metrics_to_dict(evaluate_retrieval([pred], [label]))
     second = metrics_to_dict(evaluate_retrieval([pred], [label]))
     assert first == second
+
+
+# ── M1: level-aware relevance ──────────────────────────────────────────────
+# The silver-label builder prefers article-level passage IDs, while the
+# retrieval views index both "article" and "clause" levels. Callers that do not
+# pass the level mappings therefore score a system that returned the correct
+# clause of the correct article as a total miss, and every *_recall_at reports
+# 0.0 because the code path that fills them never runs. That is what produced
+# the ~0.015 Recall@20 recorded in TASK 21 against an article/provision recall
+# of 0.9758 measured by audit_retrieval_recall.py on the same rankings.
+
+_ARTICLE_LABEL = "docA::art76"
+_CLAUSE_OF_SAME_ARTICLE = "docA::art76::cl1"
+_SAME_ARTICLE_NUMBER_OTHER_DOCUMENT = "docZ::art76"
+
+_TO_DOCUMENT = {
+    _ARTICLE_LABEL: "docA",
+    _CLAUSE_OF_SAME_ARTICLE: "docA",
+    _SAME_ARTICLE_NUMBER_OTHER_DOCUMENT: "docZ",
+}
+# Article identity is document-scoped: never a bare article number.
+_TO_ARTICLE = {
+    _ARTICLE_LABEL: "docA::art::76",
+    _CLAUSE_OF_SAME_ARTICLE: "docA::art::76",
+    _SAME_ARTICLE_NUMBER_OTHER_DOCUMENT: "docZ::art::76",
+}
+_TO_CLAUSE = {_CLAUSE_OF_SAME_ARTICLE: "docA::art76::cl1"}
+
+
+def _article_label() -> QueryRelevance:
+    return QueryRelevance("q1", frozenset({_ARTICLE_LABEL}), provenance="silver")
+
+
+def test_level_mappings_credit_the_right_clause_of_the_right_article() -> None:
+    pred = RankedList("q1", (_CLAUSE_OF_SAME_ARTICLE,))
+    bundle = evaluate_retrieval(
+        [pred],
+        [_article_label()],
+        cutoffs=(4, 10),
+        passage_to_document=_TO_DOCUMENT,
+        passage_to_article=_TO_ARTICLE,
+        passage_to_clause=_TO_CLAUSE,
+    )
+    # Exact passage_id relevance still misses — that is the historical number.
+    assert bundle.recall_at[4] == 0.0
+    # Level-aware relevance sees it.
+    assert bundle.article_recall_at[4] == 1.0
+    assert bundle.document_recall_at[4] == 1.0
+    assert bundle.wrong_document_rate == 0.0
+
+
+def test_level_recalls_silently_report_zero_without_mappings() -> None:
+    """Pin the failure mode: no mappings means no level recall at all.
+
+    Not "low" — structurally 0.0, because the branches that compute them are
+    skipped and the mean of an empty list is 0.0.
+    """
+
+    pred = RankedList("q1", (_CLAUSE_OF_SAME_ARTICLE,))
+    bundle = evaluate_retrieval([pred], [_article_label()], cutoffs=(4, 10))
+    assert bundle.article_recall_at[4] == 0.0
+    assert bundle.document_recall_at[4] == 0.0
+    assert bundle.clause_recall_at[4] == 0.0
+
+
+def test_same_article_number_in_another_document_is_not_a_hit() -> None:
+    """'Điều 76' of a different document must not be credited.
+
+    This is the trap the legacy silver-label builder fell into by mapping
+    article numbers globally across 8,512 documents.
+    """
+
+    pred = RankedList("q1", (_SAME_ARTICLE_NUMBER_OTHER_DOCUMENT,))
+    bundle = evaluate_retrieval(
+        [pred],
+        [_article_label()],
+        cutoffs=(4, 10),
+        passage_to_document=_TO_DOCUMENT,
+        passage_to_article=_TO_ARTICLE,
+        passage_to_clause=_TO_CLAUSE,
+    )
+    assert bundle.article_recall_at[4] == 0.0
+    assert bundle.document_recall_at[4] == 0.0
+    assert bundle.wrong_document_rate == 1.0
+
+
+def test_mrr_and_ndcg_stay_exact_passage_even_with_mappings() -> None:
+    """The level maps feed *_recall_at only; mrr/ndcg still use relevant_ids.
+
+    This is why the TASK 13 exit gate ("nDCG@10 or MRR@10 improves by >= 0.01")
+    reads ~0 even after the mappings are wired, and why eval_retrieval.py
+    reports a second, article-expanded bundle for ranking gates.
+    """
+
+    pred = RankedList("q1", (_CLAUSE_OF_SAME_ARTICLE,))
+    bundle = evaluate_retrieval(
+        [pred],
+        [_article_label()],
+        cutoffs=(4, 10),
+        passage_to_document=_TO_DOCUMENT,
+        passage_to_article=_TO_ARTICLE,
+        passage_to_clause=_TO_CLAUSE,
+    )
+    assert bundle.article_recall_at[4] == 1.0
+    assert bundle.mrr_at_10 == 0.0
+    assert bundle.ndcg_at_10 == 0.0
+
+
+def test_article_expanded_labels_make_mrr_usable() -> None:
+    """What eval_retrieval.py's article_expanded bundle does, in miniature.
+
+    Widening relevant_ids to the article's sibling passages is what turns
+    mrr/ndcg into article-level numbers a ranking gate can use.
+    """
+
+    pred = RankedList("q1", (_CLAUSE_OF_SAME_ARTICLE,))
+    expanded = QueryRelevance(
+        "q1",
+        frozenset({_ARTICLE_LABEL, _CLAUSE_OF_SAME_ARTICLE}),
+        provenance="silver",
+    )
+    bundle = evaluate_retrieval(
+        [pred],
+        [expanded],
+        cutoffs=(4, 10),
+        passage_to_document=_TO_DOCUMENT,
+        passage_to_article=_TO_ARTICLE,
+        passage_to_clause=_TO_CLAUSE,
+    )
+    assert bundle.recall_at[4] == 1.0
+    assert bundle.mrr_at_10 == 1.0
+    # nDCG is below 1.0 because the ideal ranking would also surface the
+    # article passage: the expanded bundle's nDCG is coverage-flavoured.
+    assert 0.0 < bundle.ndcg_at_10 < 1.0

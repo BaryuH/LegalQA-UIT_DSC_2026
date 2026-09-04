@@ -534,8 +534,21 @@ RRF_METRICS="${RUN_DIR}/metrics_fused_rrf.json"
 
 eval_one "${BM25_RETRIEVAL}" "${BM25_METRICS}"  "BM25"
 eval_one "${DENSE_RETRIEVAL}" "${DENSE_METRICS}" "Qwen dense"
-eval_one "${FUSED_UNION}"    "${UNION_METRICS}" "Fused union"
 eval_one "${FUSED_RRF}"      "${RRF_METRICS}"   "Fused RRF"
+
+# The union file is a candidate SET, not a ranking: fusion.py::candidate_union
+# emits every BM25 id first and only then the dense ids, so union@K == BM25@K
+# for every K below the cap and the row looks like a broken BM25 duplicate.
+# Score it only at the cap, where it is meaningful, and read per-cutoff union
+# recall from the Step 7 audit instead (it unions BM25@K with Qwen@K per K).
+echo "-- Fused union (cap only; see recall_audit.json for per-cutoff union)"
+python scripts/sedar_retrieval/eval_retrieval.py \
+    --pred "${FUSED_UNION}" \
+    --labels "${SILVER_LABELS}" \
+    --passages "${PASSAGES_R2A}" \
+    --cutoffs "${FUSION_CAP}" \
+    --output "${UNION_METRICS}" \
+    --force
 echo ""
 
 # ── Step 7: Recall Audit ─────────────────────────────────────────────────
@@ -591,10 +604,12 @@ import os
 import pathlib
 
 run_dir = pathlib.Path(os.environ["RUN_DIR"])
+# Fused union is deliberately absent: it is a candidate set, not a ranking, so
+# its per-cutoff numbers are just BM25 truncated. Its cap-level number is in
+# metrics_fused_union.json and the per-cutoff union is in recall_audit.json.
 systems = [
     ("BM25", "metrics_bm25.json"),
     ("Qwen dense", "metrics_dense.json"),
-    ("Fused union", "metrics_fused_union.json"),
     ("Fused RRF", "metrics_fused_rrf.json"),
 ]
 cuts = ["4", "10", "20", "100", "500"]

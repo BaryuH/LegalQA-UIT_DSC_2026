@@ -33,6 +33,7 @@ import argparse
 import json
 from pathlib import Path
 
+from legal_rag.finetuned_reader.warmup_eval import load_clean_warmup_manifest
 from legal_rag.sedar_retrieval.eval.retrieval_metrics import (
     QueryRelevance,
     RankedList,
@@ -42,6 +43,29 @@ from legal_rag.sedar_retrieval.eval.retrieval_metrics import (
 from legal_rag.sedar_retrieval.io.jsonl import iter_jsonl_lines, load_jsonl_records
 
 DEFAULT_CUTOFFS = "4,10,20,50,100"
+
+
+def _require_input_file(path: Path, flag: str) -> Path:
+    """Fail loudly on an unset shell variable instead of reading a directory.
+
+    ``--labels "$SILVER_LABELS"`` with the variable unset hands argparse an
+    empty string, and ``Path("")`` is ``Path(".")`` — so the read reaches the
+    working directory and dies with ``IsADirectoryError: '.'`` several frames
+    deep, pointing at the JSONL reader rather than at the missing export.
+    """
+
+    if str(path) in {"", "."}:
+        raise SystemExit(
+            f"{flag} resolved to an empty path. An unset shell variable "
+            f"expands to '' and Path('') is '.', so the read would hit the "
+            f"working directory. Export the variable you passed to {flag} and "
+            f"verify it with 'ls -l' before re-running."
+        )
+    if path.is_dir():
+        raise SystemExit(f"{flag} is a directory, expected a file: {path}")
+    if not path.is_file():
+        raise SystemExit(f"{flag} does not exist: {path}")
+    return path
 
 
 def _load_jsonl(path: Path) -> list[dict[str, object]]:
@@ -176,6 +200,18 @@ def main() -> int:
             f"pack cutoff and the reader's upper bound. Default: {DEFAULT_CUTOFFS}"
         ),
     )
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        help=(
+            "VAL-00 clean-warmup manifest. Without it the scope is every query "
+            "in --pred (all 500 warmup IDs), which is NOT the clean-460 scope "
+            "every champion and e2e number uses — the two are not comparable. "
+            "Pass the manifest whenever the result will be read next to an e2e "
+            "METEOR/ROUGE-L figure."
+        ),
+    )
     parser.add_argument("--mrr-cutoff", type=int, default=10)
     parser.add_argument("--ndcg-cutoff", type=int, default=10)
     parser.add_argument("--output", type=Path, required=True)
@@ -192,6 +228,12 @@ def main() -> int:
         raise SystemExit(f"Refusing to overwrite artifact: {args.output}")
 
     cutoffs = _parse_cutoffs(args.cutoffs)
+
+    # Validate every input up front: one clear message beats three separate
+    # failures discovered one run at a time.
+    _require_input_file(args.pred, "--pred")
+    _require_input_file(args.labels, "--labels")
+    _require_input_file(args.passages, "--passages")
 
     preds_raw = _load_jsonl(args.pred)
     labels_raw = _load_jsonl(args.labels)
@@ -219,6 +261,27 @@ def main() -> int:
                 provenance=provenance,  # type: ignore[arg-type]
             )
         )
+
+    id_scope = "all_predictions"
+    manifest_path: str | None = None
+    n_predictions_before_scope = len(predictions)
+    if args.manifest is not None:
+        _require_input_file(args.manifest, "--manifest")
+        manifest = load_clean_warmup_manifest(args.manifest)
+        included = set(manifest.included_ids)
+        predictions = [item for item in predictions if item.query_id in included]
+        if not predictions:
+            raise SystemExit(
+                f"No prediction query_id is in the manifest: {args.manifest}"
+            )
+        missing = sorted(included - {item.query_id for item in predictions})
+        if missing:
+            raise SystemExit(
+                f"{len(missing)} manifest IDs are absent from --pred "
+                f"(e.g. {missing[:5]}); the ranking does not cover the clean scope."
+            )
+        id_scope = "clean_manifest"
+        manifest_path = str(args.manifest)
 
     pred_ids = {item.query_id for item in predictions}
     labels = [item for item in labels if item.query_id in pred_ids]
@@ -273,6 +336,12 @@ def main() -> int:
         "cutoffs": list(cutoffs),
         "mrr_cutoff": args.mrr_cutoff,
         "ndcg_cutoff": args.ndcg_cutoff,
+        "id_scope": id_scope,
+        "manifest_path": manifest_path,
+        "n_predictions_before_scope": n_predictions_before_scope,
+        "n_predictions_scored": len(predictions),
+        "pred_path": str(args.pred),
+        "labels_path": str(args.labels),
         "passages_path": str(args.passages),
         "article_key_policy": "article_id_or_document_scoped_article_number",
         "passage_count": len(passage_to_document),
