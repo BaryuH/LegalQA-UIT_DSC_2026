@@ -6,12 +6,18 @@ import csv
 import io
 import json
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..schemas import PackedEvidence
 from ..splits import SplitAccessError, validate_reference_access
 from .alignment import canonical_id
+from .error_classifier import (
+    DEFAULT_THRESHOLDS,
+    ClassifierSignals,
+    ClassifierThresholds,
+    classify_case,
+)
 from .io import load_records
 
 ERROR_TYPES = frozenset(
@@ -96,6 +102,8 @@ class ErrorCase:
     packed_chunk_ids: tuple[str, ...] = ()
     packed_dropped_ids: tuple[str, ...] = ()
     packed_truncated_ids: tuple[str, ...] = ()
+    reason_code: str = ""
+    classification_confidence: str = ""
 
     @property
     def evidence_text(self) -> str:
@@ -111,10 +119,23 @@ class ErrorReport:
     split: str
     reference_role: str
     cases: tuple[ErrorCase, ...]
+    classification_summary: Mapping[str, int] = field(default_factory=dict)
 
     def to_markdown(self) -> str:
         """Render a worst-first Markdown report containing joined text/evidence."""
 
+        include_classification = any(
+            case.reason_code or case.classification_confidence for case in self.cases
+        )
+        header = (
+            "| rank | id | METEOR | ROUGE-L | error_type | retrieval | "
+            "raw hit IDs | packed chunk IDs | evidence previews | "
+            "prediction | reference |"
+        )
+        separator = "|---:|---|---:|---:|---|---|---|---|---|---|---|"
+        if include_classification:
+            header = header[:-1] + " | reason_code | classification_confidence |"
+            separator = separator[:-1] + "|---|---|"
         lines = [
             "# Retrieval/Generation Error Report",
             "",
@@ -124,33 +145,31 @@ class ErrorReport:
             f"- reference_role: `{self.reference_role}`",
             f"- cases: `{len(self.cases)}`",
             "",
-            (
-                "| rank | id | METEOR | ROUGE-L | error_type | retrieval | "
-                "raw hit IDs | packed chunk IDs | evidence previews | "
-                "prediction | reference |"
-            ),
-            "|---:|---|---:|---:|---|---|---|---|---|---|---|",
+            header,
+            separator,
         ]
         for rank, case in enumerate(self.cases, start=1):
-            lines.append(
-                "| "
-                + " | ".join(
+            cells = [
+                str(rank),
+                _markdown_cell(case.id),
+                _metric_cell(case.meteor),
+                _metric_cell(case.rouge_l),
+                _markdown_cell(case.error_type),
+                _markdown_cell(case.retrieval_status),
+                _markdown_cell(_join_ids(case.raw_hit_ids)),
+                _markdown_cell(_join_ids(case.packed_chunk_ids)),
+                _markdown_cell(case.evidence_text),
+                _markdown_cell(case.prediction or "<missing>"),
+                _markdown_cell(case.reference),
+            ]
+            if include_classification:
+                cells.extend(
                     (
-                        str(rank),
-                        _markdown_cell(case.id),
-                        _metric_cell(case.meteor),
-                        _metric_cell(case.rouge_l),
-                        _markdown_cell(case.error_type),
-                        _markdown_cell(case.retrieval_status),
-                        _markdown_cell(_join_ids(case.raw_hit_ids)),
-                        _markdown_cell(_join_ids(case.packed_chunk_ids)),
-                        _markdown_cell(case.evidence_text),
-                        _markdown_cell(case.prediction or "<missing>"),
-                        _markdown_cell(case.reference),
+                        _markdown_cell(case.reason_code),
+                        _markdown_cell(case.classification_confidence),
                     )
                 )
-                + " |"
-            )
+            lines.append("| " + " | ".join(cells) + " |")
         return "\n".join(lines) + "\n"
 
     def to_csv(self) -> str:
@@ -158,41 +177,46 @@ class ErrorReport:
 
         output = io.StringIO(newline="")
         writer = csv.writer(output, lineterminator="\n")
-        writer.writerow(
-            (
-                "rank",
-                "id",
-                "meteor",
-                "rouge_l",
-                "error_type",
-                "retrieval_status",
-                "raw_hit_ids",
-                "packed_chunk_ids",
-                "packed_dropped_ids",
-                "packed_truncated_ids",
-                "evidence_previews",
-                "prediction",
-                "reference",
-            )
+        headers = [
+            "rank",
+            "id",
+            "meteor",
+            "rouge_l",
+            "error_type",
+            "retrieval_status",
+            "raw_hit_ids",
+            "packed_chunk_ids",
+            "packed_dropped_ids",
+            "packed_truncated_ids",
+            "evidence_previews",
+            "prediction",
+            "reference",
+        ]
+        include_classification = any(
+            case.reason_code or case.classification_confidence for case in self.cases
         )
+        if include_classification:
+            headers.extend(("reason_code", "classification_confidence"))
+        writer.writerow(headers)
         for rank, case in enumerate(self.cases, start=1):
-            writer.writerow(
-                (
-                    rank,
-                    case.id,
-                    "" if case.meteor is None else case.meteor,
-                    "" if case.rouge_l is None else case.rouge_l,
-                    case.error_type,
-                    case.retrieval_status,
-                    _join_ids(case.raw_hit_ids),
-                    _join_ids(case.packed_chunk_ids),
-                    _join_ids(case.packed_dropped_ids),
-                    _join_ids(case.packed_truncated_ids),
-                    case.evidence_text,
-                    "" if case.prediction is None else case.prediction,
-                    case.reference,
-                )
-            )
+            row: list[object] = [
+                rank,
+                case.id,
+                "" if case.meteor is None else case.meteor,
+                "" if case.rouge_l is None else case.rouge_l,
+                case.error_type,
+                case.retrieval_status,
+                _join_ids(case.raw_hit_ids),
+                _join_ids(case.packed_chunk_ids),
+                _join_ids(case.packed_dropped_ids),
+                _join_ids(case.packed_truncated_ids),
+                case.evidence_text,
+                "" if case.prediction is None else case.prediction,
+                case.reference,
+            ]
+            if include_classification:
+                row.extend((case.reason_code, case.classification_confidence))
+            writer.writerow(row)
         return output.getvalue()
 
 
@@ -460,6 +484,80 @@ def _sort_worst_first(case: ErrorCase) -> tuple[int, float, float, str]:
     )
 
 
+def _case_frozenset(
+    mapping: Mapping[str, frozenset[str]],
+    identifier: str,
+    *,
+    field_name: str,
+) -> frozenset[str]:
+    value = mapping.get(identifier, frozenset())
+    if isinstance(value, (str, bytes)) or not isinstance(value, Collection):
+        raise ErrorReportError(
+            f"{field_name}[{identifier}] must be a collection of strings"
+        )
+    result: set[str] = set()
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise ErrorReportError(
+                f"{field_name}[{identifier}] must contain non-empty strings"
+            )
+        result.add(item)
+    return frozenset(result)
+
+
+def _passage_article_mapping(
+    mapping: Mapping[str, str],
+) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for passage_id, article_key in mapping.items():
+        if (
+            not isinstance(passage_id, str)
+            or not passage_id
+            or not isinstance(article_key, str)
+            or not article_key
+        ):
+            raise ErrorReportError(
+                "passage_article_keys must map non-empty strings to non-empty strings"
+            )
+        result[passage_id] = article_key
+    return result
+
+
+def _article_keys_for_ids(
+    identifiers: Sequence[str],
+    passage_article_keys: Mapping[str, str],
+) -> frozenset[str]:
+    return frozenset(
+        passage_article_keys[identifier]
+        for identifier in identifiers
+        if identifier in passage_article_keys
+    )
+
+
+def _document_ids_for_article_keys(article_keys: frozenset[str]) -> frozenset[str]:
+    separator = "::art::"
+    return frozenset(
+        article_key.split(separator, 1)[0]
+        for article_key in article_keys
+        if separator in article_key and article_key.split(separator, 1)[0]
+    )
+
+
+def _validate_token_counts(
+    token_counts: Mapping[str, int] | None,
+) -> dict[str, int]:
+    if token_counts is None:
+        return {}
+    result: dict[str, int] = {}
+    for identifier, value in token_counts.items():
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ErrorReportError(
+                f"Token count for {identifier} must be a non-negative integer"
+            )
+        result[identifier] = value
+    return result
+
+
 def generate_error_report(
     predictions_path: str | Path,
     references_path: str | Path,
@@ -473,6 +571,14 @@ def generate_error_report(
     preview_chars: int = 320,
     retrieval_ids: Collection[str] | None = None,
     allow_private: bool = False,
+    auto_classify: bool = False,
+    classifier_thresholds: ClassifierThresholds | None = None,
+    gold_article_keys: Mapping[str, frozenset[str]] | None = None,
+    gold_document_ids: Mapping[str, frozenset[str]] | None = None,
+    passage_article_keys: Mapping[str, str] | None = None,
+    prediction_token_counts: Mapping[str, int] | None = None,
+    reference_token_counts: Mapping[str, int] | None = None,
+    max_new_tokens: int | None = None,
 ) -> ErrorReport:
     """Join evaluation-only references with predictions, metrics, and retrieval."""
 
@@ -495,6 +601,24 @@ def generate_error_report(
             raise ErrorReportError(str(exc)) from exc
     if default_error_type not in ERROR_TYPES:
         raise ErrorReportError(f"Unknown default error_type: {default_error_type}")
+    if auto_classify:
+        missing_inputs: list[str] = []
+        if gold_article_keys is None:
+            missing_inputs.append("gold_article_keys")
+        if gold_document_ids is None:
+            missing_inputs.append("gold_document_ids")
+        if passage_article_keys is None:
+            missing_inputs.append("passage_article_keys")
+        if missing_inputs:
+            raise ErrorReportError(
+                "auto_classify requires: " + ", ".join(missing_inputs)
+            )
+        if max_new_tokens is not None and (
+            isinstance(max_new_tokens, bool)
+            or not isinstance(max_new_tokens, int)
+            or max_new_tokens <= 0
+        ):
+            raise ErrorReportError("max_new_tokens must be a positive integer")
     selected_manual = dict(manual_error_types or {})
     unknown_manual_ids = set(selected_manual) - set(metric_rows)
     if unknown_manual_ids:
@@ -548,29 +672,128 @@ def generate_error_report(
             if identifier in selected_retrieval_ids
         }
 
+    classification_thresholds = (
+        DEFAULT_THRESHOLDS if classifier_thresholds is None else classifier_thresholds
+    )
+    normalized_passage_article_keys = (
+        _passage_article_mapping(passage_article_keys)
+        if auto_classify and passage_article_keys is not None
+        else {}
+    )
+    normalized_token_counts = _validate_token_counts(
+        prediction_token_counts if auto_classify else None,
+    )
+    normalized_reference_token_counts = _validate_token_counts(
+        reference_token_counts if auto_classify else None,
+    )
+    if auto_classify:
+        assert gold_article_keys is not None
+        assert gold_document_ids is not None
+
     cases: list[ErrorCase] = []
+    classification_summary: dict[str, int] = {}
     for identifier in sorted(reference_rows):
         metric = metric_rows[identifier]
         trace = retrieval.get(identifier, RetrievalTrace(status="not_available"))
+        prediction = (
+            predictions[identifier].answer if identifier in predictions else None
+        )
+        auto_classification = None
+        if auto_classify:
+            assert gold_article_keys is not None
+            assert gold_document_ids is not None
+            packed_article_keys = _article_keys_for_ids(
+                trace.packed_chunk_ids,
+                normalized_passage_article_keys,
+            )
+            hit_article_keys = _article_keys_for_ids(
+                trace.raw_hit_ids,
+                normalized_passage_article_keys,
+            )
+            dropped_article_keys = _article_keys_for_ids(
+                trace.packed_dropped_ids,
+                normalized_passage_article_keys,
+            )
+            truncated_article_keys = _article_keys_for_ids(
+                trace.packed_truncated_ids,
+                normalized_passage_article_keys,
+            )
+            auto_classification = classify_case(
+                ClassifierSignals(
+                    identifier=identifier,
+                    prediction=prediction,
+                    reference=reference_rows[identifier],
+                    meteor=_metric_value(metric.get("meteor"), "meteor"),
+                    rouge_l=_metric_value(metric.get("rouge_l"), "rouge_l"),
+                    metric_status=str(metric.get("status", "unknown")),
+                    retrieval_status=trace.status,
+                    raw_hit_ids=trace.raw_hit_ids,
+                    packed_chunk_ids=trace.packed_chunk_ids,
+                    packed_dropped_ids=trace.packed_dropped_ids,
+                    packed_truncated_ids=trace.packed_truncated_ids,
+                    gold_article_keys=_case_frozenset(
+                        gold_article_keys,
+                        identifier,
+                        field_name="gold_article_keys",
+                    ),
+                    gold_document_ids=_case_frozenset(
+                        gold_document_ids,
+                        identifier,
+                        field_name="gold_document_ids",
+                    ),
+                    packed_article_keys=packed_article_keys,
+                    packed_document_ids=_document_ids_for_article_keys(
+                        packed_article_keys
+                    ),
+                    hit_article_keys=hit_article_keys,
+                    prediction_tokens=normalized_token_counts.get(identifier),
+                    max_new_tokens=max_new_tokens,
+                    dropped_article_keys=dropped_article_keys,
+                    truncated_article_keys=truncated_article_keys,
+                    reference_tokens=normalized_reference_token_counts.get(
+                        identifier
+                    ),
+                ),
+                thresholds=classification_thresholds,
+            )
+        selected_error_type = selected_manual.get(
+            identifier,
+            (
+                auto_classification.error_type
+                if auto_classification is not None
+                else default_error_type
+            ),
+        )
+        classification_summary[selected_error_type] = (
+            classification_summary.get(selected_error_type, 0) + 1
+        )
+        reason_code = (
+            auto_classification.reason_code
+            if auto_classification is not None and identifier not in selected_manual
+            else ""
+        )
+        classification_confidence = (
+            auto_classification.confidence
+            if auto_classification is not None and identifier not in selected_manual
+            else ""
+        )
         cases.append(
             ErrorCase(
                 id=identifier,
-                prediction=(
-                    predictions[identifier].answer
-                    if identifier in predictions
-                    else None
-                ),
+                prediction=prediction,
                 reference=reference_rows[identifier],
                 meteor=_metric_value(metric.get("meteor"), "meteor"),
                 rouge_l=_metric_value(metric.get("rouge_l"), "rouge_l"),
                 metric_status=str(metric.get("status", "unknown")),
                 retrieval_status=trace.status,
                 evidence_previews=trace.evidence_previews,
-                error_type=selected_manual.get(identifier, default_error_type),
+                error_type=selected_error_type,
                 raw_hit_ids=trace.raw_hit_ids,
                 packed_chunk_ids=trace.packed_chunk_ids,
                 packed_dropped_ids=trace.packed_dropped_ids,
                 packed_truncated_ids=trace.packed_truncated_ids,
+                reason_code=reason_code,
+                classification_confidence=classification_confidence,
             )
         )
     return ErrorReport(
@@ -579,6 +802,7 @@ def generate_error_report(
         split=selected_split,
         reference_role=_EVALUATION_REFERENCE_ROLE,
         cases=tuple(sorted(cases, key=_sort_worst_first)),
+        classification_summary=dict(sorted(classification_summary.items())),
     )
 
 

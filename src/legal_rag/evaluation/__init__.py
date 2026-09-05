@@ -1,6 +1,14 @@
 """Local, deterministic evaluation for Vietnamese legal QA answers."""
 
 from .alignment import AlignmentError, DuplicateIDError, align_records
+from .error_classifier import (
+    DEFAULT_THRESHOLDS,
+    Classification,
+    ClassifierSignals,
+    ClassifierThresholds,
+    classify_case,
+    classify_cases,
+)
 from .error_report import (
     ERROR_TYPES,
     ErrorCase,
@@ -49,6 +57,12 @@ __all__ = [
     "SOURCE_SCORER_VERSION",
     "SourceScorerDependencyError",
     "align_records",
+    "ClassifierSignals",
+    "ClassifierThresholds",
+    "Classification",
+    "DEFAULT_THRESHOLDS",
+    "classify_case",
+    "classify_cases",
     "evaluate_records",
     "normalize_text",
     "write_report",

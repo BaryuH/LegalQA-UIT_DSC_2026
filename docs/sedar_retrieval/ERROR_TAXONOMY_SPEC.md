@@ -93,6 +93,9 @@ class ClassifierSignals:
     hit_article_keys: frozenset[str]       # từ raw_hit_ids
     prediction_tokens: int | None          # đếm bằng tokenizer của model
     max_new_tokens: int | None
+    dropped_article_keys: frozenset[str]   # chiếu packed_dropped_ids -> article
+    truncated_article_keys: frozenset[str] # chiếu packed_truncated_ids -> article
+    reference_tokens: int | None           # đếm bằng tokenizer của model
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,17 +134,25 @@ Thứ tự quan trọng: quy tắc chắc chắn trước, suy đoán sau. Mỗi
 | 3 | `retrieval_status` ∈ {`not_available`, `no_packed_evidence`, `miss`} | `CONTEXT_LOAD_ERROR` | `retrieval_status_<value>` | rule_certain |
 | 4 | `gold_article_keys` rỗng | `OTHER` | `no_silver_label` | rule_certain |
 | 5 | `gold_article_keys ∩ (packed ∪ hit) = ∅` | `RETRIEVAL_MISS` | `gold_article_absent_from_hits` | rule_certain |
-| 6 | gold article ∈ `hit_article_keys` nhưng ∉ `packed_article_keys`, **và** id của nó nằm trong `packed_dropped_ids ∪ packed_truncated_ids` | `EVIDENCE_TRUNCATION` | `gold_dropped_by_budget` | rule_certain |
-| 7 | gold article ∈ `hit_article_keys`, ∉ `packed_article_keys`, không nằm trong dropped/truncated | `RERANKING_REGRESSION` | `gold_outranked_in_pack` | rule_heuristic |
+| 6 | gold article ∈ `hit_article_keys` nhưng ∉ `packed_article_keys`, **và** ∈ `dropped_article_keys ∪ truncated_article_keys` | `EVIDENCE_TRUNCATION` | `gold_dropped_by_budget` | rule_certain |
+| 7 | gold article ∈ `hit_article_keys`, ∉ `packed_article_keys`, và pack **không** bỏ rơi passage nào chưa chiếu được | `RERANKING_REGRESSION` | `gold_outranked_in_pack` | rule_heuristic |
+| 7b | như 7 nhưng pack có `packed_dropped_ids`/`packed_truncated_ids` **không chiếu được sang article key** → không phân biệt được 6 với 7 | `OTHER` | `budget_projection_unavailable` | — |
 | 8 | gold article ∉ `packed_article_keys` nhưng `gold_document_ids ∩ packed_document_ids ≠ ∅` | `RIGHT_DOCUMENT_WRONG_CHUNK` | `right_doc_wrong_article` | rule_certain |
 | 9 | gold article ∈ `packed_article_keys`, và tập dẫn chiếu parse từ `prediction` khác rỗng nhưng **giao rỗng** với tập parse từ `reference` | `WRONG_ARTICLE_CITATION` | `citation_set_disjoint` | rule_heuristic |
 | 10 | gold article ∈ pack, `prediction_tokens >= max_new_tokens - 4` | `UNDER_SPECIFIED` | `hit_generation_cap` | rule_certain |
 | 11 | gold article ∈ pack, `len_ratio >= over_verbose_ratio` **và** `rouge_l < meteor - rouge_gap` | `OVER_VERBOSE` | `long_and_precision_loss` | rule_heuristic |
 | 12 | gold article ∈ pack, `len_ratio <= under_specified_ratio` | `UNDER_SPECIFIED` | `too_short_vs_reference` | rule_heuristic |
+| 12b | thiếu `prediction_tokens` hoặc `reference_tokens` | `OTHER` | `token_count_unavailable` | — |
+| 12c | `reference_tokens <= 0` | `OTHER` | `reference_token_count_invalid` | — |
 | 13 | còn lại | `OTHER` | `unclassified` | — |
 
 `len_ratio` = số token của prediction chia số token của reference, **đếm bằng
 tokenizer của model**, không đếm từ theo khoảng trắng (xem §5).
+
+Lưu ý thứ tự với quy tắc 7b: khi rơi vào 7b thì **không trả kết quả ngay** mà
+vẫn phải cho quy tắc 8 (`RIGHT_DOCUMENT_WRONG_CHUNK`, rule_certain) chạy trước;
+chỉ khi 8 không khớp mới trả `budget_projection_unavailable`. Một mã chắc chắn
+luôn có giá trị hơn một mã "không xác định được".
 
 Sáu mã còn lại — `DATA_SCHEMA_ERROR`, `CHUNK_BOUNDARY_ERROR`,
 `WRONG_DOCUMENT_VERSION`, `MISSING_REQUIRED_ITEM`, `UNSUPPORTED_ADDITION`,
@@ -260,7 +271,16 @@ Bộ phân loại chưa được kiểm chứng là bộ phân loại vô giá t
 4. **Gate nghiệm thu:**
    - accuracy tổng ≥ **0.80**;
    - mọi mã có `confidence="rule_certain"` đạt precision ≥ **0.90**;
-   - tỉ lệ `OTHER` sau phân loại ≤ **0.25** trên 460 case.
+   - tỉ lệ `OTHER` sau phân loại ≤ **0.25** **trên tập case có nhãn bạc**, không
+     phải trên 460.
+
+   > Sửa lỗi của bản spec đầu: gate cũ ghi "≤ 0.25 trên 460 case" là **không thể
+   > đạt** và sai về nguyên tắc. Chỉ khoảng 274/460 case có nhãn bạc; số còn lại
+   > rơi vào quy tắc 4 (`no_silver_label`) và **phải** ở `OTHER` — đó là thiếu dữ
+   > liệu, không phải bộ phân loại kém. Trộn hai thứ vào một tỉ lệ sẽ khiến ta
+   > hoặc kết luận sai là bộ phân loại hỏng, hoặc tệ hơn là nới quy tắc để ép con
+   > số xuống. Báo cáo hai tỉ lệ tách bạch: độ phủ nhãn bạc, và tỉ lệ `OTHER`
+   > trong phần có nhãn.
 5. Mã nào không đạt precision 0.90 thì **hạ xuống `OTHER`** thay vì nới ngưỡng
    cho vừa số liệu. Ngưỡng chỉ được chỉnh **một lần** sau bước 3; chỉnh nhiều
    vòng trên cùng 60 case là overfit lên tập hiệu chỉnh.
@@ -305,12 +325,14 @@ python scripts/generate_error_report.py \
   --retrieval   dedup_cap768/retrieval.jsonl \
   --labels      <đường dẫn nhãn bạc v2> \
   --passages    <đường dẫn passages json> \
+  --token-counts           "$A/dedup_cap768/pred_tokens.json" \
+  --reference-token-counts "$A/dedup_cap768/ref_tokens.json" \
   --max-new-tokens 768 \
   --auto-classify \
   --markdown "$A/dedup_cap768/error_report_classified.md" \
   --csv      "$A/dedup_cap768/error_report_classified.csv" \
   --summary-out "$A/dedup_cap768/error_summary.json" \
-  --split val
+  --split warmup
 
 python -c "import json;d=json.load(open('$A/dedup_cap768/error_summary.json'));
 [print(f'{k:28s} {v:4d}') for k,v in sorted(d.items(), key=lambda x:-x[1])]"
@@ -329,6 +351,40 @@ sang nhóm nào.
 - Accuracy và precision từng mã trên 60 case hiệu chỉnh.
 - Bảng chuyển dịch `dedup_control` → `dedup_cap768` theo mã.
 - Ba mã chiếm khối lượng lớn nhất — đây là đầu vào để chọn đòn bẩy tiếp theo.
+- Độ phủ nhãn bạc (bao nhiêu case có `gold_article_keys` khác rỗng), báo riêng
+  với tỉ lệ `OTHER` trong phần có nhãn.
 
 Ghi vào `memory-bank/activeContext.md` và `memory-bank/progress.md` theo quy tắc
 ở `RETRIEVAL_FIX_PLAN.md` §10: chỉ ID và reason code.
+
+---
+
+## 10. Kết quả rà soát bản cài đặt, 2026-09-05
+
+Bản cài đặt đầu **đạt** mọi ràng buộc ở §2 và §7: hàm thuần, deterministic,
+không gọi model hay mạng, nhãn tay thắng nhãn tự động, hành vi mặc định không
+đổi (không truyền cờ mới thì CSV không có cột mới và mọi case vẫn `OTHER`), và
+`--summary-out` chỉ chứa mã kèm số đếm. Test riêng của module: 35 passed.
+
+Ba quy tắc bị chết vì **bản spec đầu thiếu tín hiệu**, không phải do người cài
+làm sai — người cài đã đúng khi từ chối đoán và đặt thẳng tên test là
+`fails_closed`:
+
+| Quy tắc | Thiếu gì | Đã bổ sung |
+|---|---|---|
+| 6 `EVIDENCE_TRUNCATION` | không có phép chiếu `packed_dropped_ids` / `packed_truncated_ids` sang article key | `dropped_article_keys`, `truncated_article_keys` |
+| 11 `OVER_VERBOSE` | không có độ dài reference tính bằng token | `reference_tokens` + cờ `--reference-token-counts` |
+| 12 `UNDER_SPECIFIED` (theo tỉ lệ) | như trên | như trên |
+
+Một lỗi thứ tự phát sinh trong lúc sửa và đã xử lý: nhánh
+`budget_projection_unavailable` ban đầu trả kết quả ngay, che mất quy tắc 8 vốn
+là `rule_certain`. Nay nó hoãn lại để 8 chạy trước.
+
+Hai lỗi khác của bản spec đầu, đã sửa ngay trong tài liệu này: gate `OTHER`
+≤ 0.25 tính trên 460 (không thể đạt — xem §6), và lệnh mẫu ở §8 dùng
+`--split val` trong khi `validate_reference_access` chỉ nhận
+`train|warmup|public|private`.
+
+Tồn đọng, không chặn: `tests/test_b2_freeze.py` có 2 test đỏ; đã xác nhận đỏ
+sẵn trước mọi thay đổi ở đây (`git stash` rồi chạy lại vẫn đỏ), nên là vấn đề
+riêng cần điều tra tách bạch.
