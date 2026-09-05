@@ -13,7 +13,9 @@ from legal_rag.sedar_sft.training_infra import inspect_sedar_training_infra
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=Path("configs/sedar_sft_train.yaml"))
+    parser.add_argument(
+        "--config", type=Path, default=Path("configs/sedar_sft_train.yaml")
+    )
     parser.add_argument("--repo-root", type=Path, default=Path("."))
     parser.add_argument(
         "--authorize-gpu-execution",

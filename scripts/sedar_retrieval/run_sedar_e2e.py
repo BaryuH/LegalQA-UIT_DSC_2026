@@ -144,9 +144,7 @@ def main() -> int:
     if args.candidate_window < 0:
         raise SystemExit("--candidate-window must be non-negative")
     if 0 < args.candidate_window < args.evidence_top_k:
-        raise SystemExit(
-            "--candidate-window must be zero or at least --evidence-top-k"
-        )
+        raise SystemExit("--candidate-window must be zero or at least --evidence-top-k")
     if args.id_source == "clean_manifest" and args.manifest is None:
         args.manifest = Path(
             "artifacts/sedar_sft/validation/clean_warmup_manifest.json"

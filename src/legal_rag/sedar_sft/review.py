@@ -22,7 +22,11 @@ CHECKS: tuple[tuple[str, Severity, str], ...] = (
     ("gpu_occupied", "Critical", "GPU already occupied"),
     ("silent_oom_recovery", "Critical", "OOM auto-recovery changed config silently"),
     ("multiple_4b_copies", "Critical", "multiple 4B copies loaded simultaneously"),
-    ("reranker_resident_during_train", "High", "reranker left resident during training"),
+    (
+        "reranker_resident_during_train",
+        "High",
+        "reranker left resident during training",
+    ),
     ("retrieval_during_training", "Critical", "on-the-fly retrieval during training"),
     ("dataloader_starving_gpu", "Medium", "DataLoader starving GPU"),
     ("non_nvme_cache", "High", "non-NVMe training cache despite available NVMe"),
@@ -77,7 +81,9 @@ def build_adversarial_review(*, local_dev: bool = True) -> AdversarialReview:
     for check_id, severity, description in CHECKS:
         if local_dev:
             status = "deferred_server"
-            evidence = "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+            evidence = (
+                "Local scaffolding; re-evaluate on Ubuntu RTX4090 before promotion"
+            )
         else:
             status = "open"
             evidence = "Needs server evidence"
@@ -87,12 +93,21 @@ def build_adversarial_review(*, local_dev: bool = True) -> AdversarialReview:
     status = (
         "pass_local_template"
         if local_dev
-        else ("blocked" if any(f.status == "open" and f.severity in {"Critical", "High"} for f in findings) else "pass")
+        else (
+            "blocked"
+            if any(
+                f.status == "open" and f.severity in {"Critical", "High"}
+                for f in findings
+            )
+            else "pass"
+        )
     )
     return AdversarialReview(status=status, findings=tuple(findings))
 
 
-def write_adversarial_review(path: str | Path, review: AdversarialReview | None = None) -> Path:
+def write_adversarial_review(
+    path: str | Path, review: AdversarialReview | None = None
+) -> Path:
     payload = review or build_adversarial_review()
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)

@@ -23,7 +23,8 @@ class PromotionFreeze:
             "execution_profile": self.execution_profile,
             "blockers": list(self.blockers),
             "rule": (
-                "Promote only if SEDAR-SFT beats SFT-only under frozen B2 + approved evaluator"
+                "Promote only if SEDAR-SFT beats SFT-only under frozen B2 "
+                "+ approved evaluator"
             ),
         }
 
@@ -64,7 +65,9 @@ def build_promotion_freeze(*, authorize_promote: bool = False) -> PromotionFreez
     )
 
 
-def write_promotion_freeze(path: str | Path, payload: PromotionFreeze | None = None) -> Path:
+def write_promotion_freeze(
+    path: str | Path, payload: PromotionFreeze | None = None
+) -> Path:
     report = payload or build_promotion_freeze()
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)

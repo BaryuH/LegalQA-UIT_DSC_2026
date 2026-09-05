@@ -445,9 +445,7 @@ def _encode_texts(
         raise RetrieverLoRATrainingError("Cannot encode an empty text batch")
     target_device = _model_device(model, device)
     chunks: list[Any] = []
-    grad_context = (
-        torch.enable_grad() if require_grad else torch.no_grad()
-    )
+    grad_context = torch.enable_grad() if require_grad else torch.no_grad()
     with grad_context:
         for start in range(0, len(texts), batch_size):
             batch = list(texts[start : start + batch_size])
@@ -621,9 +619,7 @@ def train_retriever_lora(
         lr=config.learning_rate,
     )
     trainable_params = sum(
-        parameter.numel()
-        for parameter in model.parameters()
-        if parameter.requires_grad
+        parameter.numel() for parameter in model.parameters() if parameter.requires_grad
     )
     if trainable_params == 0:
         raise RetrieverLoRATrainingError("LoRA produced zero trainable parameters")
@@ -723,12 +719,15 @@ def train_retriever_lora(
                     hard_vectors = torch.stack(padded, dim=0)
                     hard_mask = torch.stack(padded_masks, dim=0)
 
-                loss = _contrastive_step_loss(
-                    query_vectors,
-                    positive_vectors,
-                    hard_vectors,
-                    hard_negative_mask=hard_mask,
-                ) / config.grad_accum
+                loss = (
+                    _contrastive_step_loss(
+                        query_vectors,
+                        positive_vectors,
+                        hard_vectors,
+                        hard_negative_mask=hard_mask,
+                    )
+                    / config.grad_accum
+                )
             loss.backward()
             if (global_step + 1) % config.grad_accum == 0:
                 optimizer.step()

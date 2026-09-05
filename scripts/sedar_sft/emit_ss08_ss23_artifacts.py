@@ -19,14 +19,18 @@ def main() -> int:
         repo_root=root,
         authorize_gpu_execution=False,
     )
-    write_preflight(root / "artifacts/sedar_sft/hardware/ss08_preflight.json", preflight)
+    write_preflight(
+        root / "artifacts/sedar_sft/hardware/ss08_preflight.json", preflight
+    )
     write_observability(
         root / "artifacts/sedar_sft/hardware/ss20_observability_template.json",
         GpuObservability(),
     )
     write_ablation_plan(root / "artifacts/sedar_sft/eval/ss21_ablation_plan.json")
     write_promotion_freeze(root / "artifacts/sedar_sft/eval/ss22_promotion_freeze.json")
-    write_adversarial_review(root / "artifacts/sedar_sft/eval/ss23_adversarial_review.json")
+    write_adversarial_review(
+        root / "artifacts/sedar_sft/eval/ss23_adversarial_review.json"
+    )
     print("wrote SS-08..SS-23 local artifacts")
     print("preflight_status", preflight.status)
     return 0

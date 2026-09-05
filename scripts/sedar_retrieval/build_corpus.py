@@ -36,7 +36,10 @@ def main() -> int:
     parser.add_argument(
         "--compact-nodes",
         action="store_true",
-        help="Skip point/retained nodes in nodes.jsonl to reduce disk (audit still counts them).",
+        help=(
+            "Skip point/retained nodes in nodes.jsonl to reduce disk "
+            "(audit still counts them)."
+        ),
     )
     args = parser.parse_args()
 
@@ -55,9 +58,10 @@ def main() -> int:
     source_texts = {doc.id: doc.passage for doc in documents}
     compact_skip = {"point", "retained"} if args.compact_nodes else set()
 
-    with nodes_path.open("w", encoding="utf-8") as nodes_f, passages_path.open(
-        "w", encoding="utf-8"
-    ) as passages_f:
+    with (
+        nodes_path.open("w", encoding="utf-8") as nodes_f,
+        passages_path.open("w", encoding="utf-8") as passages_f,
+    ):
         for document in documents:
             nodes = parse_legal_document(document)
             all_nodes.extend(nodes)
@@ -67,8 +71,7 @@ def main() -> int:
                 ):
                     continue
                 nodes_f.write(
-                    json.dumps(node.model_dump(mode="json"), ensure_ascii=False)
-                    + "\n"
+                    json.dumps(node.model_dump(mode="json"), ensure_ascii=False) + "\n"
                 )
             for passage in nodes_to_passages(nodes, levels=levels):  # type: ignore[arg-type]
                 passages_f.write(

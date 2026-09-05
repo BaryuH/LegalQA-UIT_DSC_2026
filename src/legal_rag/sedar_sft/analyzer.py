@@ -67,7 +67,9 @@ def analyze_requirements(question: str) -> RequirementAnalysis:
         question_type = "minimum"
         answer_shape = "scalar"
         requirements.append(Requirement("R2", "minimum_value", True))
-    elif any(token in text for token in ("trách nhiệm", "bao gồm", "những gì", "gồm những")):
+    elif any(
+        token in text for token in ("trách nhiệm", "bao gồm", "những gì", "gồm những")
+    ):
         question_type = "responsibility_list"
         answer_shape = "enumeration"
         requirements.append(Requirement("R2", "legal_duty", True))

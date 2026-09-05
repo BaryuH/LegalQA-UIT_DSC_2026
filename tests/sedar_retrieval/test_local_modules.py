@@ -10,7 +10,10 @@ from legal_rag.sedar_retrieval.corpus.context_augment import (
 from legal_rag.sedar_retrieval.corpus.hierarchy import nodes_to_passages
 from legal_rag.sedar_retrieval.corpus.parse_legal import parse_legal_document
 from legal_rag.sedar_retrieval.corpus.reference_graph import parse_reference_edges
-from legal_rag.sedar_retrieval.evidence.curation import CandidateEvidence, curate_evidence
+from legal_rag.sedar_retrieval.evidence.curation import (
+    CandidateEvidence,
+    curate_evidence,
+)
 from legal_rag.sedar_retrieval.query import analyze_query_deterministic, parse_citations
 from legal_rag.sedar_retrieval.ranking.features import (
     assert_train_inference_parity,

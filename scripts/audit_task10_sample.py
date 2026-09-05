@@ -94,9 +94,7 @@ def audit_row(row: dict[str, object]) -> dict[str, object]:
     elif category == "A" and same_document and not same_article:
         note_parts.append("Khác Điều trong cùng văn bản; negative cấu trúc hợp lệ.")
     elif category == "C" and not same_document:
-        note_parts.append(
-            "Khác văn bản; chỉ trùng từ ngữ chung, negative hợp lệ."
-        )
+        note_parts.append("Khác văn bản; chỉ trùng từ ngữ chung, negative hợp lệ.")
     elif (
         category == "B"
         and same_article
@@ -112,9 +110,7 @@ def audit_row(row: dict[str, object]) -> dict[str, object]:
             "Lexical overlap cao do cùng domain/văn bản nhưng khác Điều; vẫn hợp lệ."
         )
     else:
-        note_parts.append(
-            "Không thấy dấu hiệu false negative rõ từ cấu trúc passage."
-        )
+        note_parts.append("Không thấy dấu hiệu false negative rõ từ cấu trúc passage.")
 
     if row.get("potential_false_negative") and not manual_false_negative:
         note_parts.append(
@@ -159,12 +155,12 @@ def main() -> int:
         by_category[category]["valid"] += int(row["manual_negative_is_valid"])
 
     fn_rate = sum(1 for row in audited if row["manual_false_negative"]) / len(audited)
-    valid_rate = (
-        sum(1 for row in audited if row["manual_negative_is_valid"]) / len(audited)
+    valid_rate = sum(1 for row in audited if row["manual_negative_is_valid"]) / len(
+        audited
     )
-    machine_fn_rate = (
-        sum(1 for row in audited if row.get("potential_false_negative")) / len(audited)
-    )
+    machine_fn_rate = sum(
+        1 for row in audited if row.get("potential_false_negative")
+    ) / len(audited)
     summary = {
         "rows": len(audited),
         "assisted_audit_fn_rate": round(fn_rate, 4),
@@ -174,7 +170,8 @@ def main() -> int:
         "passes_target_assisted_audit": fn_rate <= 0.03,
         "by_category": dict(by_category),
         "notes": [
-            "Assisted audit without passage text; parent-article vs clause-level rule applied.",
+            "Assisted audit without passage text; parent-article vs "
+            "clause-level rule applied.",
             "Category B same-article different-clause treated as valid hard negatives.",
             "Recommend spot-check 20 rows with passage text before promotion.",
         ],

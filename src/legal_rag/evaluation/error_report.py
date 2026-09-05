@@ -750,9 +750,7 @@ def generate_error_report(
                     max_new_tokens=max_new_tokens,
                     dropped_article_keys=dropped_article_keys,
                     truncated_article_keys=truncated_article_keys,
-                    reference_tokens=normalized_reference_token_counts.get(
-                        identifier
-                    ),
+                    reference_tokens=normalized_reference_token_counts.get(identifier),
                 ),
                 thresholds=classification_thresholds,
             )

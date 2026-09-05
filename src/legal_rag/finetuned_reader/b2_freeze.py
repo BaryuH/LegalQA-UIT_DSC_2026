@@ -139,9 +139,7 @@ class B2FreezeFingerprint:
         }
         missing = required - set(payload)
         if missing:
-            raise ValueError(
-                f"B2 freeze fingerprint missing fields: {sorted(missing)}"
-            )
+            raise ValueError(f"B2 freeze fingerprint missing fields: {sorted(missing)}")
         return cls(
             schema_version=str(payload["schema_version"]),
             freeze_id=str(payload["freeze_id"]),
@@ -443,8 +441,7 @@ def validate_against_b2_freeze(
             mismatches.append(f"{field_name}: expected {required!r}, got {observed!r}")
     if mismatches:
         raise B2FreezeDriftError(
-            "B2 freeze drift detected for finetuned_reader: "
-            + "; ".join(mismatches)
+            "B2 freeze drift detected for finetuned_reader: " + "; ".join(mismatches)
         )
 
 

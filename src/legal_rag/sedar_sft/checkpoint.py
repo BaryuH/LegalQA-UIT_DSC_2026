@@ -119,7 +119,8 @@ def validate_sedar_checkpoint(
         for key, value in expected.items():
             if manifest.get(key) != value:
                 raise CheckpointValidationError(
-                    f"Checkpoint field {key!r} mismatch: {manifest.get(key)!r} != {value!r}"
+                    f"Checkpoint field {key!r} mismatch: "
+                    f"{manifest.get(key)!r} != {value!r}"
                 )
     adapter_dir = root / "adapter"
     adapter_hash = hash_directory(adapter_dir) if adapter_dir.is_dir() else ""
@@ -142,9 +143,7 @@ def validate_sedar_checkpoint(
                 "training": train_meta,
                 "inference": dict(inference_environment),
             }
-            env_delta["note"] = (
-                "Driver/environment differences recorded explicitly"
-            )
+            env_delta["note"] = "Driver/environment differences recorded explicitly"
     manifest_hash = hashlib.sha256(
         json.dumps(manifest, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()

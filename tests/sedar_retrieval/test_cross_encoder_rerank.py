@@ -51,9 +51,7 @@ def test_reorders_head_by_score(passages, questions) -> None:
         # Reverse the incoming order: last candidate scores highest.
         return [float(i) for i in range(len(texts))]
 
-    (row,) = rerank_rankings(
-        rankings, questions, passages, score_fn=score_fn, top_k=3
-    )
+    (row,) = rerank_rankings(rankings, questions, passages, score_fn=score_fn, top_k=3)
     assert row.ranked_ids == ("p3", "p2", "p1")
     assert [s["ce_rank"] for s in row.scores] == [1, 2, 3]
     assert row.scores[0]["passage_id"] == "p3"
@@ -67,9 +65,7 @@ def test_tail_beyond_top_k_keeps_original_order(passages, questions) -> None:
     def score_fn(query: str, texts):
         return [float(i) for i in range(len(texts))]
 
-    (row,) = rerank_rankings(
-        rankings, questions, passages, score_fn=score_fn, top_k=2
-    )
+    (row,) = rerank_rankings(rankings, questions, passages, score_fn=score_fn, top_k=2)
     assert row.ranked_ids == ("p2", "p1", "p3", "p4", "p5")
     assert row.reranked_count == 2
     assert row.tail_count == 3
@@ -123,9 +119,7 @@ def test_scorer_receives_reader_text_not_retrieval_text(passages, questions) -> 
         seen.extend(texts)
         return [1.0] * len(texts)
 
-    rerank_rankings(
-        {"q1": ["p1"]}, questions, passages, score_fn=score_fn, top_k=1
-    )
+    rerank_rankings({"q1": ["p1"]}, questions, passages, score_fn=score_fn, top_k=1)
     assert seen[0].startswith("Điều 76. Hợp đồng lao động")
     assert "[DOCUMENT CONTEXT]" not in seen[0]
 
@@ -155,38 +149,53 @@ def test_passage_text_helper(passages) -> None:
 def test_missing_question_fails(passages) -> None:
     with pytest.raises(CrossEncoderError, match="No question text"):
         rerank_rankings(
-            {"q9": ["p1"]}, {}, passages,
-            score_fn=lambda q, t: [1.0] * len(t), top_k=1,
+            {"q9": ["p1"]},
+            {},
+            passages,
+            score_fn=lambda q, t: [1.0] * len(t),
+            top_k=1,
         )
 
 
 def test_missing_passage_fails(questions, passages) -> None:
     with pytest.raises(CrossEncoderError, match="absent from the corpus view"):
         rerank_rankings(
-            {"q1": ["nope"]}, questions, passages,
-            score_fn=lambda q, t: [1.0] * len(t), top_k=1,
+            {"q1": ["nope"]},
+            questions,
+            passages,
+            score_fn=lambda q, t: [1.0] * len(t),
+            top_k=1,
         )
 
 
 def test_duplicate_candidate_fails(questions, passages) -> None:
     with pytest.raises(CrossEncoderError, match="Duplicate passage_id"):
         rerank_rankings(
-            {"q1": ["p1", "p1"]}, questions, passages,
-            score_fn=lambda q, t: [1.0] * len(t), top_k=2,
+            {"q1": ["p1", "p1"]},
+            questions,
+            passages,
+            score_fn=lambda q, t: [1.0] * len(t),
+            top_k=2,
         )
 
 
 def test_score_count_mismatch_fails(questions, passages) -> None:
     with pytest.raises(CrossEncoderError, match="scores for"):
         rerank_rankings(
-            {"q1": ["p1", "p2"]}, questions, passages,
-            score_fn=lambda q, t: [1.0], top_k=2,
+            {"q1": ["p1", "p2"]},
+            questions,
+            passages,
+            score_fn=lambda q, t: [1.0],
+            top_k=2,
         )
 
 
 def test_non_positive_top_k_fails(questions, passages) -> None:
     with pytest.raises(CrossEncoderError, match="top_k must be positive"):
         rerank_rankings(
-            {"q1": ["p1"]}, questions, passages,
-            score_fn=lambda q, t: [1.0], top_k=0,
+            {"q1": ["p1"]},
+            questions,
+            passages,
+            score_fn=lambda q, t: [1.0],
+            top_k=0,
         )

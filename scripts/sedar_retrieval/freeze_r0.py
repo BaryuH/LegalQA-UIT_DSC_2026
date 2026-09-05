@@ -120,9 +120,7 @@ def main() -> int:
         "index_fingerprint": result.index_fingerprint,
         "rouge": None,
         "meteor": None,
-        "note": (
-            "ROUGE/METEOR with frozen SEDAR-SFT reader deferred to GPU server"
-        ),
+        "note": ("ROUGE/METEOR with frozen SEDAR-SFT reader deferred to GPU server"),
     }
     (out / "metrics.json").write_text(
         json.dumps(metrics, indent=2, ensure_ascii=False) + "\n",
@@ -205,7 +203,8 @@ def main() -> int:
         recommendation="CONTINUE_LOCAL",
         known_issues=[
             "Local R0 uses frozen B2 mock generation; SEDAR reader checksum deferred.",
-            "Re-run on GPU server with live reranker + frozen SEDAR-SFT reader before PROMOTE.",
+            "Re-run on GPU server with live reranker + frozen SEDAR-SFT "
+            "reader before PROMOTE.",
         ],
         local_dev_waiver={
             "cuda_assumed": True,

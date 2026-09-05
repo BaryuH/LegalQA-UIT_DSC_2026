@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from ..schemas import PackedEvidence
 from .analyzer import RequirementAnalysis, analyze_requirements
@@ -56,7 +57,9 @@ class SedarRuntimeResult:
             "draft": self.draft.as_dict(),
             "verification": self.verification.as_dict(),
             "risk": self.risk.as_dict(),
-            "critic_plan": None if self.critic_plan is None else self.critic_plan.as_dict(),
+            "critic_plan": None
+            if self.critic_plan is None
+            else self.critic_plan.as_dict(),
             "candidates": self.candidates.as_dict(),
             "final": self.final.as_dict(),
         }

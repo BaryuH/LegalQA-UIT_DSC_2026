@@ -113,9 +113,7 @@ def _cross_split_train_exclusions(
     return exclusion_reason_map(exclusions)
 
 
-def _dataset_output_dir(
-    root: Path, settings: Any, *, max_examples: int | None
-) -> Path:
+def _dataset_output_dir(root: Path, settings: Any, *, max_examples: int | None) -> Path:
     dataset_root = Path(str(settings.output.dataset_root))
     output_dir = root / dataset_root / str(settings.dataset_version)
     if max_examples is not None:

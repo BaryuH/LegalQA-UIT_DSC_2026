@@ -30,7 +30,9 @@ _MULTI_HINTS = ("và", "hoặc", "trừ trường hợp", "ngoại trừ", "đ�
 _HOP_HINTS = ("theo điều", "quy định tại", "theo khoản")
 
 
-def classify_complexity(query: str, citations: tuple[CitationMention, ...]) -> Complexity:
+def classify_complexity(
+    query: str, citations: tuple[CitationMention, ...]
+) -> Complexity:
     lowered = query.casefold()
     if any(hint in lowered for hint in _HOP_HINTS) and len(citations) >= 2:
         return "multi_hop"

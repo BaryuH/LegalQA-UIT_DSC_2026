@@ -26,7 +26,6 @@ from legal_rag.sedar_sft.length_profile import (
 )
 from legal_rag.sedar_sft.training_infra import inspect_sedar_training_infra
 
-
 REPO = Path(__file__).resolve().parents[1]
 
 

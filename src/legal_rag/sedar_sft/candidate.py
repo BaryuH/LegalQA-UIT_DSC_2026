@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from .analyzer import RequirementAnalysis
 from .draft import GroundedDraft, attach_draft_attribution
@@ -67,7 +68,11 @@ def maybe_generate_second_candidate(
     # Prefer fewer high hard findings.
     primary_score = (
         int(primary_verification.hard_violation),
-        sum(1 for item in primary_verification.claim_support if item.label == "unsupported"),
+        sum(
+            1
+            for item in primary_verification.claim_support
+            if item.label == "unsupported"
+        ),
     )
     secondary_score = (
         int(secondary_verification.hard_violation),

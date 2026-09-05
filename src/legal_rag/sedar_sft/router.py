@@ -55,15 +55,22 @@ def route_risk(
     weak = sum(1 for item in verification.claim_support if item.label == "weak")
     total = max(len(verification.claim_support), 1)
     unsupported_risk = unsupported / total
-    citation_risk = 1.0 if any(
-        item.code.startswith("UNSUPPORTED_") for item in verification.hard_findings
-    ) else 0.0
-    temporal_risk = 1.0 if any(
-        item.code == "TEMPORAL_CONFLICT" for item in verification.hard_findings
-    ) else (0.2 if evidence_profile.temporal_status == "unknown" else 0.0)
+    citation_risk = (
+        1.0
+        if any(
+            item.code.startswith("UNSUPPORTED_") for item in verification.hard_findings
+        )
+        else 0.0
+    )
+    temporal_risk = (
+        1.0
+        if any(item.code == "TEMPORAL_CONFLICT" for item in verification.hard_findings)
+        else (0.2 if evidence_profile.temporal_status == "unknown" else 0.0)
+    )
     truncation_risk = (
         0.5
-        if evidence_profile.dropped_evidence_ids or evidence_profile.truncated_evidence_ids
+        if evidence_profile.dropped_evidence_ids
+        or evidence_profile.truncated_evidence_ids
         else 0.0
     )
     retrieval_uncertainty = min(1.0, 0.1 * len(evidence_profile.dropped_evidence_ids))
@@ -74,7 +81,9 @@ def route_risk(
         route: Route = "critic_patch"
     elif unsupported_risk >= 0.5 or candidate_disagreement >= 0.4:
         route = "second_candidate"
-    elif unsupported_risk > 0 or weak > 0 or requirement_gap > 0 or temporal_risk >= 0.5:
+    elif (
+        unsupported_risk > 0 or weak > 0 or requirement_gap > 0 or temporal_risk >= 0.5
+    ):
         route = "critic_patch"
     else:
         route = "accept"

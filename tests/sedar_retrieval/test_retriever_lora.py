@@ -140,8 +140,7 @@ def test_build_retriever_examples_pairs_synthetic_and_hard_negatives() -> None:
         negative_ids=("p-neg-a", "p-neg-b"),
     )
     passages = {
-        passage.passage_id: passage
-        for passage in (positive, negative_a, negative_b)
+        passage.passage_id: passage for passage in (positive, negative_a, negative_b)
     }
 
     examples = build_retriever_examples(

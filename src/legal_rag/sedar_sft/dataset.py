@@ -98,7 +98,9 @@ def build_sedar_sft_dataset_from_config(
             "SEDAR dataset build requires project.profile='sedar_sft'"
         )
     if project.finetuned_reader is None:
-        raise DatasetBuildError("SEDAR dataset build requires finetuned_reader settings")
+        raise DatasetBuildError(
+            "SEDAR dataset build requires finetuned_reader settings"
+        )
 
     underlying = build_sft_dataset_from_config(
         project,
@@ -107,7 +109,9 @@ def build_sedar_sft_dataset_from_config(
     )
     sedar_examples = remap_examples_to_sedar_contract(underlying.examples)
     settings = project.finetuned_reader
-    overlay_dir = root / settings.output.dataset_root / f"{settings.dataset_version}-sedar"
+    overlay_dir = (
+        root / settings.output.dataset_root / f"{settings.dataset_version}-sedar"
+    )
     if max_examples is not None:
         overlay_dir = overlay_dir / f"smoke-{max_examples}"
     manifest_path = _write_sedar_overlay(

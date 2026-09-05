@@ -74,9 +74,7 @@ class PassageEvidenceConfig:
         if self.candidate_window < 0:
             raise ValueError("candidate_window must be non-negative")
         if 0 < self.candidate_window < self.evidence_top_k:
-            raise ValueError(
-                "candidate_window must be zero or at least evidence_top_k"
-            )
+            raise ValueError("candidate_window must be zero or at least evidence_top_k")
         if self.body_source not in {"raw_text", "reader_text"}:
             raise ValueError(f"Unsupported body_source: {self.body_source!r}")
         if self.dedup_article_mode not in {"off", "article", "clause", "first"}:

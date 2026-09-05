@@ -41,9 +41,7 @@ def test_canonical_point_clause_article_still_parses() -> None:
     assert any(
         m.article == "15" and m.clause == "2" and m.point == "a" for m in mentions
     )
-    assert any(
-        m.document_number and "13/2023" in m.document_number for m in mentions
-    )
+    assert any(m.document_number and "13/2023" in m.document_number for m in mentions)
 
 
 @pytest.mark.parametrize(

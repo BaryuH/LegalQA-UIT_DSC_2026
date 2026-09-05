@@ -44,7 +44,9 @@ def main() -> int:
     def write(path: Path, rows: tuple) -> None:
         with path.open("w", encoding="utf-8") as handle:
             for row in rows:
-                handle.write(json.dumps(row.model_dump(mode="json"), ensure_ascii=False) + "\n")
+                handle.write(
+                    json.dumps(row.model_dump(mode="json"), ensure_ascii=False) + "\n"
+                )
 
     write(out / "passages_r1.jsonl", r1)
     write(out / "passages_r2a.jsonl", r2a)

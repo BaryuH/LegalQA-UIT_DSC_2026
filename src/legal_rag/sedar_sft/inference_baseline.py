@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from ..schemas import PackedEvidence
 
@@ -84,7 +85,7 @@ def run_sft_only_baseline(
         )
     elapsed = max(time.perf_counter() - started, 1e-9)
     status = "pass_local_mock" if results else "empty"
-    notes = (
+    notes: tuple[str, ...] = (
         "SFT-only baseline uses one generator path; SEDAR runtime is disabled.",
         "Token counts are whitespace estimates until SS-04C tokenizer is locked.",
     )

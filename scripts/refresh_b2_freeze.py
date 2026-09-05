@@ -22,7 +22,10 @@ def main(argv: list[str] | None = None) -> int:
         require_complete_b2_freeze,
         write_b2_freeze_fingerprint,
     )
-    from legal_rag.pipeline import prepare_bm25_index_from_config, run_hybrid_rag_from_config
+    from legal_rag.pipeline import (
+        prepare_bm25_index_from_config,
+        run_hybrid_rag_from_config,
+    )
 
     parser = argparse.ArgumentParser(description="Refresh B2 freeze artifact (FTR-02).")
     parser.add_argument(

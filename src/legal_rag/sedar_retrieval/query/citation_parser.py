@@ -17,7 +17,8 @@ shape                                        before      now
 ``153/2020/NĐ-CP`` standing alone            missed      ``document_number``
 ``Nghị quyết``/``Pháp lệnh``/``Chỉ thị``/…   missed      ``document_number``
 ``Luật Doanh nghiệp 2020`` (name, no number) missed      ``document_name``
-``khoản 2`` / ``điểm a`` standing alone      missed      ``clause_only`` / ``point_only``
+``khoản 2`` / ``điểm a`` standing alone      missed      ``clause_only``
+                                                        ``point_only``
 ===========================================  ==========  ============
 
 Overlapping matches are resolved by containment: a mention wholly inside a

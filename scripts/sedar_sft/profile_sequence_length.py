@@ -19,7 +19,9 @@ from legal_rag.sedar_sft.length_profile import (
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=Path("configs/sedar_sft_train.yaml"))
+    parser.add_argument(
+        "--config", type=Path, default=Path("configs/sedar_sft_train.yaml")
+    )
     parser.add_argument("--repo-root", type=Path, default=Path("."))
     parser.add_argument("--max-examples", type=int, default=8)
     parser.add_argument(

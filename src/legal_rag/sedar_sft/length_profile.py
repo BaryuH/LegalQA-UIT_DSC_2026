@@ -151,7 +151,8 @@ def profile_sft_examples(
         )
 
     notes = [
-        "Target must never be silently truncated (collator raises TARGET_DOES_NOT_FIT).",
+        "Target must never be silently truncated "
+        "(collator raises TARGET_DOES_NOT_FIT).",
         "Evidence reduction occurs before target reduction.",
         "Do not select longer context merely because RTX4090 can run it.",
     ]
@@ -172,7 +173,8 @@ def profile_sft_examples(
             selected = int(budgets[-1])
             notes = [
                 *notes,
-                "No budget retained >=95% fit; selected largest listed budget pending policy review.",
+                "No budget retained >=95% fit; selected largest listed "
+                "budget pending policy review.",
             ]
 
     return LengthProfileResult(

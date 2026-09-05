@@ -6,9 +6,7 @@ from hashlib import sha256
 from typing import Literal
 
 from legal_rag.schemas import LegalChunk
-
 from legal_rag.sedar_retrieval.corpus.schema import CanonicalPassage
-
 
 BodySource = Literal["raw_text", "reader_text"]
 
@@ -53,7 +51,9 @@ def passage_to_legal_chunk(
         section_parts.append(f"Khoản {passage.clause_number}")
     if passage.point_label:
         section_parts.append(f"Điểm {passage.point_label}")
-    section_label = " / ".join(section_parts) if section_parts else passage.retrieval_level
+    section_label = (
+        " / ".join(section_parts) if section_parts else passage.retrieval_level
+    )
 
     return LegalChunk(
         chunk_id=passage.passage_id,

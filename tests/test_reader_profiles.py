@@ -173,9 +173,7 @@ def test_reader_cuda_backend_matches_cpu_when_available() -> None:
         pytest.skip("CUDA is not available in this test environment")
 
     question = _inference_cases()[0].question
-    cpu_hits = ReaderBM25Index(_train_cases(), backend="cpu").search(
-        question, top_k=5
-    )
+    cpu_hits = ReaderBM25Index(_train_cases(), backend="cpu").search(question, top_k=5)
     cuda_hits = ReaderBM25Index(_train_cases(), backend="cuda").search(
         question, top_k=5
     )

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,7 +15,6 @@ from ..finetuned_reader.training import (
     TrainingStackReport,
     inspect_training_stack,
 )
-
 
 DEFAULT_RUNTIME_PROFILE = Path("configs/sedar_sft/runtime_profile.yaml")
 
@@ -69,11 +67,7 @@ def inspect_sedar_training_infra(
 ) -> SedarTrainingInfraReport:
     """Probe QLoRA infra without downloading models or inventing AUTO values."""
 
-    settings = (
-        config.finetuned_reader
-        if isinstance(config, ProjectConfig)
-        else config
-    )
+    settings = config.finetuned_reader if isinstance(config, ProjectConfig) else config
     if settings is None:
         raise TrainingGateError("SEDAR training requires finetuned_reader settings")
 

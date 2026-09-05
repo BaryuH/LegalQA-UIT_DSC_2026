@@ -58,9 +58,7 @@ def _passage(
         passage_id=passage_id,
         document_id=document_id,
         article_id=f"{document_id}::art::{article}",
-        clause_id=(
-            f"{document_id}::art::{article}::cl::{clause}" if clause else None
-        ),
+        clause_id=(f"{document_id}::art::{article}::cl::{clause}" if clause else None),
         retrieval_level=level,  # type: ignore[arg-type]
         document_name=name,
         article_number=str(article),
@@ -200,9 +198,7 @@ def test_header_shows_document_name_when_enabled(passages, candidates) -> None:
 # ── P3 ─────────────────────────────────────────────────────────────────────
 
 
-def test_body_source_reader_text_carries_article_heading(
-    passages, candidates
-) -> None:
+def test_body_source_reader_text_carries_article_heading(passages, candidates) -> None:
     heading = "Điều 76. Hợp đồng lao động"
     raw = pack_passage_retrieval_evidence(
         candidates,
@@ -244,9 +240,9 @@ def test_dedup_by_article_modes(passages, candidates, mode, expected) -> None:
 
 
 def test_dedup_off_is_identity(passages, candidates) -> None:
-    assert dedup_candidates_by_article(
-        candidates, passages, mode="off"
-    ) == tuple(candidates)
+    assert dedup_candidates_by_article(candidates, passages, mode="off") == tuple(
+        candidates
+    )
 
 
 def test_dedup_frees_slots_for_other_documents(passages, candidates) -> None:

@@ -41,7 +41,7 @@ def main() -> int:
     assert result.index is not None
     hits = search_passages(result.index, args.smoke_query, top_k=args.top_k)
     # Reload determinism check.
-    from legal_rag.retrieval.bm25 import load_bm25_index, BM25Config
+    from legal_rag.retrieval.bm25 import BM25Config, load_bm25_index
 
     reloaded = load_bm25_index(
         args.cache_root,
@@ -50,11 +50,7 @@ def main() -> int:
     )
     assert reloaded.index is not None
     hits2 = search_passages(reloaded.index, args.smoke_query, top_k=args.top_k)
-    overlap = (
-        1.0
-        if [h.chunk_id for h in hits] == [h.chunk_id for h in hits2]
-        else 0.0
-    )
+    overlap = 1.0 if [h.chunk_id for h in hits] == [h.chunk_id for h in hits2] else 0.0
 
     manifest_out = args.manifest_out or (
         Path("artifacts/sedar_retrieval/indexes/manifests") / f"{run_id}.json"

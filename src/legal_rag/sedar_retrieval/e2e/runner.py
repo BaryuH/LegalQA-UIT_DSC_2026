@@ -24,6 +24,7 @@ from legal_rag.sedar_retrieval.evidence.passage_packer import (
     pack_passage_retrieval_evidence,
 )
 from legal_rag.sedar_retrieval.retrieval.passage_adapter import load_passages_jsonl
+from legal_rag.splits import SplitName
 
 
 class SedarE2ERunnerError(RuntimeError):
@@ -54,7 +55,7 @@ class SedarE2EConfig:
     no_repeat_ngram_size: int | None = None
     repetition_penalty: float | None = None
     manifest_path: Path | None = None
-    split: str = "warmup"
+    split: SplitName = "warmup"
     id_source: str = "clean_manifest"
     limit: int | None = None
     fail_fast: bool = True
@@ -202,7 +203,7 @@ def run_sedar_e2e(
                 }
             )
         except (PassageEvidencePackError, Exception) as exc:
-            error = {
+            error: dict[str, object] = {
                 "id": case.id,
                 "method": "sedar_sft",
                 "error_code": "TASK20_E2E_ERROR",

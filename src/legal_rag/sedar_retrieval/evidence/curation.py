@@ -80,7 +80,11 @@ def curate_evidence(
         if seen_articles.get(article_key, 0) >= 2 and cand.passage_id not in force:
             continue
         block_tokens = _approx_tokens(cand.raw_text)
-        if selected and token_count + block_tokens > max_tokens and cand.passage_id not in force:
+        if (
+            selected
+            and token_count + block_tokens > max_tokens
+            and cand.passage_id not in force
+        ):
             continue
         if len(selected) >= max_blocks and cand.passage_id not in force:
             break

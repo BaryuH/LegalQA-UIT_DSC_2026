@@ -1,5 +1,7 @@
 """Evidence package for SEDAR Retrieval v3."""
 
+from dataclasses import dataclass
+
 from .curation import (
     DEFAULT_BUDGETS,
     CandidateEvidence,
@@ -9,17 +11,16 @@ from .curation import (
 )
 
 
-def fail_closed_sufficiency(*, error: str):
-    from dataclasses import dataclass
+@dataclass(frozen=True, slots=True)
+class SufficiencyResult:
+    sufficient: bool
+    missing: tuple[str, ...]
+    confidence: float
+    followup_query: str | None = None
+    reference_targets: tuple[str, ...] = ()
 
-    @dataclass(frozen=True, slots=True)
-    class SufficiencyResult:
-        sufficient: bool
-        missing: tuple[str, ...]
-        confidence: float
-        followup_query: str | None = None
-        reference_targets: tuple[str, ...] = ()
 
+def fail_closed_sufficiency(*, error: str) -> SufficiencyResult:
     _ = error
     return SufficiencyResult(sufficient=True, missing=(), confidence=0.0)
 
@@ -29,6 +30,7 @@ __all__ = [
     "CandidateEvidence",
     "EvidenceBlock",
     "EvidencePack",
+    "SufficiencyResult",
     "curate_evidence",
     "fail_closed_sufficiency",
 ]

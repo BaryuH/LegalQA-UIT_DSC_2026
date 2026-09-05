@@ -42,9 +42,9 @@ def parse_reference_edges(
         if node.level == "article" and node.article_number:
             by_article[(node.document_id, node.article_number)] = node.node_id
         if node.level == "clause" and node.article_number and node.clause_number:
-            by_clause[
-                (node.document_id, node.article_number, node.clause_number)
-            ] = node.node_id
+            by_clause[(node.document_id, node.article_number, node.clause_number)] = (
+                node.node_id
+            )
 
     edges: list[ReferenceEdge] = []
     for node in nodes:

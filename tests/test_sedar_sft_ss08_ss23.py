@@ -14,21 +14,25 @@ from legal_rag.sedar_sft.checkpoint import (
     build_sedar_manifest_template,
     validate_sedar_checkpoint,
 )
+from legal_rag.sedar_sft.draft import attach_draft_attribution
 from legal_rag.sedar_sft.evidence_profile import build_evidence_profile
 from legal_rag.sedar_sft.inference_baseline import run_sft_only_baseline
 from legal_rag.sedar_sft.observability import GpuObservability, write_observability
 from legal_rag.sedar_sft.preflight import run_canonical_train_preflight
 from legal_rag.sedar_sft.promotion import build_promotion_freeze, write_promotion_freeze
-from legal_rag.sedar_sft.review import build_adversarial_review, write_adversarial_review
+from legal_rag.sedar_sft.review import (
+    build_adversarial_review,
+    write_adversarial_review,
+)
 from legal_rag.sedar_sft.runtime import run_sedar_runtime
 from legal_rag.sedar_sft.verifier import verify_draft
-from legal_rag.sedar_sft.draft import attach_draft_attribution
-
 
 REPO = Path(__file__).resolve().parents[1]
 
 
-def _packed(text: str = "Theo Điều 1 của 12/2020/NĐ-CP ngày 01/01/2020.") -> PackedEvidence:
+def _packed(
+    text: str = "Theo Điều 1 của 12/2020/NĐ-CP ngày 01/01/2020.",
+) -> PackedEvidence:
     hit = RetrievalHit(
         chunk_id="c1",
         document_id="d1",

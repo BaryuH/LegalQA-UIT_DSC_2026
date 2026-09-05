@@ -9,9 +9,7 @@ from typing import Any
 from ..schemas import PackedEvidence
 
 _ARTICLE_RE = re.compile(r"\bĐiều\s+\d+[a-zA-Z]?\b", re.IGNORECASE)
-_LEGAL_ID_RE = re.compile(
-    r"\b\d{1,4}/\d{4}/[A-ZĐđ]{1,10}(?:-[A-ZĐđ]+)?\b"
-)
+_LEGAL_ID_RE = re.compile(r"\b\d{1,4}/\d{4}/[A-ZĐđ]{1,10}(?:-[A-ZĐđ]+)?\b")
 _DATE_RE = re.compile(r"\b\d{1,2}/\d{1,2}/\d{4}\b")
 _NUMBER_RE = re.compile(r"\b\d{1,4}\b")
 _CURRENT = ("hiện nay", "hiện hành", "hiện tại")
@@ -75,7 +73,9 @@ def build_evidence_profile(evidence: PackedEvidence) -> EvidenceProfile:
     dates = tuple(dict.fromkeys(_DATE_RE.findall(text)))
     numbers = tuple(dict.fromkeys(_NUMBER_RE.findall(text)))
     return EvidenceProfile(
-        evidence_ids=tuple(f"E{index + 1}" for index in range(len(evidence.included_ids)))
+        evidence_ids=tuple(
+            f"E{index + 1}" for index in range(len(evidence.included_ids))
+        )
         if evidence.included_ids
         else (),
         document_ids=document_ids,

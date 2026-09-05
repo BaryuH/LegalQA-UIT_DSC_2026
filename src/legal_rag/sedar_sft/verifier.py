@@ -97,9 +97,8 @@ def verify_draft(
                     "high",
                 )
             )
-    if (
-        evidence_profile.temporal_status == "historical"
-        and any(token in answer.casefold() for token in ("hiện nay", "hiện hành"))
+    if evidence_profile.temporal_status == "historical" and any(
+        token in answer.casefold() for token in ("hiện nay", "hiện hành")
     ):
         findings.append(
             HardFinding(

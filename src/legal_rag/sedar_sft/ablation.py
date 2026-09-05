@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 REQUIRED_ABLATIONS = (
     "SFT_only",
     "SEDAR_SFT_full",
@@ -33,7 +32,10 @@ class AblationPlan:
             "quality_metrics": list(self.quality_metrics),
             "efficiency_metrics": list(self.efficiency_metrics),
             "arms": list(self.arms),
-            "rule": "Do not mix kernel-performance comparisons with architecture-quality conclusions.",
+            "rule": (
+                "Do not mix kernel-performance comparisons with "
+                "architecture-quality conclusions."
+            ),
             "gpu_deferred": True,
         }
 
@@ -62,8 +64,15 @@ def write_ablation_plan(path: str | Path, plan: AblationPlan | None = None) -> P
     payload = (plan or build_ablation_plan()).as_dict()
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    out.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     return out
 
 
-__all__ = ["AblationPlan", "REQUIRED_ABLATIONS", "build_ablation_plan", "write_ablation_plan"]
+__all__ = [
+    "AblationPlan",
+    "REQUIRED_ABLATIONS",
+    "build_ablation_plan",
+    "write_ablation_plan",
+]

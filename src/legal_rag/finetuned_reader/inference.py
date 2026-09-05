@@ -274,9 +274,7 @@ class FineTunedReaderGenerator:
                 "no_repeat_ngram_size": getattr(
                     self.backend, "no_repeat_ngram_size", None
                 ),
-                "repetition_penalty": getattr(
-                    self.backend, "repetition_penalty", None
-                ),
+                "repetition_penalty": getattr(self.backend, "repetition_penalty", None),
             },
         )
 

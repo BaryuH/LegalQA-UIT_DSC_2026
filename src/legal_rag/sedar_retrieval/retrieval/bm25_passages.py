@@ -17,7 +17,6 @@ from legal_rag.retrieval.bm25 import (
     write_bm25_index,
 )
 from legal_rag.schemas import RetrievalHit
-
 from legal_rag.sedar_retrieval.corpus.schema import CanonicalPassage
 from legal_rag.sedar_retrieval.retrieval.passage_adapter import (
     load_passages_jsonl,
@@ -34,7 +33,9 @@ def corpus_fingerprint(passages: tuple[CanonicalPassage, ...]) -> str:
         }
         for p in sorted(passages, key=lambda item: item.passage_id)
     ]
-    blob = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    blob = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
     return sha256(blob.encode("utf-8")).hexdigest()
 
 

@@ -75,7 +75,9 @@ def run_canonical_train_preflight(
     project = (
         config
         if isinstance(config, ProjectConfig)
-        else load_config(root / config if not Path(str(config)).is_absolute() else config)
+        else load_config(
+            root / config if not Path(str(config)).is_absolute() else config
+        )
     )
     blockers: list[str] = []
     checks: dict[str, Any] = {}

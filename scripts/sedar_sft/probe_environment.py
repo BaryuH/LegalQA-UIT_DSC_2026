@@ -15,7 +15,7 @@ import platform
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,11 @@ from typing import Any
 def _pkg_version(name: str) -> str:
     module_name = "sentence_transformers" if name == "sentence-transformers" else name
     try:
-        module = importlib.import_module(module_name.replace("-", "_") if name != "sentence-transformers" else module_name)
+        module = importlib.import_module(
+            module_name.replace("-", "_")
+            if name != "sentence-transformers"
+            else module_name
+        )
         return str(getattr(module, "__version__", "imported"))
     except Exception as exc:  # noqa: BLE001 - probe must record any import failure
         return f"MISSING:{type(exc).__name__}"
@@ -50,7 +54,9 @@ def _cuda_probe() -> dict[str, Any]:
         "torch_version": torch.__version__,
         "torch_version_cuda": getattr(torch.version, "cuda", None),
         "cuda_available": bool(torch.cuda.is_available()),
-        "device_count": int(torch.cuda.device_count()) if torch.cuda.is_available() else 0,
+        "device_count": int(torch.cuda.device_count())
+        if torch.cuda.is_available()
+        else 0,
         "cudnn_version": None,
         "device_name": None,
         "device_capability": None,
@@ -58,7 +64,9 @@ def _cuda_probe() -> dict[str, Any]:
         "driver_version": None,
     }
     try:
-        payload["cudnn_version"] = getattr(torch.backends.cudnn, "version", lambda: None)()
+        payload["cudnn_version"] = getattr(
+            torch.backends.cudnn, "version", lambda: None
+        )()
     except Exception:  # noqa: BLE001
         payload["cudnn_version"] = None
     if torch.cuda.is_available():
@@ -167,10 +175,15 @@ def build_probe() -> dict[str, Any]:
         "cuda_enabled_torch": bool(cuda.get("cuda_available")),
         "rtx4090_visible": "4090" in str(device_name),
         "compute_capability_8_9": capability == [8, 9],
-        "bf16_measured": cuda.get("bf16_supported") is not None and bool(cuda.get("cuda_available")),
-        "bitsandbytes_importable": not str(packages.get("bitsandbytes", "")).startswith("MISSING"),
+        "bf16_measured": cuda.get("bf16_supported") is not None
+        and bool(cuda.get("cuda_available")),
+        "bitsandbytes_importable": not str(packages.get("bitsandbytes", "")).startswith(
+            "MISSING"
+        ),
         "nvme_work_root_configured": bool(work_root),
-        "root_not_primary_hf_cache": bool(hf_home) and not str(hf_home).startswith("/home") and hf_home not in {"/", "/root"},
+        "root_not_primary_hf_cache": bool(hf_home)
+        and not str(hf_home).startswith("/home")
+        and hf_home not in {"/", "/root"},
     }
     exit_gate["all_pass"] = all(
         [
@@ -187,7 +200,7 @@ def build_probe() -> dict[str, Any]:
     return {
         "schema_version": "sedar_sft.ss04a.environment_probe.v1",
         "task": "SS-04A",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "python": {
             "version": sys.version,
             "executable": sys.executable,
@@ -219,7 +232,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     probe = build_probe()
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(probe, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    args.out.write_text(
+        json.dumps(probe, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     print(json.dumps(probe["exit_gate"], indent=2))
     print(f"wrote {args.out}")
     return 0 if probe["exit_gate"].get("all_pass") else 2
