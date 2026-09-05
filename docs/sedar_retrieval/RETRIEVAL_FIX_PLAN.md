@@ -2461,6 +2461,8 @@ quy trách nhiệm cho từng tầng. Gộp hai patch vào một run là mất k
 [ ] Phase 5  grid trọng số xong, chốt cấu hình fusion, build lại feature
 [ ] Phase 6  cross-encoder: article_recall@4 tăng ≥ 0.02, e2e xác nhận
 [ ] Phase 7  view/index mới, đo riêng BM25 trước/sau
+[x] SS-06     ngân sách sinh đã chốt: cap 768 (mục 11, 2026-09-05)
+[x] SS-06     n-gram blocking đã thử và bị bác bỏ (mục 11.4)
 [ ] Ngoài lề  scorer calibrate với cặp public 0.4894/0.5418
 [ ] Ngoài lề  Q2 nhãn cho 40 query không citation (biên evaluation)
 ```
@@ -2479,3 +2481,128 @@ Sau mỗi phase, ghi vào `memory-bank/activeContext.md` và `memory-bank/progre
 
 Chỉ ghi ID và reason code. Không bao giờ copy reference answer, prompt chứa gold
 content, hay inference trace vào memory bank.
+
+---
+
+## 11. Ngân sách sinh (sequence budget) — đã đo và đã chốt, 2026-09-05
+
+Mục này đóng exit gate SS-06 "Canonical sequence budget selected", vốn để mở từ
+lúc lập kế hoạch. Toàn bộ số liệu dưới đây đo trên scope clean-460, cùng một
+retrieval input (`qwen_warmup_top500.jsonl`, dedup article), cùng evidence
+budget (top-k 4 / 4000 ký tự / 2 chunk mỗi văn bản), scorer
+`btc_source_scorer_v1`, và cùng reader adapter hash
+`6e3e294884fcac786a86df0c4a242d322a340547e71671262287e9894d3f2e63`. Biến duy
+nhất thay đổi giữa các run là tham số decoding.
+
+### 11.1 Vấn đề: trần 512 token bị chạm ở 46.5% số case
+
+Đo bằng chính tokenizer của model (không phải đếm từ theo khoảng trắng):
+**214/460 câu trả lời dài đúng 512 token**, tỉ lệ token/từ trung vị 1.29. Nghĩa
+là gần một nửa output bị cắt giữa chừng vì hết ngân sách chứ không phải vì model
+đã nói xong.
+
+> Ghi chú phương pháp: lần đo đầu tiên tôi đếm từ theo khoảng trắng, thấy tối đa
+> 456 và kết luận trần không bị chạm — sai đơn vị. Đây đúng cùng lớp lỗi với
+> `tokenizer: whitespace_estimator_only` trong `ss03_feasibility.json`. Mọi phép
+> đo độ dài từ nay phải dùng tokenizer của model.
+
+### 11.2 Sweep `--max-new-tokens`, paired bootstrap trên 460 case
+
+| cap | METEOR | Δ vs 512 | KTC 95% | ROUGE-L | Δ vs 512 | KTC 95% |
+|---|---|---|---|---|---|---|
+| 512 (control) | 0.5010 | — | — | 0.5563 | — | — |
+| **768** | **0.5227** | **+0.0217** | [+0.0151, +0.0287] | **0.5502** | **−0.0062** | [−0.0116, −0.0008] |
+| 1024 | 0.5262 | +0.0253 | [+0.0175, +0.0334] | 0.5403 | −0.0160 | [−0.0231, −0.0090] |
+| 1536 | 0.5243 | +0.0233 | [+0.0149, +0.0322] | 0.5298 | −0.0265 | [−0.0352, −0.0183] |
+| 2048 | 0.5216 | +0.0206 | [+0.0119, +0.0297] | 0.5242 | −0.0321 | [−0.0416, −0.0231] |
+
+Hình dạng: METEOR bão hoà ngay từ 768 (bốn giá trị +0.0206…+0.0253 nằm trong
+sai số của nhau), trong khi ROUGE-L giảm **đơn điệu** theo cap. Token cấp thêm
+sau 768 gần như không mua thêm recall nội dung mà chỉ làm loãng precision.
+
+`dedup_cap2048` và `dedup_cap2048_r2` chạy cùng cấu hình cho md5 khớp nhau →
+pipeline tất định, sai số run-to-run bằng 0, nên mọi KTC ở trên đọc được trực
+tiếp.
+
+### 11.3 Quyết định: chốt cap = 768, ưu tiên METEOR
+
+**cap768 KHÔNG đạt gate đã pre-register.** Gate yêu cầu cận dưới KTC của ROUGE-L
+≥ −0.008 (noise floor e2e); cap768 có cận dưới −0.0116 và p=0.0294, tức mức suy
+giảm là thật chứ không phải nhiễu. Không cap nào trong sweep đạt gate.
+
+Vẫn chốt **cap768** làm champion, bằng một **quyết định về thứ tự ưu tiên metric**,
+không phải bằng kết quả của gate:
+
+- METEOR là metric xếp hạng chính thức của cuộc thi; ROUGE-L là thứ cấp.
+- Đánh đổi: **+0.0217 METEOR** lấy **−0.0062 ROUGE-L**, tỉ lệ ~3.5:1 nghiêng về
+  metric chính.
+- Rủi ro đã nhận biết: nếu ban tổ chức áp bất kỳ tiêu chí phụ nào dựa trên
+  ROUGE-L, quyết định này bất lợi. Nếu điều đó xảy ra, quay về cap 512.
+
+Gate bị trượt và bị bỏ qua **có chủ đích**; ghi lại đúng như vậy để lần đọc sau
+không nhầm đây là kết quả "đạt".
+
+### 11.4 ĐÃ THỬ VÀ BỊ BÁC BỎ: n-gram blocking (`no_repeat_ngram_size`)
+
+Giả thuyết ban đầu: ROUGE-L mất đi là do degenerate repetition khi nới cap, nên
+chặn lặp sẽ giữ được METEOR mà cứu ROUGE-L. **Giả thuyết sai, và cách chữa gây
+hại nặng.**
+
+`--no-repeat-ngram-size 6` tại cả ba cap:
+
+| run | METEOR vs control | ROUGE-L vs control | case tệ đi |
+|---|---|---|---|
+| cap768_norep6 | −0.1269 | −0.1025 | 381/460 |
+| cap1024_norep6 | −0.1224 | −0.1092 | 370/460 |
+| cap1536_norep6 | −0.1209 | −0.1161 | 363/460 |
+
+Mức sụt lớn gấp ~5 lần toàn bộ phần thưởng của việc nới cap, và đều ở mọi cap →
+nguyên nhân là chính ràng buộc, không phải tương tác với độ dài.
+
+Hai chế độ hỏng quan sát được khi đối chiếu `cap768` với `cap768_norep6` (mô tả
+hiện tượng; không lưu nội dung sinh ra vào artifact):
+
+1. **Hỏng ở mức ký tự.** Model chèn khoảng trắng vào giữa từ để lách lệnh cấm
+   khi mọi cách viết đúng của một cụm đều đã bị chặn.
+2. **Trôi dẫn chiếu — nghiêm trọng hơn nhiều.** Cùng một câu hỏi, bản không có
+   ràng buộc dẫn đúng điều/thông tư; bản `norep6` dẫn sang một số hiệu văn bản
+   khác hẳn và đổi luôn chủ đề nội dung. Ràng buộc đẩy model ra khỏi chuỗi dẫn
+   chiếu đúng và nó bịa ra dẫn chiếu nghe hợp lý.
+
+Nguyên nhân gốc: **văn bản pháp luật tiếng Việt lặp n-gram một cách hợp pháp và
+bắt buộc** ("theo quy định tại khoản … Điều …", tên đầy đủ văn bản được nhắc
+lại). Với tỉ lệ token/từ 1.29, 6 token ≈ 4–5 từ. Cấm cứng mọi cụm 4–5 từ tái
+xuất hiện là buộc model rời khỏi văn phong pháp lý ngay từ câu thứ hai.
+
+`repetition_penalty` **cũng bị loại mà không cần chạy thêm**: nó phạt đúng những
+token bị lặp nhiều nhất, tức chính là thuật ngữ pháp lý và thành phần dẫn chiếu
+— cùng cơ chế gây hại, chỉ mềm hơn về mức độ.
+
+> Sửa chẩn đoán cũ: ở cap1536, nhóm 158 case "bị flag lặp 5-gram" có METEOR
+> **+0.0362**, tức tăng. Nếu đó là vòng lặp thoái hoá thật thì METEOR phải giảm.
+> Phần lớn "lặp" bị flag là lặp **hợp lệ** của thuật ngữ pháp lý. Tôi đã đọc
+> flag đó như bằng chứng bệnh lý trong khi dữ liệu trong tay đã nói ngược lại;
+> ba run `norep6` là hệ quả của sai lầm đó.
+
+**Kết luận vận hành: không dùng bất kỳ hình thức ức chế lặp nào ở tầng decoding
+cho domain này.** Hai tham số `--no-repeat-ngram-size` và `--repetition-penalty`
+vẫn còn trong code (commit `cf4656d`), mặc định **tắt**, có test, không đổi hành
+vi champion. Giữ lại như năng lực đã kiểm chứng là *không nên dùng*, không phải
+như tuỳ chọn đang chờ tinh chỉnh.
+
+### 11.5 Cấu hình champion sau mục này
+
+```bash
+--evidence-top-k 4 --max-total-chars 4000 --max-chunks-per-document 2 \
+--dedup-article-mode article --max-new-tokens 768
+# KHÔNG dùng --no-repeat-ngram-size, KHÔNG dùng --repetition-penalty
+```
+
+METEOR 0.5227 / ROUGE-L 0.5502 trên clean-460.
+
+### 11.6 Việc tiếp theo mà mục này chỉ ra
+
+Ngân sách sinh không còn là nút thắt. Đòn bẩy kế tiếp không đoán được từ số
+liệu hiện có, vì `error_type` vẫn là `OTHER` cho **cả 460 case** — taxonomy lỗi
+chưa được cài, nên ta đang mù về *loại* lỗi còn lại. Cài phân loại lỗi trước khi
+chọn hướng tối ưu tiếp theo.
