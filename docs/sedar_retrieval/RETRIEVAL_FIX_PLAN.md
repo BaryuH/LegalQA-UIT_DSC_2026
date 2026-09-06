@@ -2757,3 +2757,143 @@ chunk/văn bản cắt mất phần còn lại và model lấp chỗ trống b�
 - Mẫu hiệu chỉnh 60 case (`calibration_sample_60.json`) vẫn chưa gán tay, nên
   precision từng mã của bộ phân loại **chưa được kiểm chứng**. Mọi con số ở
   §12.4 là chỉ dấu, chưa phải bằng chứng đã nghiệm thu.
+
+---
+
+## 13. Dư địa còn lại nằm ở đâu — 2026-09-06
+
+Mục này thay cho §12.4 đã thu hồi. Nó không giải thích vì sao champion tốt; nó
+đo xem còn gì để lấy và ở đâu.
+
+Mọi số liệu đo trên `val01_pack_wide_cap768` (champion 6/6000/3, cap 768),
+clean-460, reader đóng băng.
+
+### 13.1 Champion bền trên METEOR, KHÔNG bền trên ROUGE-L
+
+Chia đôi ngẫu nhiên 200 lần, `pack_wide` so với `dedup_cap768`:
+
+| metric | delta | cả hai nửa dương | đảo dấu | nửa tệ nhất |
+|---|---|---|---|---|
+| METEOR | +0.0274 | **100%** | 0% | +0.0095 |
+| ROUGE-L | +0.0113 | 90% | 10% | −0.0061 |
+
+Được phép nói "pack_wide tăng METEOR". **Không** được nói nó tăng ROUGE-L —
+khớp với paired CI [−0.0014, +0.0237], p=0.0779.
+
+Lưu ý về độ tin cậy tổng thể: ~20 cấu hình đã được chấm trên cùng 460 câu và
+champion được chọn bằng cách lấy max. Đó là selection bias kể cả khi từng phép
+so đều đúng. Cặp public đã nộp (0.4894 / 0.5418) so với warmup cùng thời điểm
+(0.5010 / 0.5563) gợi ý độ lớn: warmup lạc quan hơn ~0.012 METEOR.
+
+### 13.2 Retrieval gần như đã xong; ranking còn rất ít
+
+Phân bố hạng của article gold trong danh sách 500 ứng viên (274 case có nhãn):
+
+| gold nằm ở | tích luỹ |
+|---|---|
+| hạng 1 | 56.6% |
+| top-6 (bằng kích thước pack) | 83.6% |
+| top-20 | 91.6% |
+| ngoài top-500 | **2.6% (7 case)** |
+
+Hạng trung vị = 1. Và 274 − 229 = **45** đúng bằng tổng
+`RETRIEVAL_MISS + RERANKING_REGRESSION` ở mọi `hit_depth`, nên packer lấy đúng
+top-6 theo thứ tự, không sắp xếp lại.
+
+**Trần của toàn nhánh retrieval + ranking:** 45 case, METEOR trung bình ~0.343,
+tức `45 × (0.5501 − 0.343) / 460 ≈ +0.020`. Phần với tới được bằng ranking tốt
+hơn — 22 case ở hạng 7–20 — chỉ đáng **+0.010**, quanh noise floor. Nới pack đã
+thử (`pack_wider` hoà); cross-encoder đã thử và không nhận.
+
+### 13.3 Ưu tiên phải theo thiệt hại, không theo tần suất
+
+Ba lần trong ngày tôi xếp ưu tiên theo số case và cả ba lần đều sai. Ghi lại
+để không lặp:
+
+| lỗi | tần suất | thiệt hại thật |
+|---|---|---|
+| dẫn sai văn bản | 249/460 (54%) | **≈ 0** (nhóm này METEOR 0.5689, trên trung bình) |
+| vòng lặp sinh | ~28/460 (6%) | +0.0025 ROUGE-L, **dưới noise floor** |
+| pack không có văn bản đúng | 27 (6%) | +0.0134 |
+| `RERANKING_REGRESSION` | 38 (8%) | +0.0175 |
+
+Về dẫn sai văn bản, hai phép đo độc lập cùng kết luận: đối chứng match/disjoint
+cho khoảng cách 0.022/case, và trần theo trung bình nhóm cho **0**. Nó là lỗi
+phổ biến nhất và cũng là lỗi **nghiêm trọng nhất về mặt pháp lý** — trả lời
+trôi chảy, có số hiệu cụ thể, và sai văn bản — nhưng METEOR/ROUGE-L gần như
+không phạt vì tên văn bản chỉ chiếm 1–3% số token. Mục tiêu "điểm thi" và mục
+tiêu "hệ thống dùng được" phân kỳ ở đây, và phải chọn có ý thức.
+
+Chẩn đoán tầng lỗi (`diagnose_citation_mismatch.py`): trong 156 case phân xử
+được, **82.7% là lỗi reader** (văn bản đúng đã nằm trong pack mà vẫn dẫn sai),
+chỉ 17.3% là lỗi retrieval.
+
+### 13.4 Cơ chế thật của tứ phân vị đáy: PACK BỊ BỎ ĐÓI
+
+Tứ phân vị đáy giữ **42% tổng thâm hụt** (115 case, METEOR 0.2405, trần
++0.0774) và **không mã lỗi nào giải thích được nó**. Đọc tay 20 case tệ nhất
+kèm văn bản evidence cho câu trả lời.
+
+Quan hệ liều–đáp ứng trên toàn 460, tổng ký tự evidence thực trong pack so với
+ngân sách 6000:
+
+| tổng ký tự | n | METEOR |
+|---|---|---|
+| < 1000 | 21 | **0.4360** |
+| < 2000 | 74 | 0.5012 |
+| < 3000 | 141 | 0.5147 |
+| toàn bộ | 460 | 0.5501 |
+
+Đơn điệu, không ngoại lệ. Phân vị: p10=1519, p25=2682, p50=4534, p75=6040 —
+một phần tư số case dùng chưa tới nửa ngân sách.
+
+**Cơ chế.** Corpus chứa nhiều chunk cấp khoản chỉ là mục danh sách, không có
+nội dung pháp lý. Ví dụ trong case `115545`: `"14. Cục Quản lý Môi trường y
+tế."` (32 ký tự), `"12. Cục Quản lý Môi trường y tế."` (32), `"5. Cục Quản lý
+môi trường y tế : A23-MTYT + STT"` (47). Chúng khớp tên gần như tuyệt đối với
+câu hỏi nên BM25 và dense đều xếp hạng 1–2, chiếm 4/6 chỗ trong pack, và đẩy
+passage gold (`Điều 1 Quyết định 1534/QĐ-BYT`, 1445 ký tự, đúng nội dung
+reference) xuống hạng 3. Model bám mảnh vụn hạng 1 và viết 186 ký tự trong khi
+đáp án dài 1295. Case `35959`: cả pack chỉ **533 ký tự**.
+
+Trên 20 case tệ nhất: 22.8% passage dưới 120 ký tự, 14.1% dưới 60; tỉ lệ độ dài
+prediction/reference trung vị **0.30**; 14/20 case prediction ngắn hơn nửa đáp án.
+
+**`evidence_top_k` bind trước `max_total_chars`.** Với chunk 1000–1500 ký tự thì
+6 chỗ lấp đầy 6000 và mọi thứ ổn — đa số case. Khi mảnh vụn chiếm chỗ, pack cạn
+ở 500–2000 ký tự và ngân sách ký tự **không bao giờ được chạm tới**. Điều này
+giải thích vì sao `pack_k6` (4→6 chỗ) cho kết quả null: quá ít để cứu pack đói.
+
+Hệ quả cho bộ phân loại: 65 case `UNDER_SPECIFIED` bị quy cho `hit_generation_cap`
+là **quy sai nguyên nhân**. Model dừng sớm vì hết nội dung để viết, không phải
+vì hết ngân sách sinh.
+
+**Trần:** kéo nhóm `<3000` lên trung bình corpus ≈ `141 × 0.0354 / 460 ≈ +0.011`.
+Tương quan, không phải nhân quả — pack nhỏ có thể vì chủ đề vốn ít văn bản, và
+nhồi thêm mảnh vụn không cứu được điều đó.
+
+### 13.5 Việc tiếp theo
+
+- `pack_k16` (16 / 6000 / 3, cap 768): lấp pack theo ngân sách ký tự thay vì
+  theo số chỗ. Chỉ chạm nhóm đói; ~25% case đã chạm trần 6000 nên không đổi.
+  **Bắt buộc kiểm chứng nhân quả:** đo lại phân bố ký tự pack của run mới. Nếu
+  điểm lên mà pack vẫn đói thì cơ chế trên sai và phải sửa lời giải thích.
+- Lọc mảnh vụn ở tầng corpus/ứng viên (chunk dưới ngưỡng ký tự) — sửa gốc thay
+  vì sửa triệu chứng, nhưng đụng vào corpus nên tốn hơn nhiều.
+- `--include-document-name`: trần ~+0.006…+0.012, chưa từng bật.
+
+### 13.6 Ràng buộc lớn nhất hiện nay
+
+Ít nhất 70/115 case ở tứ phân vị đáy **có gold trong pack mà vẫn đạt ~0.24**
+(vì toàn corpus chỉ có 45 case thiếu gold trong pack). Cộng với 82.7% lỗi dẫn
+chiếu là reader-fault, ba hướng đo độc lập cùng chỉ về một chỗ: **dư địa lớn
+nhất nằm ở reader**.
+
+Nhưng reader đang đóng băng theo ràng buộc dự án (checksum
+`6e3e294884fcac786a86df0c4a242d322a340547e71671262287e9894d3f2e63`). Ràng buộc
+đó phục vụ đúng mục đích của nó — so sánh retrieval công bằng — nhưng nó khoá
+đúng thành phần đang giữ phần lớn dư địa.
+
+Làm được mà không phá đóng băng: cách trình bày evidence, ngân sách pack, lọc
+mảnh vụn. Cần gỡ đóng băng: train lại hoặc thay reader — đó là **quyết định cấp
+dự án**, cần baseline mới và đo lại toàn bộ chuỗi. Chưa đề xuất gỡ.
