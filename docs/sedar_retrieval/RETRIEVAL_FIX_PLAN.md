@@ -2897,3 +2897,71 @@ Nhưng reader đang đóng băng theo ràng buộc dự án (checksum
 Làm được mà không phá đóng băng: cách trình bày evidence, ngân sách pack, lọc
 mảnh vụn. Cần gỡ đóng băng: train lại hoặc thay reader — đó là **quyết định cấp
 dự án**, cần baseline mới và đo lại toàn bộ chuỗi. Chưa đề xuất gỡ.
+
+---
+
+## 14. Bật `--include-document-name` — quyết định về mục tiêu, 2026-09-06
+
+### 14.1 Cờ hoạt động, và chỉ tác động đúng nhóm nó nhắm tới
+
+`packwide_docname_cap768`, mọi thứ khác giữ nguyên champion 6/6000/3 cap 768,
+adapter hash không đổi.
+
+| | pack_wide | + docname | Δ |
+|---|---|---|---|
+| dẫn sai văn bản | 249 (54.1%) | **82 (17.8%)** | **−167** |
+| nhóm A: pack có văn bản đúng mà vẫn dẫn sai | 129 | **29** | **−100** |
+| nhóm B: pack không có văn bản đúng | 27 | 25 | −2 |
+| nhóm C: không nhãn bạc | 93 | 28 | −65 |
+
+Nhóm B gần như đứng yên — đúng như phải vậy, vì cờ này không thể sửa được case
+mà pack vốn không chứa văn bản đúng. Can thiệp chỉ chạm nhóm nó có thể chạm.
+Đó là bằng chứng cơ chế sạch.
+
+### 14.2 Điểm số không nhúc nhích
+
+METEOR −0.0043, KTC [−0.0170, +0.0085], p=0.5100 → **không kết luận được**.
+ROUGE-L +0.0026, KTC [−0.0091, +0.0142], p=0.6722 → **không kết luận được**.
+
+Đây là xác nhận bằng thực nghiệm cho §13.3, vốn mới chỉ suy từ tỉ lệ token:
+**METEOR và ROUGE-L gần như mù trước việc dẫn đúng hay sai văn bản.** Khi model
+dẫn sai văn bản nhưng trích đúng nội dung điều luật, phần thân bài vẫn khớp
+nguyên vẹn; metric chấm phần thân đó.
+
+Một điều **không** được đọc sai: đây không phải "sửa dẫn chiếu mà không ảnh
+hưởng gì khác". 230 case tốt lên, 181 case tệ đi — **411/460 câu trả lời đã
+thay đổi**. Thêm thông tin vào context làm toàn bộ quá trình sinh dịch chuyển,
+và lời lãi bù trừ nhau. Phát biểu đúng là **miễn phí tính trung bình, không
+phải vô hại từng case**.
+
+### 14.3 Quyết định: BẬT
+
+Cấu hình champion bổ sung `--include-document-name`.
+
+Đây là **quyết định về mục tiêu, không phải kết quả của gate**. Gate không đạt
+và cũng không trượt — dữ liệu không phán được. Lý do chọn:
+
+Trong QA pháp luật, dẫn sai văn bản là chế độ lỗi **nguy hiểm bất đối xứng**.
+Câu trả lời thiếu ý thì người đọc thấy thiếu và tra thêm. Câu trả lời trôi
+chảy, có số hiệu cụ thể, nội dung đúng nhưng gán sai văn bản thì không ai nghi
+ngờ — nó mang đủ dấu hiệu của sự đáng tin, sẽ được trích dẫn lại, và sai sót
+chỉ lộ khi đã muộn. Ví dụ thực tế trong mẫu đọc tay: case `115545` gán nội dung
+Điều 1 Quyết định 1534/QĐ-BYT cho Nghị định 95/2022.
+
+Vì metric không phân biệt được hai thứ đó, **tối ưu theo metric sẽ không bao
+giờ sửa lỗi này**. Nó buộc phải là lựa chọn có chủ đích.
+
+**Rủi ro đã nhận biết và chấp nhận:** cận dưới KTC của METEOR là −0.0170. Điểm
+ước lượng −0.0043 không kết luận được, nhưng giá trị thật có thể xấu tới
+−0.017. Nếu về sau mục tiêu chuyển hẳn sang tối đa hoá điểm bảng xếp hạng, đây
+là quyết định đầu tiên cần xem lại. Reason code:
+`enabled_for_legal_correctness_not_score`.
+
+### 14.4 Còn lại
+
+- **Tách bạch xem dẫn đúng có đáng điểm không**: đo delta riêng trên ~100 case
+  nhóm A đã được sửa, so với các case vẫn dẫn sai. Nếu nhóm đã sửa tăng rõ hơn
+  thì phần lợi có tồn tại nhưng bị nhiễu của run nuốt mất.
+- **Cài đặt ít xáo trộn hơn**: 411/460 câu đổi là nhiều hơn mức cần thiết cho
+  một thay đổi ở dòng header. Một cách đưa định danh văn bản vào mà không đổi
+  cấu trúc block có thể giữ được phần sửa dẫn chiếu với ít phương sai hơn.
