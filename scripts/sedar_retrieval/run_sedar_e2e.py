@@ -80,6 +80,17 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--min-passage-chars",
+        type=int,
+        default=0,
+        help=(
+            "Drop candidate passages shorter than this before packing. The "
+            "corpus holds clause-level fragments that are bare list items; "
+            "they match a question by name, win the top ranks, and starve the "
+            "pack. 0 keeps the historical behaviour."
+        ),
+    )
+    parser.add_argument(
         "--include-document-name",
         action="store_true",
         help=(
@@ -174,6 +185,7 @@ def main() -> int:
             body_source=args.body_source,
             dedup_article_mode=args.dedup_article_mode,
             include_document_name=args.include_document_name,
+            min_passage_chars=args.min_passage_chars,
         ),
         max_new_tokens=args.max_new_tokens,
         stop_sequences=(),

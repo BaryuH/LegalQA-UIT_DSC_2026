@@ -63,6 +63,7 @@ class PassageEvidenceConfig:
     body_source: BodySource = "raw_text"
     dedup_article_mode: ArticleDedupMode = "off"
     include_document_name: bool = False
+    min_passage_chars: int = 0
 
     def __post_init__(self) -> None:
         if self.evidence_top_k <= 0:
@@ -73,6 +74,8 @@ class PassageEvidenceConfig:
             raise ValueError("max_chunks_per_document must be positive")
         if self.candidate_window < 0:
             raise ValueError("candidate_window must be non-negative")
+        if self.min_passage_chars < 0:
+            raise ValueError("min_passage_chars must be non-negative")
         if 0 < self.candidate_window < self.evidence_top_k:
             raise ValueError("candidate_window must be zero or at least evidence_top_k")
         if self.body_source not in {"raw_text", "reader_text"}:
@@ -269,6 +272,44 @@ def ranked_passages_to_hits(
     return tuple(hits)
 
 
+def drop_micro_chunk_candidates(
+    candidates: Sequence[RankedPassageCandidate],
+    passages: Mapping[str, CanonicalPassage],
+    *,
+    min_chars: int,
+    body_source: BodySource = "raw_text",
+) -> tuple[RankedPassageCandidate, ...]:
+    """Drop candidates whose body is too short to answer anything.
+
+    The corpus holds clause-level chunks that are bare list items - one packed
+    pack contained three passages of 32, 32 and 47 characters, each a variant
+    of the same office name. They match a question almost exactly by name, so
+    both BM25 and the dense retriever rank them first, they take most of the
+    pack's slots, and they push the article that actually answers the question
+    out of it. The measured result is a starved pack: a quarter of all cases
+    fill less than half the character budget, and score falls monotonically
+    with how little text the pack holds.
+
+    Ordering is preserved, and the filter never empties a pack: if nothing
+    clears the threshold the original candidates are returned, because a pack
+    of fragments still beats no pack at all.
+    """
+
+    if min_chars <= 0:
+        return tuple(candidates)
+
+    kept = []
+    for candidate in candidates:
+        passage = passages.get(candidate.passage_id)
+        if passage is None:
+            kept.append(candidate)  # let the packer raise on the missing ID
+            continue
+        body = getattr(passage, body_source, "") or ""
+        if len(" ".join(body.split())) >= min_chars:
+            kept.append(candidate)
+    return tuple(kept) if kept else tuple(candidates)
+
+
 def pack_passage_retrieval_evidence(
     candidates: Sequence[RankedPassageCandidate],
     passages: Mapping[str, CanonicalPassage],
@@ -278,7 +319,12 @@ def pack_passage_retrieval_evidence(
     """Pack ranked SEDAR passages using the same budget contract as R0."""
 
     selected = dedup_candidates_by_article(
-        candidates,
+        drop_micro_chunk_candidates(
+            candidates,
+            passages,
+            min_chars=config.min_passage_chars,
+            body_source=config.body_source,
+        ),
         passages,
         mode=config.dedup_article_mode,
     )
@@ -314,6 +360,7 @@ __all__ = [
     "PassageEvidencePackError",
     "RankedPassageCandidate",
     "dedup_candidates_by_article",
+    "drop_micro_chunk_candidates",
     "load_retrieval_rankings",
     "pack_passage_retrieval_evidence",
     "ranked_passages_to_hits",

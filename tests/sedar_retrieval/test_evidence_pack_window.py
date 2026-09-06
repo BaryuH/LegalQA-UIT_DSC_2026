@@ -32,6 +32,7 @@ from legal_rag.sedar_retrieval.evidence.passage_packer import (
     PassageEvidenceConfig,
     RankedPassageCandidate,
     dedup_candidates_by_article,
+    drop_micro_chunk_candidates,
     pack_passage_retrieval_evidence,
 )
 
@@ -278,3 +279,90 @@ def test_dedup_is_document_scoped(passages) -> None:
     ]
     kept = dedup_candidates_by_article(trap, corpus, mode="article")
     assert [item.passage_id for item in kept] == ["A::art76", "Z::art76"]
+
+
+# ── Micro-chunk filtering ───────────────────────────────────────────────────
+
+
+def _sized_passage(passage_id: str, document_id: str, body: str) -> CanonicalPassage:
+    """A passage whose body length is what the test is about."""
+
+    return CanonicalPassage(
+        passage_id=passage_id,
+        document_id=document_id,
+        article_id=f"{document_id}::art::1",
+        clause_id=None,
+        retrieval_level="article",  # type: ignore[arg-type]
+        document_name="Nghị định 95/2022/NĐ-CP",
+        article_number="1",
+        article_title="Vị trí, chức năng",
+        clause_number=None,
+        raw_text=body,
+        reader_text=body,
+        retrieval_text=body,
+        source=SourceProvenance(
+            source_path="selected-contexts.zip",
+            source_member=f"{document_id}_1.txt",
+            document_id=document_id,
+            content_hash="0" * 64,
+        ),
+    )
+
+
+def _ranked(passage_id: str, rank: int) -> RankedPassageCandidate:
+    return RankedPassageCandidate(passage_id=passage_id, rank=rank, score=1.0 / rank)
+
+
+def test_micro_chunks_are_dropped_before_packing() -> None:
+    """Bare list items must not take pack slots from the article that answers."""
+
+    passages = {
+        "frag-a": _sized_passage("frag-a", "D1", "14. Cục Quản lý Môi trường y tế."),
+        "frag-b": _sized_passage("frag-b", "D2", "12. Cục Quản lý Môi trường y tế."),
+        "real": _sized_passage(
+            "real", "D3",
+            "Điều 1. Vị trí, chức năng. " + "Cục có chức năng tham mưu. " * 30,
+        ),
+    }
+    kept = drop_micro_chunk_candidates(
+        [_ranked("frag-a", 1), _ranked("frag-b", 2), _ranked("real", 3)],
+        passages,
+        min_chars=120,
+    )
+    assert [c.passage_id for c in kept] == ["real"]
+
+
+def test_filtering_preserves_candidate_order() -> None:
+    passages = {
+        "a": _sized_passage("a", "D", "x" * 400),
+        "b": _sized_passage("b", "D", "tiny"),
+        "c": _sized_passage("c", "D", "y" * 400),
+    }
+    kept = drop_micro_chunk_candidates(
+        [_ranked("a", 1), _ranked("b", 2), _ranked("c", 3)], passages, min_chars=100
+    )
+    assert [c.passage_id for c in kept] == ["a", "c"]
+
+
+def test_the_filter_never_empties_a_pack() -> None:
+    """A pack of fragments still beats no pack at all."""
+
+    passages = {
+        "a": _sized_passage("a", "D", "ngan"),
+        "b": _sized_passage("b", "D", "ngan"),
+    }
+    candidates = [_ranked("a", 1), _ranked("b", 2)]
+    kept = drop_micro_chunk_candidates(candidates, passages, min_chars=500)
+    assert [c.passage_id for c in kept] == ["a", "b"]
+
+
+def test_zero_threshold_is_a_no_op() -> None:
+    passages = {"a": _sized_passage("a", "D", "ngan")}
+    candidates = [_ranked("a", 1)]
+    assert drop_micro_chunk_candidates(candidates, passages, min_chars=0) == tuple(
+        candidates
+    )
+
+
+def test_min_passage_chars_defaults_to_off() -> None:
+    assert PassageEvidenceConfig().min_passage_chars == 0
