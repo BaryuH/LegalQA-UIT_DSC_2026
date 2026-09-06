@@ -99,3 +99,37 @@ def test_the_comparison_is_deterministic_for_a_given_seed() -> None:
     a = _paired.compare(baseline, candidate, metrics=("meteor",), resamples=500)
     b = _paired.compare(baseline, candidate, metrics=("meteor",), resamples=500)
     assert a == b
+
+
+def test_a_wide_interval_is_inconclusive_not_a_regression() -> None:
+    """A null result with a wide CI must not be read as a drop.
+
+    Enabling document names in the evidence header measured METEOR -0.0043
+    with CI [-0.0170, +0.0085] and p=0.51. The lower bound sits past the
+    noise floor while the upper bound sits above zero: the data cannot
+    judge the change, and calling that a regression would condemn an
+    intervention on evidence that does not exist.
+    """
+
+    baseline, candidate = _runs([0.25, -0.25] * 100 + [-0.0043] * 200)
+    m = _paired.compare(baseline, candidate, metrics=("meteor",),
+                        resamples=1000)["metrics"]["meteor"]
+    assert m["ci_low"] < -0.008 < m["ci_high"]
+    assert m["verdict"] == "khong_ket_luan_duoc"
+    assert not m["is_regression"]
+    assert not m["within_noise_floor"]
+
+
+def test_a_clear_regression_is_named_as_one() -> None:
+    baseline, candidate = _runs([-0.05] * 300)
+    m = _paired.compare(baseline, candidate, metrics=("meteor",),
+                        resamples=1000)["metrics"]["meteor"]
+    assert m["verdict"] == "tut_ro_rang"
+    assert m["is_regression"]
+
+
+def test_a_tight_interval_around_zero_is_inside_the_noise_floor() -> None:
+    baseline, candidate = _runs([0.001, -0.001] * 200)
+    m = _paired.compare(baseline, candidate, metrics=("meteor",),
+                        resamples=1000)["metrics"]["meteor"]
+    assert m["verdict"] == "trong_noise_floor"

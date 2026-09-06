@@ -111,11 +111,21 @@ def compare(
             "p_value": permutation_p(deltas, resamples=resamples, seed=seed + 1),
             "better": sum(1 for d in deltas if d > 0),
             "worse": sum(1 for d in deltas if d < 0),
-            # The decision rule this project pre-registered: judge the interval,
-            # not the point estimate. A significant p with a CI inside the
-            # noise floor is a real but negligible effect.
+            # Judge the interval, not the point estimate. Four outcomes, and
+            # the fourth matters: a wide interval spanning the floor in both
+            # directions is INCONCLUSIVE, not a regression. Reading such a
+            # result as a drop because its lower bound is low would condemn
+            # an intervention the data cannot judge.
             "beats_noise_floor": lo > noise_floor,
-            "within_noise_floor": lo >= -noise_floor,
+            "within_noise_floor": lo >= -noise_floor and hi <= noise_floor,
+            "is_regression": hi < -noise_floor,
+            "verdict": (
+                "vuot_noise_floor" if lo > noise_floor
+                else "tut_ro_rang" if hi < -noise_floor
+                else "trong_noise_floor"
+                if (lo >= -noise_floor and hi <= noise_floor)
+                else "khong_ket_luan_duoc"
+            ),
         }
     return result
 
@@ -123,11 +133,12 @@ def compare(
 def _render(name: str, r: dict) -> None:
     print(f"shared cases: {r['shared_cases']}")
     for metric, m in r["metrics"].items():
-        verdict = (
-            "VUOT noise floor" if m["beats_noise_floor"]
-            else "trong noise floor" if m["within_noise_floor"]
-            else "TUT ngoai noise floor"
-        )
+        verdict = {
+            "vuot_noise_floor": "VUOT noise floor",
+            "tut_ro_rang": "TUT RO RANG",
+            "trong_noise_floor": "trong noise floor (that nhung khong dang ke)",
+            "khong_ket_luan_duoc": "KHONG KET LUAN DUOC (KTC qua rong)",
+        }[m["verdict"]]
         print(
             f"  {metric:8s} {m['baseline']:.4f} -> {m['candidate']:.4f}"
             f"   delta {m['delta']:+.4f}"
