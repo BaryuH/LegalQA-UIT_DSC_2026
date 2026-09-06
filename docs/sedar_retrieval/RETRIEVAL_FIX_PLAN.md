@@ -2592,6 +2592,10 @@ như tuỳ chọn đang chờ tinh chỉnh.
 
 ### 11.5 Cấu hình champion sau mục này
 
+> **Đã bị thay thế bởi mục 12 (2026-09-06).** Champion hiện tại là
+> `6 / 6000 / 3` với cap 768. Điều khoản miễn trừ gate ROUGE-L ở §11.3 đã được
+> rút lại vì không còn cần. Ngân sách sinh 768 thì vẫn giữ nguyên.
+
 ```bash
 --evidence-top-k 4 --max-total-chars 4000 --max-chunks-per-document 2 \
 --dedup-article-mode article --max-new-tokens 768
@@ -2606,3 +2610,88 @@ Ngân sách sinh không còn là nút thắt. Đòn bẩy kế tiếp không đo
 liệu hiện có, vì `error_type` vẫn là `OTHER` cho **cả 460 case** — taxonomy lỗi
 chưa được cài, nên ta đang mù về *loại* lỗi còn lại. Cài phân loại lỗi trước khi
 chọn hướng tối ưu tiếp theo.
+
+---
+
+## 12. Ngân sách evidence pack — champion mới, 2026-09-06
+
+Cùng scope clean-460, cùng retrieval input, cùng reader adapter hash
+`6e3e294884fcac786a86df0c4a242d322a340547e71671262287e9894d3f2e63`,
+`included_ids_hash` `69be61d0…` giống hệt mọi run trước. Biến thay đổi: ba tham
+số của evidence pack. Ngân sách sinh giữ ở 768 (mục 11).
+
+Artifact: `/mnt/G/sedar-legalqa/artifacts/sedar_retrieval/eval/task20_pack_ablation/`
+
+### 12.1 Kết quả
+
+| run | k / chars / per-doc | METEOR | ROUGE-L |
+|---|---|---|---|
+| dedup_control | 4 / 4000 / 2, cap 512 | 0.5010 | 0.5563 |
+| dedup_cap768 | 4 / 4000 / 2, cap 768 | 0.5227 | 0.5502 |
+| pack_k6 | 6 / 4000 / 2, cap 768 | 0.5214 | 0.5462 |
+| **pack_wide** | **6 / 6000 / 3, cap 768** | **0.5501** | **0.5614** |
+
+Paired bootstrap, n=460:
+
+- pack_wide vs cap768: METEOR **+0.0274** [+0.0142, +0.0413] p=0.0001;
+  ROUGE-L +0.0113 [−0.0014, +0.0237] p=0.0779.
+- pack_wide vs control(512): METEOR **+0.0492** [+0.0349, +0.0639] p=0.0000;
+  ROUGE-L +0.0051 [−0.0080, +0.0184] p=0.4431.
+- pack_k6 vs cap768: null trên cả hai (p=0.7148 / p=0.2746).
+
+### 12.2 Quyết định — champion mới, gate đạt không cần miễn trừ
+
+**pack_wide đạt cả hai điều kiện pre-register**: METEOR CI dưới +0.0142
+(> +0.008) và ROUGE-L CI dưới −0.0014 (≥ −0.008). Đây là biến thể đầu tiên
+trong toàn bộ chuỗi thí nghiệm không phải đánh đổi metric nào.
+
+**Điều khoản miễn trừ ở §11.3 được rút lại.** Champion không còn mất ROUGE-L,
+nên lý do "ưu tiên metric chính" không còn cần viện tới. Ghi chú: so với
+control 512, cận dưới KTC của ROUGE-L là −0.0080, tức **đúng sát ngưỡng** —
+qua trong gang tấc, không phải qua thoải mái.
+
+Cấu hình champion:
+
+```bash
+--evidence-top-k 6 --max-total-chars 6000 --max-chunks-per-document 3 \
+--dedup-article-mode article --max-new-tokens 768
+```
+
+METEOR 0.5501 / ROUGE-L 0.5614 trên clean-460.
+
+### 12.3 `evidence_top_k` không phải ràng buộc
+
+`pack_k6` nâng riêng `evidence_top_k` 4 → 6 và cho kết quả **null**. Ứng viên
+thêm vào không có chỗ để vào pack khi `max_total_chars` và
+`max_chunks_per_document` giữ nguyên. Nút thắt nằm ở hai tham số sau, không
+phải ở số ứng viên. Không tăng `evidence_top_k` một mình nữa.
+
+### 12.4 Kiểm chứng nhân quả: đúng hướng, giải thích được ~30%
+
+Chạy lại bộ phân loại lỗi trên `pack_wide` (mã / trước → sau):
+
+- `gold_outranked_in_pack` 54 → **38**
+- `gold_dropped_by_budget` 17 → 16
+- `gold_article_absent_from_hits` 7 → 7 (không đổi, đúng — retrieval không đổi)
+- `citation_set_disjoint` 52 → **59**
+- `hit_generation_cap` / `too_short_vs_reference` không đổi
+
+Giả thuyết "pack đầy trước khi article đúng vào được" **đúng hướng nhưng không
+đủ**: 16 case được chữa × 0.23 METEOR/case ÷ 460 ≈ **+0.008**, trong khi mức
+tăng thực đo là **+0.0274**. Khoảng 70% phần thưởng đến từ nguyên nhân khác,
+nhiều khả năng là ngữ cảnh bổ trợ cho những case vốn đã có article đúng. Không
+được ghi lại như thể cơ chế đã được giải thích trọn vẹn.
+
+Cái giá: `citation_set_disjoint` tăng 7 case — pack rộng hơn thì model thỉnh
+thoảng dẫn nhầm sang điều lân cận. Nhỏ so với phần được, nhưng có thật.
+
+Còn **38 case `gold_outranked_in_pack`** chưa khai thác.
+
+### 12.5 Chưa xong
+
+- Tách `max_total_chars` với `max_chunks_per_document`: `pack_wide` đổi hai
+  biến cùng lúc, chưa biết cái nào trả tiền (`pack_chars6000`, `pack_perdoc3`).
+- Thăm dò `8 / 8000 / 4` xem `6000/3` đã là knee chưa.
+- Mẫu hiệu chỉnh 60 case (`calibration_sample_60.json`) vẫn chưa gán tay, nên
+  precision từng mã của bộ phân loại **chưa được kiểm chứng**. Mọi con số ở
+  §12.4 là chỉ dấu, chưa phải bằng chứng đã nghiệm thu.
