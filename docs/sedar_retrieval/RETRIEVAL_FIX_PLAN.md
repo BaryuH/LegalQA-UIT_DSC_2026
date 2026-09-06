@@ -2687,11 +2687,39 @@ thoảng dẫn nhầm sang điều lân cận. Nhỏ so với phần được, n
 
 Còn **38 case `gold_outranked_in_pack`** chưa khai thác.
 
-### 12.5 Chưa xong
+### 12.5 Tách biến và dò đỉnh — đã xong 2026-09-06
 
-- Tách `max_total_chars` với `max_chunks_per_document`: `pack_wide` đổi hai
-  biến cùng lúc, chưa biết cái nào trả tiền (`pack_chars6000`, `pack_perdoc3`).
-- Thăm dò `8 / 8000 / 4` xem `6000/3` đã là knee chưa.
+| biến thể | k / chars / per-doc | METEOR | ROUGE-L | Δ METEOR vs cap768 | p |
+|---|---|---|---|---|---|
+| pack_k6 | 6 / 4000 / 2 | 0.5214 | 0.5462 | −0.0013 | 0.7148 |
+| pack_chars6000 | 6 / 6000 / 2 | 0.5290 | 0.5456 | +0.0064 | **0.2764** |
+| pack_perdoc3 | 6 / 4000 / 3 | 0.5368 | 0.5574 | +0.0141 | 0.0056 |
+| **pack_wide** | **6 / 6000 / 3** | **0.5501** | **0.5614** | **+0.0274** | 0.0001 |
+| pack_wider | 8 / 8000 / 4 | 0.5454 | 0.5620 | +0.0227 | 0.0040 |
+
+**`6 / 6000 / 3` là knee.** `pack_wider` so với `pack_wide`: METEOR −0.0047
+(KTC [−0.0159, +0.0065], p=0.4048), ROUGE-L +0.0006 (p=0.9070) — hoà trên cả
+hai trục. Gấp đôi ngân sách không mua thêm gì. Khi hai cấu hình hoà nhau về
+thống kê thì chọn cái rẻ: `6/6000/3` dùng ít context hơn và sinh nhanh hơn.
+Không dò rộng hơn nữa.
+
+**`max_chunks_per_document` là đòn bẩy; `max_total_chars` là điều kiện đủ.**
+Nới riêng ngân sách ký tự cho kết quả **không có ý nghĩa thống kê** (+0.0064,
+p=0.2764); nới riêng hạn mức chunk/văn bản thì có (+0.0141, p=0.0056). Nhưng
+0.0141 + 0.0064 = 0.0205, thấp hơn hẳn +0.0274 thực đo: hai biến **tương tác
+siêu cộng**, không cộng tuyến tính. Cơ chế: nới per-doc cho phép thêm passage
+cùng văn bản vào pack, nhưng chúng chỉ lọt nếu ngân sách ký tự cũng nới — mỗi
+biến một mình bị biến kia chặn.
+
+> Chỉnh lại §12.3: câu "nút thắt nằm ở `max_total_chars` và
+> `max_chunks_per_document`" đúng nhưng mờ. Chính xác hơn là per-doc mới là
+> đòn bẩy, chars chỉ mở đường cho nó. Ai chỉ nới chars sẽ không thấy gì.
+
+Điều này khớp với chẩn đoán "đúng điều, sai văn bản" chiếm 30/60 case trong mẫu
+hiệu chỉnh: khi một văn bản cần nhiều đoạn mới trả lời trọn, hạn mức 2
+chunk/văn bản cắt mất phần còn lại và model lấp chỗ trống bằng văn bản sinh đôi.
+
+### 12.6 Chưa xong
 - Mẫu hiệu chỉnh 60 case (`calibration_sample_60.json`) vẫn chưa gán tay, nên
   precision từng mã của bộ phân loại **chưa được kiểm chứng**. Mọi con số ở
   §12.4 là chỉ dấu, chưa phải bằng chứng đã nghiệm thu.
