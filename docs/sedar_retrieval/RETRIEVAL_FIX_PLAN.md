@@ -2830,6 +2830,11 @@ chỉ 17.3% là lỗi retrieval.
 
 ### 13.4 Cơ chế thật của tứ phân vị đáy: PACK BỊ BỎ ĐÓI
 
+> **Mối liên hệ nhân quả trong mục này đã BỊ BÁC BỎ — xem §15.** Hiện tượng mô
+> tả bên dưới (mảnh vụn, pack đói, quan hệ liều–đáp ứng) vẫn đúng; nhưng lấp
+> đầy pack **không** làm điểm tăng, nên pack đói không phải nguyên nhân của
+> thâm hụt.
+
 Tứ phân vị đáy giữ **42% tổng thâm hụt** (115 case, METEOR 0.2405, trần
 +0.0774) và **không mã lỗi nào giải thích được nó**. Đọc tay 20 case tệ nhất
 kèm văn bản evidence cho câu trả lời.
@@ -2965,3 +2970,84 @@ là quyết định đầu tiên cần xem lại. Reason code:
 - **Cài đặt ít xáo trộn hơn**: 411/460 câu đổi là nhiều hơn mức cần thiết cho
   một thay đổi ở dòng header. Một cách đưa định danh văn bản vào mà không đổi
   cấu trúc block có thể giữ được phần sửa dẫn chiếu với ít phương sai hơn.
+
+---
+
+## 15. §13.4 BỊ BÁC BỎ: pack đói không phải nguyên nhân — 2026-09-06
+
+§13.4 mô tả một cơ chế: mảnh vụn chiếm chỗ → pack đói → model hết nội dung để
+viết → điểm thấp. Tôi đã ghi rõ đó là **tương quan**, và ba run sau đây là phép
+thử nhân quả đầu tiên. **Cơ chế không đứng vững.**
+
+### 15.1 Can thiệp chữa được đúng thứ nó nhắm tới
+
+Tổng ký tự evidence thực trong pack:
+
+| run | p10 | p25 | p50 | pack<2000 | pack<3000 |
+|---|---|---|---|---|---|
+| packwide_docname (champion) | 1519 | 2682 | 4480 | 74 | 141 |
+| pack_minchars (lọc <120 ký tự) | 2150 | 3260 | 5036 | 39 | 98 |
+| pack_k16_minchars | 3902 | 4569 | 5340 | **7** | **19** |
+
+Đói gần như bị xoá sổ: 141 → **19** case. Cơ chế lọc hoạt động chính xác.
+
+### 15.2 Điểm không nhúc nhích
+
+So với `packwide_docname`:
+
+| run | METEOR | KTC | ROUGE-L | KTC |
+|---|---|---|---|---|
+| pack_minchars | +0.0039 | [−0.0034, +0.0114] | +0.0049 | [−0.0020, +0.0119] |
+| pack_k16_minchars | +0.0045 | [−0.0051, +0.0143] | +0.0018 | [−0.0070, +0.0106] |
+
+Cả bốn phép đo **không kết luận được**. Xoá 122 case pack đói mà không đổi điểm.
+
+### 15.3 Kết luận: tương quan có thật, nhân quả không
+
+Quan hệ liều–đáp ứng ở §13.4 là **thật** — pack nhỏ đi cùng điểm thấp, đơn điệu
+qua bốn mức. Nhưng lấp đầy pack **không** kéo điểm lên. Chiều nhân quả đi ngược
+lại hoặc qua một biến ẩn: case có pack nhỏ là case mà corpus **thực sự có ít
+nội dung liên quan** — điều luật ngắn, văn bản dạng danh mục, hoặc câu hỏi mà
+đáp án không nằm trong corpus. Nhồi thêm passage biên không tạo ra nội dung
+đang thiếu.
+
+Đây là lý do §13.4 được viết kèm cảnh báo "tương quan, không phải nhân quả", và
+lý do phép kiểm chứng nhân quả được đặt là **bắt buộc** thay vì tuỳ chọn. Cảnh
+báo đó đã cứu một kết luận sai khỏi đi vào tài liệu như sự thật.
+
+**Phần mô tả hiện tượng ở §13.4 giữ nguyên hiệu lực** — mảnh vụn có thật, chúng
+thắng top rank thật, `evidence_top_k` bind trước `max_total_chars` thật. Chỉ
+**mối liên hệ nhân quả với điểm số** bị bác bỏ.
+
+### 15.4 Chiều evidence đã cạn
+
+Ba can thiệp độc lập vào evidence pack, mỗi cái chữa đúng khuyết tật nó nhắm
+tới, và **không cái nào đổi điểm**:
+
+| can thiệp | khuyết tật được chữa | điểm |
+|---|---|---|
+| `--include-document-name` | dẫn sai văn bản 249 → 82 | không kết luận được |
+| `--min-passage-chars 120` | pack đói 141 → 98 | không kết luận được |
+| `+ evidence_top_k 16` | pack đói 141 → 19 | không kết luận được |
+
+Cộng với `pack_wider` (hoà) và `pack_k6` (null), **evidence pack không còn là
+ràng buộc**. Reader nhận đủ nội dung, đúng văn bản, đúng định danh — và vẫn cho
+ra kết quả như cũ.
+
+Không adopt cái nào trong hai cờ mới **trên cơ sở điểm số**. Ghi chú rủi ro
+tích luỹ: đã có hai thay đổi được nhận với KTC chứa 0 (`--include-document-name`
+nhận vì lý do đúng đắn pháp lý). Nhận thêm những thay đổi "dương nhưng không kết
+luận được" là cách âm thầm tích tụ biến thể chưa kiểm chứng. Nếu muốn nhận
+`--min-passage-chars` thì nên nhận vì **độ bền hệ thống** (ít pack thoái hoá
+hơn), và ghi rõ như vậy, chứ không phải vì +0.0039.
+
+### 15.5 Còn lại đúng hai chỗ
+
+**Reader** — đóng băng theo ràng buộc dự án. Sau khi evidence đã bị loại trừ
+bằng ba thí nghiệm, đây là nơi duy nhất còn khối lượng dư địa lớn.
+
+**Bộ máy đo lường** — 40% case không nhãn bạc; bộ phân loại chưa qua nghiệm thu
+(48.9% so với gate 0.80); ~20 phép so trên cùng 460 câu; metric mù trước tính
+đúng đắn pháp lý. Không cải thiện chỗ này thì mọi chẩn đoán tiếp theo vẫn mù.
+
+Không đề xuất thêm thí nghiệm nào ở nhánh retrieval/evidence.
