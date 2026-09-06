@@ -579,6 +579,7 @@ def generate_error_report(
     prediction_token_counts: Mapping[str, int] | None = None,
     reference_token_counts: Mapping[str, int] | None = None,
     max_new_tokens: int | None = None,
+    hit_depth: int | None = None,
 ) -> ErrorReport:
     """Join evaluation-only references with predictions, metrics, and retrieval."""
 
@@ -609,10 +610,24 @@ def generate_error_report(
             missing_inputs.append("gold_document_ids")
         if passage_article_keys is None:
             missing_inputs.append("passage_article_keys")
+        if hit_depth is None:
+            # A retrieval hit list is typically hundreds of candidates deep.
+            # Projecting all of it onto article keys makes RETRIEVAL_MISS mean
+            # "absent from the entire candidate list" and RERANKING_REGRESSION
+            # mean "not in the top few" - the first almost never fires and the
+            # second is nearly vacuous. The caller must state the depth within
+            # which a passage had a real chance of reaching the pack.
+            missing_inputs.append("hit_depth")
         if missing_inputs:
             raise ErrorReportError(
                 "auto_classify requires: " + ", ".join(missing_inputs)
             )
+        if hit_depth is not None and (
+            isinstance(hit_depth, bool)
+            or not isinstance(hit_depth, int)
+            or hit_depth <= 0
+        ):
+            raise ErrorReportError("hit_depth must be a positive integer")
         if max_new_tokens is not None and (
             isinstance(max_new_tokens, bool)
             or not isinstance(max_new_tokens, int)
@@ -707,7 +722,7 @@ def generate_error_report(
                 normalized_passage_article_keys,
             )
             hit_article_keys = _article_keys_for_ids(
-                trace.raw_hit_ids,
+                trace.raw_hit_ids[:hit_depth],
                 normalized_passage_article_keys,
             )
             dropped_article_keys = _article_keys_for_ids(

@@ -102,6 +102,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--max-new-tokens", type=int, default=None)
     parser.add_argument(
+        "--hit-depth",
+        type=int,
+        default=None,
+        help=(
+            "How many leading retrieval hits count as 'within reach of the "
+            "pack'. Required with --auto-classify: a full candidate list is "
+            "hundreds deep, and projecting all of it makes RETRIEVAL_MISS and "
+            "RERANKING_REGRESSION meaningless."
+        ),
+    )
+    parser.add_argument(
         "--thresholds",
         type=Path,
         default=None,
@@ -283,6 +294,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 for name, value in (
                     ("--labels", args.labels),
                     ("--passages", args.passages),
+                    ("--hit-depth", args.hit_depth),
                 )
                 if value is None
             ]
@@ -326,6 +338,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             prediction_token_counts=prediction_token_counts,
             reference_token_counts=reference_token_counts,
             max_new_tokens=args.max_new_tokens,
+            hit_depth=args.hit_depth,
         )
         write_error_report(
             report,

@@ -479,3 +479,42 @@ chúng là overfit và con số sẽ đẹp một cách vô nghĩa. Quy trình:
 3. **Chỉ số liệu trên test set mới** được dùng để đóng gate §6.
 
 Không được lặp lại vòng "sửa rồi chấm lại trên cùng tập" quá một lần.
+
+---
+
+## 12. Khiếm khuyết 4: `hit_article_keys` không có độ sâu — 2026-09-06
+
+Phát hiện khi phân xử 5 case mà nhãn người và nhãn máy mâu thuẫn. Cả hai đều
+đúng, vì đang trả lời hai câu hỏi khác nhau.
+
+Đo trên `val01_pack_wide_cap768`: `raw_hit_ids` có **p50 = min = max = 500**
+cho mọi case; `packed_chunk_ids` p50 = 4 (min 1, max 6). Spec bản đầu định
+nghĩa `hit_article_keys` từ **toàn bộ** `raw_hit_ids` mà không nêu độ sâu. Hệ
+quả là hai mã retrieval mất hết sức phân biệt:
+
+- `RETRIEVAL_MISS` chỉ kích hoạt khi gold không nằm trong 500 ứng viên — nó đo
+  article recall@500 (~98.5%), không đo lỗi. Đúng như quan sát: 7/460.
+- `RERANKING_REGRESSION` chỉ nói "gold không lọt top-4". Với 500 ứng viên thì
+  điều đó đúng với gần như mọi case bị lỗi, nên mã này không mang thông tin.
+
+**Đã sửa.** `hit_depth` là tham số **bắt buộc** khi bật `auto_classify`:
+`generate_error_report` từ chối chạy nếu thiếu, CLI có `--hit-depth`, và
+`raw_hit_ids` được cắt `[:hit_depth]` **trước khi** chiếu sang article key.
+Không có giá trị mặc định — chính một mặc định ngầm đã tạo ra khiếm khuyết này.
+
+Ngữ nghĩa sau khi sửa:
+
+- ngoài `hit_depth` → coi như **không tìm thấy**, vì với pipeline hiện tại
+  passage đó không có cơ hội nào vào pack;
+- trong `hit_depth` nhưng ngoài pack → **bị xếp sau**, và đây mới là điều đáng
+  hành động.
+
+Chọn `hit_depth` bao nhiêu là quyết định cần biện minh, không phải mặc định.
+Đề xuất **20** (cửa sổ ứng viên mà packer thực sự cân nhắc sau rerank), kèm
+kiểm tra độ nhạy ở 10 / 20 / 50: nếu phân bố hai mã đổi mạnh theo K thì bản
+thân điều đó là phát hiện về pipeline, không phải về bộ phân loại.
+
+Hệ quả ngoài spec này: `RETRIEVAL_FIX_PLAN.md` §12.4 đã bị **thu hồi**, vì con
+số "71 case pack-selection" và phép tính "giải thích ~30% mức tăng" đều dựng
+trên hai mã nói trên. Kết quả METEOR/ROUGE-L của `pack_wide` không bị ảnh
+hưởng — chúng đo trực tiếp, không qua bộ phân loại.

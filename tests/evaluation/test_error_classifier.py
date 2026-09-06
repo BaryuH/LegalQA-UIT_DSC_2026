@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from legal_rag.evaluation import (
+    ErrorReportError,
     ClassifierSignals,
     ClassifierThresholds,
     classify_case,
@@ -405,6 +406,7 @@ def test_manual_label_overrides_auto_label_and_summary_is_final_type(
         paths["metrics"],
         retrieval_path=paths["retrieval"],
         auto_classify=True,
+        hit_depth=20,
         manual_error_types={"case-a": "FORMAT_ERROR"},
         gold_article_keys={"case-a": frozenset({ARTICLE_12})},
         gold_document_ids={"case-a": frozenset({"doc-a"})},
@@ -443,6 +445,8 @@ def test_cli_auto_classify_is_fail_closed_without_labels(
             "--metrics",
             str(paths["metrics"]),
             "--auto-classify",
+            "--hit-depth",
+            "20",
             "--passages",
             str(paths["passages"]),
             "--markdown",
@@ -477,6 +481,8 @@ def test_cli_summary_contains_codes_but_not_reference_text(tmp_path: Path) -> No
             "--passages",
             str(paths["passages"]),
             "--auto-classify",
+            "--hit-depth",
+            "20",
             "--markdown",
             str(markdown),
             "--csv",
@@ -519,6 +525,8 @@ def test_cli_summary_does_not_require_gold_inference_artifacts(
             "--passages",
             str(paths["passages"]),
             "--auto-classify",
+            "--hit-depth",
+            "20",
             "--summary-out",
             str(summary),
             "--markdown",
@@ -630,3 +638,48 @@ def test_a_clause_only_reference_yields_no_document_identity() -> None:
         )
     )
     assert result.reason_code != "citation_document_mismatch"
+
+
+def test_hits_are_cut_to_the_depth_that_could_have_reached_the_pack() -> None:
+    """Gold sitting deep in a 500-long candidate list is not 'retrieved'.
+
+    Without a depth, RETRIEVAL_MISS only fires when gold is absent from the
+    whole candidate list and RERANKING_REGRESSION means no more than 'not in
+    the top few', so neither code carries information.
+    """
+
+    signals = _signals(
+        packed_article_keys=frozenset(),
+        packed_document_ids=frozenset(),
+        gold_document_ids=frozenset({"doc-z"}),
+        hit_article_keys=frozenset({ARTICLE_12}),
+    )
+    within_reach = classify_case(signals)
+    assert within_reach.error_type == "RERANKING_REGRESSION"
+
+    # Same case with gold beyond the depth the caller allowed: the projection
+    # is done by the caller, so an empty hit set is what "too deep" looks like.
+    out_of_reach = classify_case(
+        _signals(
+            packed_article_keys=frozenset(),
+            packed_document_ids=frozenset(),
+            gold_document_ids=frozenset({"doc-z"}),
+            hit_article_keys=frozenset(),
+        )
+    )
+    assert out_of_reach.error_type == "RETRIEVAL_MISS"
+
+
+def test_auto_classify_refuses_to_run_without_a_hit_depth(tmp_path: Path) -> None:
+    paths = _report_fixture(tmp_path)
+    with pytest.raises(ErrorReportError, match="hit_depth"):
+        generate_error_report(
+            paths["predictions"],
+            paths["references"],
+            paths["metrics"],
+            retrieval_path=paths["retrieval"],
+            auto_classify=True,
+            gold_article_keys={"case-a": frozenset({ARTICLE_12})},
+            gold_document_ids={"case-a": frozenset({"doc-a"})},
+            passage_article_keys={"p12": ARTICLE_12},
+        )

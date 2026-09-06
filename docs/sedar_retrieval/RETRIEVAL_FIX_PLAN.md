@@ -2666,7 +2666,39 @@ thêm vào không có chỗ để vào pack khi `max_total_chars` và
 `max_chunks_per_document` giữ nguyên. Nút thắt nằm ở hai tham số sau, không
 phải ở số ứng viên. Không tăng `evidence_top_k` một mình nữa.
 
-### 12.4 Kiểm chứng nhân quả: đúng hướng, giải thích được ~30%
+### 12.4 ĐÃ THU HỒI — số liệu bên dưới đo sai đại lượng
+
+> **Thu hồi 2026-09-06.** Toàn bộ diễn giải trong mục này dựa trên
+> `gold_outranked_in_pack` và `gold_article_absent_from_hits`, mà hai mã đó
+> được tính với `raw_hit_ids` = **500 ứng viên cho mọi case** (đã đo: p50 =
+> min = max = 500, trong khi pack chỉ 1-6 chunk). Hệ quả:
+>
+> - `RETRIEVAL_MISS` chỉ kích hoạt khi gold **không nằm trong top-500**, tức
+>   nó đang đo article recall@500 (~98.5%), không đo lỗi hệ thống. Đó là lý do
+>   nó chỉ có 7/460.
+> - `RERANKING_REGRESSION` chỉ nói "gold không lọt top-4" — với 500 ứng viên
+>   thì phát biểu đó gần như trống rỗng.
+>
+> Vì vậy con số **"71 case pack-selection"** và phép tính "16 case được chữa ×
+> 0.23 METEOR ≈ +0.008, giải thích ~30% mức tăng" **không có hiệu lực**. Chúng
+> không đo "retrieval tìm được rồi pack đánh rơi"; chúng đo "không nằm trong
+> top-4", điều đã hiển nhiên với mọi case bị lỗi.
+>
+> Điều này **không** ảnh hưởng tới kết quả của `pack_wide`: METEOR 0.5501 /
+> ROUGE-L 0.5614 và mọi khoảng tin cậy đều đo trực tiếp từ scorer, không đi qua
+> bộ phân loại. Cấu hình champion giữ nguyên. Chỉ **lời giải thích cơ chế** bị
+> thu hồi, và hiện **chưa có** lời giải thích nào thay thế đã được kiểm chứng.
+>
+> Nguyên nhân gốc là khiếm khuyết trong spec: `hit_article_keys` được định
+> nghĩa mà không nêu độ sâu. Đã sửa — `hit_depth` nay là tham số **bắt buộc**
+> khi bật `--auto-classify`, và bộ phân loại từ chối chạy nếu thiếu (xem
+> `ERROR_TAXONOMY_SPEC.md` §12). Mọi con số phân loại ở mục này cần đo lại với
+> một `hit_depth` có nghĩa trước khi được trích dẫn lại.
+
+<details>
+<summary>Nội dung gốc, giữ lại làm hồ sơ (KHÔNG dùng làm căn cứ)</summary>
+
+### 12.4 (thu hồi) Kiểm chứng nhân quả: đúng hướng, giải thích được ~30%
 
 Chạy lại bộ phân loại lỗi trên `pack_wide` (mã / trước → sau):
 
@@ -2686,6 +2718,8 @@ Cái giá: `citation_set_disjoint` tăng 7 case — pack rộng hơn thì model 
 thoảng dẫn nhầm sang điều lân cận. Nhỏ so với phần được, nhưng có thật.
 
 Còn **38 case `gold_outranked_in_pack`** chưa khai thác.
+
+</details>
 
 ### 12.5 Tách biến và dò đỉnh — đã xong 2026-09-06
 
