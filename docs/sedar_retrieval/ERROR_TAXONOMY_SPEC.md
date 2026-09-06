@@ -388,3 +388,94 @@ Hai lỗi khác của bản spec đầu, đã sửa ngay trong tài liệu này:
 Tồn đọng, không chặn: `tests/test_b2_freeze.py` có 2 test đỏ; đã xác nhận đỏ
 sẵn trước mọi thay đổi ở đây (`git stash` rồi chạy lại vẫn đỏ), nên là vấn đề
 riêng cần điều tra tách bạch.
+
+---
+
+## 11. Hiệu chỉnh vòng 1 thất bại, và ba khiếm khuyết đã sửa — 2026-09-06
+
+Mẫu 60 case trên `val01_pack_wide_cap768` đã được gán mù (không thấy
+`error_type`/`reason_code`/`confidence`) rồi mới đối chiếu.
+
+### 11.1 Kết quả: TRƯỢT
+
+Trên phần bộ phân loại **có phán đoán** (23/60): accuracy **17.39%**
+(gate ≥ 0.80), `rule_certain` **0/12** (gate ≥ 0.90). Không đạt ở mọi chiều.
+Theo §6, phân bố lỗi của bộ phân loại **không được dùng làm bằng chứng**.
+
+Lần chấm đầu tiên cho 6.67% và con số đó **sai về phương pháp**:
+`no_silver_label` cùng các mã `unclassified`, `token_count_unavailable`,
+`budget_projection_unavailable` là **lời từ chối phán đoán**, không phải nhãn
+taxonomy cạnh tranh. Đem so chúng với nhãn người như hai câu trả lời tranh nhau
+là lỗi phạm trù. Script so sánh nay tách hai nhóm; mọi lần chấm sau phải giữ
+cách tách này.
+
+### 11.2 Khiếm khuyết 1 (lớn nhất): cascade chặn nhầm các quy tắc không cần nhãn
+
+Quy tắc 4 (`no_silver_label` → OTHER) đứng **trước** các quy tắc so dẫn chiếu và
+so độ dài, trong khi những quy tắc đó chỉ đọc prediction và reference — chúng
+không cần nhãn bạc. Hệ quả: 29/60 case (48%) bị từ chối phán đoán dù phân loại
+được hoàn toàn bằng văn bản. Trong 29 case đó, nhãn người là **20
+`WRONG_ARTICLE_CITATION`**.
+
+**Đã sửa:** cascade tách làm hai nửa. Nửa retrieval đọc nhãn bạc và bị bỏ qua
+trọn vẹn khi thiếu nhãn; nửa answer-side chỉ đọc văn bản và **luôn** chạy. Kết
+quả retrieval vẫn thắng ở nơi nó áp dụng: nếu gold không vào được pack thì trả
+`unclassified` chứ không rơi xuống các quy tắc văn bản — một câu trả lời viết mà
+không có nguồn là hệ quả của retrieval, không phải lỗi hành văn.
+
+### 11.3 Khiếm khuyết 2: quy tắc dẫn chiếu mù đúng chế độ lỗi phổ biến nhất
+
+Máy gán `WRONG_ARTICLE_CITATION` cho 4 case, người gán 30. Nguyên nhân cơ chế:
+quy tắc đòi tập dẫn chiếu **giao rỗng**, nhưng chế độ lỗi thực tế là **đúng điều,
+sai văn bản** ("Điều 175 Luật Chứng khoán 2019" trong khi nguồn là "Điều 175
+Nghị định 155/2020"). Số điều trùng nên giao khác rỗng và quy tắc im lặng.
+
+**Đã sửa:** thêm `_document_identity_keys()` chiếu mỗi dẫn chiếu xuống **riêng
+định danh văn bản** (số hiệu, hoặc tên + năm), bỏ điều/khoản/điểm. Quy tắc mới
+`citation_document_mismatch` kích hoạt khi hai bên đều có định danh văn bản và
+giao rỗng — chạy **trước** quy tắc `citation_set_disjoint` cũ, vốn nay chỉ còn
+bắt trường hợp sai cả điều lẫn văn bản. Dẫn chiếu không mang định danh văn bản
+(chỉ "khoản 2 Điều này") đóng góp tập rỗng và quy tắc phải im lặng.
+
+Rủi ro đã biết: nếu prediction dẫn theo **số hiệu** còn reference dẫn theo
+**tên**, hai tập rời nhau và quy tắc báo nhầm. Vì vậy nó là `rule_heuristic`,
+và precision của nó phải do tập test mới quyết định.
+
+### 11.4 Khiếm khuyết 3: `UNDER_SPECIFIED` hút phần dư
+
+Máy gán 10, người gán 0. Nó là **triệu chứng độ dài**, không phải nguyên nhân,
+và vì đứng gần cuối cascade nên nó nuốt mọi case các quy tắc trước bỏ sót. Năm
+case `WRONG_ARTICLE_CITATION → UNDER_SPECIFIED` là hệ quả trực tiếp của khiếm
+khuyết 2. **Chưa sửa riêng** — dự kiến sửa khiếm khuyết 1 và 2 sẽ rút bớt phần
+dư mà nó hút. Nếu vòng hiệu chỉnh sau `UNDER_SPECIFIED` vẫn precision thấp thì
+hạ nó xuống `OTHER` theo §6, **không** nới ngưỡng.
+
+### 11.5 Một chỗ nhãn người sai, không phải máy
+
+Năm case (118857, 162345, 21269, 76041, 86151) người gán `RETRIEVAL_MISS` còn
+máy gán `EVIDENCE_TRUNCATION`/`RERANKING_REGRESSION`. Bằng chứng của người
+**yếu hơn**: evidence preview chỉ hiện `packed_chunk_id_only` — toàn ID, không
+có văn bản — nên kết luận "gold không có trong hits" là suy đoán từ số hiệu. Máy
+đọc nhãn bạc trực tiếp. Ghi nhận nhãn người sai ở năm case này; nếu máy đúng thì
+chúng là lỗi chọn pack, khớp với 71 case ở `RETRIEVAL_FIX_PLAN.md` §12.4.
+
+Bài học cho worksheet: bản gán mù nên kèm **văn bản** của evidence, không chỉ ID.
+
+### 11.6 Taxonomy thiếu một mã
+
+Ít nhất 5/60 case là **vòng lặp sinh thoái hoá** — model lặp cùng một câu 10-25
+lần tới khi hết token. Không mã nào mô tả đúng nên chúng bị dồn vào
+`OVER_VERBOSE`, làm bẩn mã đó. Đề xuất `DEGENERATE_REPETITION`. Theo §2, mở rộng
+`ERROR_TYPES` là quyết định của con người, không phải của bộ phân loại.
+
+### 11.7 Ràng buộc cho vòng hiệu chỉnh sau — bắt buộc
+
+Hai quy tắc vừa sửa được **sau khi đã đọc 60 case đó**. Chấm lại trên chính
+chúng là overfit và con số sẽ đẹp một cách vô nghĩa. Quy trình:
+
+1. Mẫu 60 hiện tại thành **dev set** — chỉ dùng để xem sửa có đúng hướng.
+2. Rút **mẫu 60 mới**, seed khác, cùng phân tầng theo tứ phân vị METEOR, làm
+   **test set**; gán mù lần nữa.
+3. **Chỉ số liệu trên test set mới** được dùng để đóng gate §6.
+
+Không được lặp lại vòng "sửa rồi chấm lại trên cùng tập" quá một lần.

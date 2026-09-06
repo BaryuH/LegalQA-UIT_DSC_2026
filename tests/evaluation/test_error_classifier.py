@@ -549,3 +549,84 @@ def test_cli_summary_does_not_require_gold_inference_artifacts(
         "REFERENCE_STYLE_VARIATION",
         "OTHER",
     }
+
+
+# ── Cascade split: answer-side rules must not be gated behind silver labels ──
+
+
+def test_wrong_document_is_caught_even_when_the_article_number_matches() -> None:
+    """The dominant real failure: right article text, wrong document.
+
+    Comparing whole citation tuples cannot see this, because the article
+    numbers agree; only document identity does.
+    """
+
+    result = classify_case(
+        _signals(
+            prediction="Căn cứ Điều 175 Luật Chứng khoán 2019 quy định như sau: ...",
+            reference="Tại Điều 175 Nghị định 155/2020/NĐ-CP quy định như sau: ...",
+        )
+    )
+    assert (result.error_type, result.reason_code) == (
+        "WRONG_ARTICLE_CITATION",
+        "citation_document_mismatch",
+    )
+
+
+def test_matching_document_does_not_trip_the_identity_rule() -> None:
+    result = classify_case(
+        _signals(
+            prediction="Căn cứ Điều 28 Luật Cư trú 2020 quy định như sau: ...",
+            reference="Căn cứ tại Điều 28 Luật Cư trú 2020 quy định như sau: ...",
+        )
+    )
+    assert result.error_type != "WRONG_ARTICLE_CITATION"
+
+
+def test_answer_side_rules_run_without_silver_labels() -> None:
+    """An unlabelled case is not automatically unclassifiable."""
+
+    result = classify_case(
+        _signals(
+            gold_article_keys=frozenset(),
+            gold_document_ids=frozenset(),
+            prediction="Căn cứ Điều 175 Luật Chứng khoán 2019 ...",
+            reference="Tại Điều 175 Nghị định 155/2020/NĐ-CP ...",
+        )
+    )
+    assert result.error_type == "WRONG_ARTICLE_CITATION"
+
+
+def test_unlabelled_case_that_no_answer_rule_explains_reports_the_coverage_gap(
+) -> None:
+    result = classify_case(
+        _signals(gold_article_keys=frozenset(), gold_document_ids=frozenset())
+    )
+    assert (result.error_type, result.reason_code) == ("OTHER", "no_silver_label")
+
+
+def test_retrieval_outcome_outranks_a_citation_mismatch() -> None:
+    """A wrong citation written without the source is a retrieval failure."""
+
+    result = classify_case(
+        _signals(
+            packed_article_keys=frozenset(),
+            hit_article_keys=frozenset(),
+            packed_document_ids=frozenset(),
+            prediction="Căn cứ Điều 175 Luật Chứng khoán 2019 ...",
+            reference="Tại Điều 175 Nghị định 155/2020/NĐ-CP ...",
+        )
+    )
+    assert result.error_type == "RETRIEVAL_MISS"
+
+
+def test_a_clause_only_reference_yields_no_document_identity() -> None:
+    """Without a document on both sides the rule must stay silent."""
+
+    result = classify_case(
+        _signals(
+            prediction="Theo khoản 2 Điều này thì người nộp thuế phải kê khai.",
+            reference="Theo khoản 3 Điều này thì người nộp thuế phải kê khai.",
+        )
+    )
+    assert result.reason_code != "citation_document_mismatch"
