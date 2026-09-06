@@ -75,3 +75,30 @@ def test_cases_missing_the_metric_are_excluded() -> None:
     report = _deficit.deficit_by_group(per_case, {"g": ["a", "b"]})
     assert report["cases"] == 1
     assert report["groups"][0]["n"] == 1
+
+
+def test_a_group_above_the_corpus_mean_has_no_ceiling_however_large() -> None:
+    """Summing below-mean cases rewards size; lifting the group mean does not.
+
+    A group covering half the corpus accumulates a large within-group
+    shortfall even when its own mean sits above the corpus mean. That is not
+    a gain anyone can collect, and ranking on it puts the wrong group first.
+    """
+
+    per_case, groups = _corpus({"big_mixed": (236, 0.57), "small_bad": (38, 0.34)})
+    report = _deficit.deficit_by_group(per_case, groups)
+    big = next(g for g in report["groups"] if g["group"] == "big_mixed")
+    small = next(g for g in report["groups"] if g["group"] == "small_bad")
+    assert big["mean_metric"] > report["mean_metric"]
+    assert big["ceiling_if_lifted_to_mean"] == pytest.approx(0.0)
+    assert small["ceiling_if_lifted_to_mean"] > 0.0
+    assert report["groups"][0]["group"] == "small_bad"
+
+
+def test_within_group_shortfall_is_reported_and_never_smaller() -> None:
+    per_case, groups = _corpus({"a": (60, 0.30), "b": (140, 0.70)})
+    report = _deficit.deficit_by_group(per_case, groups)
+    for g in report["groups"]:
+        # Equal for a uniform group, larger for a mixed one. The tolerance is
+        # for float accumulation, not for slack in the relationship.
+        assert g["within_group_shortfall"] >= g["ceiling_if_lifted_to_mean"] - 1e-9

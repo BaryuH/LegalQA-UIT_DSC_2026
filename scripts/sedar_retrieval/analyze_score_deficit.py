@@ -61,6 +61,7 @@ def deficit_by_group(
             "tu phan vi 4 (tot nhat)": ordered[3 * n // 4 :],
         }
 
+    corpus_mean = mean(scored.values()) if scored else 0.0
     rows = []
     for name, ids in buckets.items():
         if not ids:
@@ -73,12 +74,21 @@ def deficit_by_group(
             "mean_metric": mean(scored[i] for i in ids),
             "deficit": deficit,
             "share_of_deficit": deficit / total_deficit if total_deficit else 0.0,
-            # What a full fix of this group would be worth globally: lifting
-            # every case in it to the corpus mean. An upper bound, and a
-            # correlational one - do not read it as a promise.
+            # What lifting this group's MEAN to the corpus mean would be
+            # worth globally. Summing each below-mean case instead rewards
+            # group size: a group covering half the corpus scores highly on
+            # that even when its own mean sits above the corpus mean, which
+            # is not a gain anyone can collect.
             "ceiling_if_lifted_to_mean": (
-                sum(max(0.0, mean(scored.values()) - scored[i]) for i in ids)
+                len(ids)
+                * max(0.0, corpus_mean - mean(scored[i] for i in ids))
                 / len(scored)
+            ),
+            # Kept for contrast: the sum of every below-mean shortfall inside
+            # the group. Always at least as large, and misleading on its own
+            # for a group that mixes strong and weak cases.
+            "within_group_shortfall": (
+                sum(max(0.0, corpus_mean - scored[i]) for i in ids) / len(scored)
             ),
             "worst_ids": sorted(ids, key=lambda c: scored[c])[:8],
         })
@@ -119,16 +129,20 @@ def main(argv=None) -> int:
     print(f"{report['cases']} case | {report['metric']} trung binh "
           f"{report['mean_metric']:.4f} | tong tham hut {report['total_deficit']:.1f}\n")
     print(f"{'nhom':42s} {'n':>4s} {'%case':>7s} {'tb':>7s} "
-          f"{'tham hut':>9s} {'%tham hut':>10s} {'tran':>8s}")
+          f"{'%tham hut':>10s} {'tran':>8s} {'trong nhom':>11s}")
     for r in report["groups"]:
         print(f"{r['group'][:42]:42s} {r['n']:4d} {r['share_of_cases']:7.1%} "
-              f"{r['mean_metric']:7.4f} {r['deficit']:9.1f} "
-              f"{r['share_of_deficit']:10.1%} {r['ceiling_if_lifted_to_mean']:+8.4f}")
+              f"{r['mean_metric']:7.4f} {r['share_of_deficit']:10.1%} "
+              f"{r['ceiling_if_lifted_to_mean']:+8.4f} "
+              f"{r['within_group_shortfall']:+11.4f}")
     print("\nID te nhat moi nhom:")
     for r in report["groups"]:
         print(f"  {r['group'][:36]:36s} {', '.join(r['worst_ids'])}")
-    print("\n'tran' = muc tang toan cuc neu ca nhom duoc keo len trung binh corpus."
-          "\nDay la tran tren va mang tinh tuong quan, khong phai loi hua.")
+    print("\n'tran'       = keo TRUNG BINH NHOM len trung binh corpus. Nhom da o"
+          " tren trung binh thi bang 0."
+          "\n'trong nhom' = cong thieu hut cua tung case duoi trung binh. Luon lon"
+          " hon, va thuong lon chi vi nhom dong."
+          "\nCa hai deu la tran tren va mang tinh tuong quan, khong phai loi hua.")
     if args.json_out:
         args.json_out.write_text(
             json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
