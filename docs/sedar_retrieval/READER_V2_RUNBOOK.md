@@ -197,17 +197,35 @@ Bump `dataset_version` sang `sedar-sft-ltr-v2` trong config trước khi build t
 
 ### P1.2 Đo lại ngân sách token — **trước** khi train
 
+**Không dùng `profile_sequence_length.py`.** Script đó `raise SystemExit` ngay
+khi truyền `--tokenizer-mode ss04c_exact`, và đường duy nhất chạy được của nó là
+`MockWhitespaceTokenizer` — tức đếm theo whitespace, đúng sai số đã làm SS-06
+kết luận sai rằng cap 512 không binding. Nó cũng build lại dataset bằng builder
+frozen-B2 chứ không đọc dataset LTR.
+
+Dùng công cụ mới (2026-09-07), đọc `train.jsonl` đã build và tokenizer thật:
+
 ```bash
-python scripts/sedar_sft/profile_sequence_length.py \
-  --config configs/sedar_sft_train_ltr.yaml \
-  --tokenizer-mode ss04c_exact \
-  --max-examples 0 \
-  --out artifacts/sedar_sft/tokenization/length_profile_v2.json
+python scripts/sedar_sft/profile_dataset_tokens.py \
+  --dataset-dir <artifacts/sedar_sft/datasets/sedar-sft-ltr-v2> \
+  --tokenizer /mnt/G/sedar-legalqa/models/vilegalqwen3-1.7b-base \
+  --max-seq-length 4096
 ```
 
-**`--tokenizer-mode ss04c_exact` là bắt buộc.** Mặc định của script là
-`provisional_whitespace`, và đếm theo whitespace chính là sai số đã làm hỏng
-SS-06 một lần (`tokenizer: whitespace_estimator_only`). Đừng để nó chạy mặc định.
+Nó dựng lại đúng chuỗi huấn luyện mà `GenerativePromptBuilder.build_training`
+tạo ra (`train_template.format(question=..., evidence=rendered_text)`, target
+tách riêng), đếm bằng `AutoTokenizer` với `local_files_only=True`, và ghi
+`token_budget.json` cạnh dataset. Chỉ ghi số và case_id; không ghi câu hỏi,
+evidence hay đáp án.
+
+Exit code 0 = `BUDGET_HOLDS`, exit code 3 = `RAISE_MAX_SEQ_LENGTH`. Nó khuyến
+nghị nâng lên 8192 khi **một trong hai** điều xảy ra: có ít nhất một ví dụ vượt
+`max_seq_length` (dù chỉ một — truncation không được lấy trung bình, nó cắt đuôi
+đáp án mục tiêu mà loss vẫn đẹp), hoặc p99 vượt 3800 tức không còn chỗ cho cap
+sinh 768 nằm lên trên prompt.
+
+Nếu verdict là `RAISE_MAX_SEQ_LENGTH`: train với `--max-seq-length 8192` và đo
+lại VRAM trước khi chạy full.
 
 
 Bắt buộc, bằng tokenizer của base model, không phải đếm từ (đây đúng lớp lỗi
