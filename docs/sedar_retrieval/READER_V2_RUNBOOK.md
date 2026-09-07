@@ -19,6 +19,66 @@ Gate đã pre-register ở `configs/sedar_sft/reader_v2_gates.yaml`. File đó p
 
 ---
 
+## Phase S — chuẩn bị trên server
+
+### S.1 Pull
+
+```bash
+cd /path/to/LegalQA-UIT_DSC_2026
+git fetch origin
+git status --short          # phải sạch; nếu bẩn thì stash trước
+git checkout codex/16_baseline
+git pull --ff-only origin codex/16_baseline
+git log --oneline -5        # kỳ vọng 4 commit mới trên 504d0fd
+```
+
+`--ff-only` là cố ý: nếu server có commit riêng thì lệnh này **fail** thay vì
+tạo merge commit im lặng. Fail thì dừng lại xem server đang có gì.
+
+### S.2 Env
+
+Theo `SERVER_TASK_GUIDE.md` §0.1. Lưu ý một chỗ lệch: guide viết
+`SEDAR_WORK_ROOT=/mnt/F/sedar-legalqa`, nhưng mọi artifact trong memory-bank
+nằm ở `/mnt/G/sedar-legalqa`. Dùng đúng cái ổ đang chứa artifact, đừng dùng
+mặc định trong script.
+
+```bash
+export SEDAR_WORK_ROOT=/mnt/G/sedar-legalqa      # kiểm tra lại trước khi chạy
+bash scripts/sedar_sft/bootstrap_linux_env.sh
+source "$SEDAR_WORK_ROOT/venvs/sedar-sft/bin/activate"
+export PYTHONPATH="$PWD:$PWD/src"
+export HF_HOME="$SEDAR_WORK_ROOT/hf-cache"
+export TORCH_HOME="$SEDAR_WORK_ROOT/torch-cache"
+python -V                                        # phải >= 3.11
+```
+
+### S.3 Chạy test — làm trước mọi thứ khác
+
+Code mới chưa từng được chạy qua pytest: VM local chỉ có Python 3.10 và không
+có pydantic. `splits.py` thì đã được kiểm bằng tay (7/7 thân test pass) vì nó
+chỉ dùng thư viện chuẩn, hai bộ kia chưa.
+
+```bash
+pytest tests/test_reader_v2_splits.py tests/test_sedar_sft_ltr_dataset.py -q
+```
+
+Nếu đỏ, **dừng** và gửi output về. Ba test CUDA đã đỏ từ trước
+(`test_semantic_reranker`, `test_reader_profiles`, `test_gold_leakage`) —
+chúng đọc CUDA state thật nên không thể xanh trên máy có GPU; bỏ qua.
+
+### S.4 P0.4 — probe stack
+
+```bash
+python scripts/sedar_sft/probe_environment.py
+python scripts/sedar_sft/inspect_training_infra.py
+```
+
+Điều kiện đi tiếp: `cuda_available: true`, và `peft` / `accelerate` /
+`bitsandbytes` / `trl` / `datasets` đều có mặt. Artifact hiện tại trong repo là
+ảnh của máy Windows (`cuda_available: false`, bốn package MISSING) — nó sẽ bị
+ghi đè bằng số thật của server. Thiếu package nào thì cài trong venv, đừng
+đụng system Python.
+
 ## Phase 0 — điều kiện tiên quyết (không train được nếu chưa xong)
 
 ### P0.1 Xác minh loại trừ trùng lặp
@@ -136,6 +196,19 @@ hash v1 — đó là lý do override chỉ được ghi vào hash khi khác defa
 Bump `dataset_version` sang `sedar-sft-ltr-v2` trong config trước khi build thật.
 
 ### P1.2 Đo lại ngân sách token — **trước** khi train
+
+```bash
+python scripts/sedar_sft/profile_sequence_length.py \
+  --config configs/sedar_sft_train_ltr.yaml \
+  --tokenizer-mode ss04c_exact \
+  --max-examples 0 \
+  --out artifacts/sedar_sft/tokenization/length_profile_v2.json
+```
+
+**`--tokenizer-mode ss04c_exact` là bắt buộc.** Mặc định của script là
+`provisional_whitespace`, và đếm theo whitespace chính là sai số đã làm hỏng
+SS-06 một lần (`tokenizer: whitespace_estimator_only`). Đừng để nó chạy mặc định.
+
 
 Bắt buộc, bằng tokenizer của base model, không phải đếm từ (đây đúng lớp lỗi
 đã làm hỏng SS-06). Ghi p50/p95/p99/max ra artifact.
