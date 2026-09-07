@@ -30,6 +30,37 @@ reranker:
   device: cuda
   batch_size: 8
   max_length: 512
+# HISTORICAL RECORD — these are the values that produced `sedar-sft-ltr-v1`
+# (the reader now deployed as vilegal-sedar-v1). They are deliberately NOT
+# updated to the champion renderer, because this block documents what v1 was
+# trained on; changing it would erase that.
+#
+# Two things to know before trusting this block:
+#  1. It is not authoritative for the dataset build.
+#     scripts/sedar_sft/build_dataset_from_ltr.py takes evidence from CLI flags
+#     (--evidence-top-k / --max-total-chars / --max-chunks-per-document,
+#     argparse defaults 4 / 4000 / 2) and never reads project.evidence.
+#     project.evidence is consumed by pipeline.py and b2_freeze.py only.
+#  2. It cannot express the champion renderer, and is not meant to.
+#     EvidenceSection is pydantic `extra="forbid"` with exactly these three
+#     fields, and it is left that way on purpose: project.evidence feeds
+#     pipeline.py and b2_freeze.py, which are frozen paths.
+#     The renderer settings live on the dataset builder instead. Since
+#     2026-09-07, LtrDatasetBuildConfig and
+#     scripts/sedar_sft/build_dataset_from_ltr.py carry all five of
+#     candidate_window / body_source / dedup_article_mode /
+#     include_document_name / min_passage_chars, with flag names identical to
+#     scripts/sedar_retrieval/run_sedar_e2e.py and defaults equal to the
+#     historical v1 behaviour.
+#
+# Reader v2 (READER_RETRAIN_V2_PROPOSAL.md §2.1) therefore needs no edit here.
+# It needs the build to be invoked with the champion renderer:
+#   --evidence-top-k 6 --max-total-chars 6000 --max-chunks-per-document 3
+#   --dedup-article-mode article --include-document-name
+# Verify it landed: the dataset manifest must show `renderer_overrides` with
+# those two flags, and `retrieval_config_hash` must differ from v1's. A default
+# build still reproduces v1's hash exactly - overrides enter the hash only when
+# they differ from the defaults. See READER_V2_RUNBOOK.md P1.1.
 evidence:
   evidence_top_k: 4
   max_total_chars: 4000
@@ -78,6 +109,9 @@ finetuned_reader:
   inference_prompt_path: configs/prompts/sedar_sft_infer_v1.txt
   checkpoint_path: checkpoints/sedar_sft/<run_id>
   checkpoint_manifest_path: checkpoints/sedar_sft/<run_id>/checkpoint_manifest.json
+  # Training-time record only; generation length is set per run by
+  # run_sedar_e2e.py --max-new-tokens. The deployed champion is 768
+  # (SS-06, 2026-09-05). Left at 512 because that is what v1 recorded.
   max_new_tokens: 512
   overlap_policy: exclude_and_record
   overlap_remediation_id: ftr03-train-overlap-exclusion-v1

@@ -1,4 +1,25 @@
 # FTR-04 decision record. Do not replace UNRESOLVED values by guesses.
+#
+# SCOPE — read before assuming this file is stale.
+# It governs the LEGACY `finetuned_reader` profile only (the qwen3.5-4b track
+# that was never unblocked). It does NOT describe the reader in production.
+# The deployed reader is `vilegal-sedar-v1`: base
+# vilegalqwen3-1.7b-base @ 258c56ed40529cced26fa7fcc3ecc0663e914c18, QLoRA
+# r=16 / alpha=32 / nf4, declared in configs/sedar_sft_train_ltr.yaml.
+# The two tracks are separate on purpose; do not merge them.
+#
+# LIVE GATE — `decision.inference_authorized` is not documentation.
+# scripts/run_warmup_validation_eval.py greps this file for the literal
+# authorization string and raises if it is absent (it is a substring check
+# on the raw text, not a YAML lookup, so this comment block must never
+# spell that string out - writing it even inside a comment would flip the
+# gate open). `false` therefore
+# fail-closes local finetuned_reader inference, which is correct on this box:
+# hardware.cuda_available is false and the base checkpoint is not present.
+# Do NOT flip it to unblock a run — that unlocks an inference path the machine
+# cannot execute, and the failure surfaces later and less clearly.
+# The values below are a true record of the Windows dev box, so they are left
+# exactly as measured. Anything that changes here must be re-probed, not edited.
 profile: finetuned_reader
 status: blocked
 requested_model:
