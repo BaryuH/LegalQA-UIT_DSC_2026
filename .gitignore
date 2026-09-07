@@ -103,3 +103,4 @@ cursor-goal/
 
 # Historical local audit; not part of the implementation contract
 docs/integration-audit.md
+calibration_local/
