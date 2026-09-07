@@ -185,14 +185,40 @@ Code plumbing đã xong (2026-09-07): `LtrDatasetBuildConfig` và
 `build_dataset_from_ltr.py` giờ nhận đủ 5 trường renderer, tên flag **giống hệt**
 `run_sedar_e2e.py`. Default vẫn là hành vi v1, nên phải truyền tường minh:
 
+**Renderer champion đã đọc từ artifact, không lấy từ ghi chú** (07-09).
+`outputs/task20_pack_ablation/packwide_docname_cap768/config.json` có
+`config_hash` khớp `inference_config_hash` trong metrics.json, nên nó là cấu
+hình đã sinh ra điểm. Nó ghi **`dedup_article_mode: "off"`**, không phải
+`article` như dòng champion trong `activeContext.md`. Không truyền
+`--dedup-article-mode`.
+
+Passages và rankings cũng lấy từ đó:
+
+```text
+passages   .../views/parser_blankline_20260901/passages_r2a.jsonl
+retrieval  .../runs/continue_parser_blankline_20260903_120640/qwen_warmup_top500.jsonl
+variant    qwen_warmup_top500          <- Qwen, KHÔNG phải LTR
+```
+
 ```bash
 python scripts/sedar_sft/build_dataset_from_ltr.py \
   --config configs/sedar_sft_train_ltr.yaml \
-  --rankings <ltr_rankings_train.jsonl> \
-  --passages <passages_r2a.jsonl> \
+  --rankings <ranking Qwen của split train — xem ghi chú dưới> \
+  --passages /mnt/G/sedar-legalqa/artifacts/sedar_retrieval/views/parser_blankline_20260901/passages_r2a.jsonl \
   --evidence-top-k 6 --max-total-chars 6000 --max-chunks-per-document 3 \
-  --dedup-article-mode article --include-document-name
+  --include-document-name
 ```
+
+**Chưa chốt được `--rankings`.** `ltr_train_eff6609.jsonl` là ranking **LTR**
+cho split train, nhưng champion inference xếp hạng bằng **Qwen**
+(`qwen_warmup_top500`), theo đúng quyết định 04-09 bỏ RRF 1.0/1.0 và xếp bằng
+Qwen. Dùng ranking LTR để train trong khi inference dùng Qwen là tái tạo lại
+đúng loại lệch phân bố mà cả vòng P1 tồn tại để xoá — chỉ đổi trục: thay vì
+lệch renderer thì lệch ranking.
+
+Phải tìm ranking Qwen cho split train (`qwen_train_*top500.jsonl` hoặc tương
+đương). Nếu không có, phải sinh nó trước khi build dataset — đừng lấy LTR thay
+thế.
 
 Kiểm tra ngay sau khi build — hai thứ này là bằng chứng plumbing thật sự chạy:
 

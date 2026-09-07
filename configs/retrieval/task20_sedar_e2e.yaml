@@ -25,24 +25,43 @@ data:
   manifest_path: artifacts/sedar_sft/validation/clean_warmup_manifest.json
   split: warmup
 
-# DEPLOYED champion. Promoted 2026-09-06 (evidence pack), 2026-09-05 (cap 768),
-# 2026-09-06 (document name, reason code
-# `enabled_for_legal_correctness_not_score`). clean-460: METEOR 0.5501 /
-# ROUGE-L 0.5614. Both pre-registered gates pass without waiver.
+# DEPLOYED champion, transcribed from the run that produced the scored
+# predictions: outputs/task20_pack_ablation/packwide_docname_cap768/config.json,
+# whose `config_hash` equals the `inference_config_hash` in
+# eval/task20_pack_ablation/val01_packwide_docname_cap768/metrics.json
+# (3da06469...). clean-460: METEOR 0.5458 / ROUGE-L 0.5640.
+#
+# CORRECTED 2026-09-07. This block previously said
+# `dedup_article_mode: article`, copied from the champion line in
+# memory-bank/activeContext.md. The deployed run has it **off**. The run
+# artifact wins over the note: its hash is what scored.
 champion:
   evidence:
     evidence_top_k: 6
     max_total_chars: 6000
     max_chunks_per_document: 3
-    dedup_article_mode: article
+    dedup_article_mode: "off"
     include_document_name: true
+    body_source: raw_text
+    candidate_window: 6      # == evidence_top_k, so backfill_enabled is false
+  retrieval:
+    variant: qwen_warmup_top500
+    # Not LTR. The 2026-09-04 decision dropped RRF 1.0/1.0 and ranked with
+    # Qwen alone; the deployed e2e run followed that, not the LambdaRank path
+    # still named in the TASK 21 champion description.
+    path: >-
+      /mnt/G/sedar-legalqa/artifacts/sedar_retrieval/runs/
+      continue_parser_blankline_20260903_120640/qwen_warmup_top500.jsonl
+    passages: >-
+      /mnt/G/sedar-legalqa/artifacts/sedar_retrieval/views/
+      parser_blankline_20260901/passages_r2a.jsonl
   generation:
     max_new_tokens: 768
     # REJECTED, do not retry: no_repeat_ngram_size / repetition_penalty
     # (-0.127 METEOR, citation drift). RETRIEVAL_FIX_PLAN.md §11.4.
   cli: >-
     --evidence-top-k 6 --max-total-chars 6000 --max-chunks-per-document 3
-    --dedup-article-mode article --include-document-name --max-new-tokens 768
+    --include-document-name --max-new-tokens 768
 
 # Superseded baseline, kept because every paired CI on record is measured
 # against it. clean-460: METEOR 0.5010 / ROUGE-L 0.5563.
