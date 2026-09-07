@@ -206,3 +206,110 @@ def test_sedar_ltr_config_profile() -> None:
         "up_proj",
         "v_proj",
     )
+
+
+def _renderer_builder() -> GenerativePromptBuilder:
+    return GenerativePromptBuilder.from_files(
+        REPO / "configs" / "prompts" / "sedar_sft_train_v1.txt",
+        REPO / "configs" / "prompts" / "sedar_sft_infer_v1.txt",
+        version="sedar-sft-ltr-v1",
+    )
+
+
+def _renderer_case() -> LegalQuestion:
+    return LegalQuestion(
+        id="t1",
+        question="Người lao động được nghỉ hằng năm bao nhiêu ngày?",
+        answer="Theo Điều 1, người lao động được nghỉ hằng năm.",
+        split="train",
+    )
+
+
+def test_renderer_defaults_reproduce_v1_and_record_nothing() -> None:
+    """A default build must stay fingerprint-compatible with sedar-sft-ltr-v1."""
+
+    config = LtrDatasetBuildConfig(
+        rankings_path=Path("rankings.jsonl"),
+        passages_path=Path("passages.jsonl"),
+    )
+    assert config.renderer_overrides() == {}
+    assert config.renderer_settings() == {
+        "candidate_window": 0,
+        "body_source": "raw_text",
+        "dedup_article_mode": "off",
+        "include_document_name": False,
+        "min_passage_chars": 0,
+    }
+
+
+def test_champion_renderer_is_recorded_as_an_override() -> None:
+    config = LtrDatasetBuildConfig(
+        rankings_path=Path("rankings.jsonl"),
+        passages_path=Path("passages.jsonl"),
+        evidence_top_k=6,
+        max_total_chars=6000,
+        max_chunks_per_document=3,
+        dedup_article_mode="article",
+        include_document_name=True,
+    )
+    assert config.renderer_overrides() == {
+        "dedup_article_mode": "article",
+        "include_document_name": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"dedup_article_mode": "not-a-mode"},
+        {"body_source": "not-a-source"},
+        {"candidate_window": -1},
+        {"min_passage_chars": -1},
+    ],
+)
+def test_renderer_settings_fail_closed(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        LtrDatasetBuildConfig(
+            rankings_path=Path("rankings.jsonl"),
+            passages_path=Path("passages.jsonl"),
+            **kwargs,
+        )
+
+
+def test_include_document_name_reaches_the_supervised_evidence() -> None:
+    """The renderer flag must change the text the reader is trained on.
+
+    Without this the training pack shows the zip member on the ``Văn bản``
+    header while champion inference shows the real document name, which is the
+    train/inference mismatch READER_RETRAIN_PLAN.md section 2 identifies.
+    """
+
+    builder = _renderer_builder()
+    cases = (_renderer_case(),)
+    rankings = {
+        "t1": (RankedPassageCandidate(passage_id="p-1", rank=1, score=0.9),),
+    }
+    passages = {"p-1": _passage("p-1", "Người lao động được nghỉ hằng năm.")}
+
+    def build(*, include_document_name: bool) -> str:
+        examples, _, failures = build_sft_examples_from_ltr_rankings(
+            cases,
+            rankings,
+            passages,
+            prompt_builder=builder,
+            evidence_config=PassageEvidenceConfig(
+                evidence_top_k=1,
+                include_document_name=include_document_name,
+            ),
+            retrieval_config_hash="ltr-cfg",
+            index_fingerprint="idx",
+        )
+        assert not failures
+        assert len(examples) == 1
+        return examples[0].evidence.rendered_text
+
+    without_name = build(include_document_name=False)
+    with_name = build(include_document_name=True)
+    assert "Văn bản: Luật mẫu" in with_name
+    assert "Văn bản: Luật mẫu" not in without_name
+    assert with_name != without_name

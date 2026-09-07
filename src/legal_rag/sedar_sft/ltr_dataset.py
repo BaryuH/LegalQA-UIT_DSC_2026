@@ -28,6 +28,7 @@ from ..questions import load_questions
 from ..schemas import LegalQuestion
 from ..sedar_retrieval.corpus.schema import CanonicalPassage
 from ..sedar_retrieval.evidence.passage_packer import (
+    ArticleDedupMode,
     PassageEvidenceConfig,
     PassageEvidencePackError,
     RankedPassageCandidate,
@@ -35,12 +36,27 @@ from ..sedar_retrieval.evidence.passage_packer import (
     pack_passage_retrieval_evidence,
 )
 from ..sedar_retrieval.retrieval.bm25_passages import corpus_fingerprint
-from ..sedar_retrieval.retrieval.passage_adapter import load_passages_jsonl
+from ..sedar_retrieval.retrieval.passage_adapter import BodySource, load_passages_jsonl
 from .contracts import SEDAR_METHOD, SEDAR_TRAINING_ROLE
 from .dataset import SedarDatasetBuildResult, remap_examples_to_sedar_contract
 
 LTR_EVIDENCE_SOURCE = "ltr_passage_rankings"
 LTR_DATASET_SCHEMA = "sedar_sft.ss05b.ltr_dataset.v1"
+
+DEDUP_ARTICLE_MODES: tuple[str, ...] = ("off", "article", "clause", "first")
+BODY_SOURCES: tuple[str, ...] = ("raw_text", "reader_text")
+
+# Renderer settings whose defaults reproduce the `sedar-sft-ltr-v1` build byte
+# for byte. `retrieval_config_hash` records them only when they differ from
+# these values, so a v1 rebuild keeps its recorded fingerprint while any
+# renderer change produces a new one.
+_RENDERER_DEFAULTS: dict[str, object] = {
+    "candidate_window": 0,
+    "body_source": "raw_text",
+    "dedup_article_mode": "off",
+    "include_document_name": False,
+    "min_passage_chars": 0,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +69,19 @@ class LtrDatasetBuildConfig:
     evidence_top_k: int = 4
     max_total_chars: int = 4000
     max_chunks_per_document: int = 2
+    # Renderer settings. Defaults are the historical v1 behaviour on purpose.
+    # The deployed champion inference renderer differs in exactly two of them:
+    # dedup_article_mode="article" and include_document_name=True
+    # (candidate_window stayed 0, body_source stayed raw_text,
+    # min_passage_chars stayed 0 - see task20_sedar_e2e.yaml). Training and
+    # inference must agree - a mismatch is the READER_RETRAIN_PLAN.md section 2
+    # defect, where every evidence experiment reads as null because the reader
+    # never learned to use the fields it is now shown.
+    candidate_window: int = 0
+    body_source: BodySource = "raw_text"
+    dedup_article_mode: ArticleDedupMode = "off"
+    include_document_name: bool = False
+    min_passage_chars: int = 0
     progress_every: int = 100
 
     def __post_init__(self) -> None:
@@ -64,8 +93,32 @@ class LtrDatasetBuildConfig:
             raise ValueError("max_total_chars must be positive")
         if self.max_chunks_per_document <= 0:
             raise ValueError("max_chunks_per_document must be positive")
+        if self.candidate_window < 0:
+            raise ValueError("candidate_window must be >= 0")
+        if self.min_passage_chars < 0:
+            raise ValueError("min_passage_chars must be >= 0")
+        if self.body_source not in BODY_SOURCES:
+            raise ValueError(f"body_source must be one of {BODY_SOURCES}")
+        if self.dedup_article_mode not in DEDUP_ARTICLE_MODES:
+            raise ValueError(
+                f"dedup_article_mode must be one of {DEDUP_ARTICLE_MODES}"
+            )
         if self.progress_every <= 0:
             raise ValueError("progress_every must be positive")
+
+    def renderer_settings(self) -> dict[str, object]:
+        """Effective renderer settings, for the dataset manifest."""
+
+        return {name: getattr(self, name) for name in _RENDERER_DEFAULTS}
+
+    def renderer_overrides(self) -> dict[str, object]:
+        """Only the renderer settings that differ from the v1 defaults."""
+
+        return {
+            name: value
+            for name, value in self.renderer_settings().items()
+            if value != _RENDERER_DEFAULTS[name]
+        }
 
 
 def _hash_file(path: Path) -> str:
@@ -354,21 +407,29 @@ def build_sedar_sft_dataset_from_ltr(
         evidence_top_k=ltr.evidence_top_k,
         max_total_chars=ltr.max_total_chars,
         max_chunks_per_document=ltr.max_chunks_per_document,
+        candidate_window=ltr.candidate_window,
+        body_source=ltr.body_source,
+        dedup_article_mode=ltr.dedup_article_mode,
+        include_document_name=ltr.include_document_name,
+        min_passage_chars=ltr.min_passage_chars,
     )
     rankings_sha256 = _hash_file(rankings_path)
     passages_sha256 = _hash_file(passages_path)
-    retrieval_config_hash = fingerprint_json(
-        {
-            "evidence_source": LTR_EVIDENCE_SOURCE,
-            "retrieval_variant": ltr.retrieval_variant,
-            "evidence_top_k": ltr.evidence_top_k,
-            "max_total_chars": ltr.max_total_chars,
-            "max_chunks_per_document": ltr.max_chunks_per_document,
-            "rankings_sha256": rankings_sha256,
-            "passages_sha256": passages_sha256,
-            "index_fingerprint": index_fingerprint,
-        }
-    )
+    retrieval_config_payload: dict[str, object] = {
+        "evidence_source": LTR_EVIDENCE_SOURCE,
+        "retrieval_variant": ltr.retrieval_variant,
+        "evidence_top_k": ltr.evidence_top_k,
+        "max_total_chars": ltr.max_total_chars,
+        "max_chunks_per_document": ltr.max_chunks_per_document,
+        "rankings_sha256": rankings_sha256,
+        "passages_sha256": passages_sha256,
+        "index_fingerprint": index_fingerprint,
+    }
+    renderer_overrides = ltr.renderer_overrides()
+    if renderer_overrides:
+        # Absent for a v1-default build, so the recorded v1 hash is preserved.
+        retrieval_config_payload["renderer"] = renderer_overrides
+    retrieval_config_hash = fingerprint_json(retrieval_config_payload)
 
     examples, excluded, failures = build_sft_examples_from_ltr_rankings(
         cases,
@@ -394,6 +455,8 @@ def build_sedar_sft_dataset_from_ltr(
             (root / project.data.question_path).read_text(encoding="utf-8")
         ),
         "retrieval_config_hash": retrieval_config_hash,
+        "renderer": ltr.renderer_settings(),
+        "renderer_overrides": renderer_overrides,
         "index_fingerprint": index_fingerprint,
         "rankings_path": rankings_path.as_posix(),
         "passages_path": passages_path.as_posix(),

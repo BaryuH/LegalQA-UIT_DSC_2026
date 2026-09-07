@@ -43,6 +43,52 @@ def main() -> int:
     parser.add_argument("--evidence-top-k", type=int, default=4)
     parser.add_argument("--max-total-chars", type=int, default=4000)
     parser.add_argument("--max-chunks-per-document", type=int, default=2)
+    # Renderer flags. Names and defaults mirror
+    # scripts/sedar_retrieval/run_sedar_e2e.py exactly, so a training dataset
+    # can be built with the same renderer the reader will meet at inference.
+    # Defaults are the historical v1 behaviour; the deployed champion needs
+    #   --dedup-article-mode article --include-document-name
+    # on top of --evidence-top-k 6 --max-total-chars 6000
+    # --max-chunks-per-document 3.
+    parser.add_argument(
+        "--candidate-window",
+        type=int,
+        default=0,
+        help=(
+            "Ranked candidates handed to the packer. 0 = same as "
+            "--evidence-top-k (historical: no backfill after the per-document "
+            "cap and character budget drop candidates)."
+        ),
+    )
+    parser.add_argument(
+        "--body-source",
+        choices=("raw_text", "reader_text"),
+        default="raw_text",
+        help="Which passage field the reader is trained on.",
+    )
+    parser.add_argument(
+        "--min-passage-chars",
+        type=int,
+        default=0,
+        help="Drop candidate passages shorter than this before packing.",
+    )
+    parser.add_argument(
+        "--include-document-name",
+        action="store_true",
+        help=(
+            "Render the real document name on the 'Van ban' header line "
+            "instead of the zip member. Required to match the champion."
+        ),
+    )
+    parser.add_argument(
+        "--dedup-article-mode",
+        choices=("off", "article", "clause", "first"),
+        default="off",
+        help=(
+            "Collapse candidates from the same article before packing. "
+            "Champion uses 'article'."
+        ),
+    )
     parser.add_argument("--progress-every", type=int, default=100)
     parser.add_argument(
         "--max-examples",
@@ -62,6 +108,11 @@ def main() -> int:
                 evidence_top_k=args.evidence_top_k,
                 max_total_chars=args.max_total_chars,
                 max_chunks_per_document=args.max_chunks_per_document,
+                candidate_window=args.candidate_window,
+                body_source=args.body_source,
+                dedup_article_mode=args.dedup_article_mode,
+                include_document_name=args.include_document_name,
+                min_passage_chars=args.min_passage_chars,
                 progress_every=args.progress_every,
             ),
             max_examples=args.max_examples,
@@ -89,6 +140,13 @@ def main() -> int:
                 "dataset_dir": result.underlying.output_dir.as_posix(),
                 "sedar_overlay_dir": result.output_dir.as_posix(),
                 "manifest_path": result.manifest_path.as_posix(),
+                "renderer": {
+                    "candidate_window": args.candidate_window,
+                    "body_source": args.body_source,
+                    "dedup_article_mode": args.dedup_article_mode,
+                    "include_document_name": args.include_document_name,
+                    "min_passage_chars": args.min_passage_chars,
+                },
             },
             ensure_ascii=False,
             indent=2,
