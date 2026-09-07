@@ -33,7 +33,39 @@ runtime:
   deterministic_topk_overlap: 1.0
 
 reader:
-  frozen: true
-  # Filled by TASK 00/01 once checkpoint bytes exist on the GPU server.
+  # DECISION 2026-09-07 — the reader is unfrozen for retraining.
+  # Taken by the project owner, recorded here rather than assumed. This is a
+  # decision record, not a runtime switch: nothing reads this file yet, so
+  # flipping it does not by itself start or permit anything.
+  #
+  # What it does and does not authorise:
+  #  - authorises building dataset v2 and training `vilegal-sedar-v2`;
+  #  - does NOT change the submission configuration. `vilegal-sedar-v1` stays
+  #    the submitted reader until v2 passes the pre-registered gates on
+  #    test-230 (configs/sedar_sft/reader_v2_gates.yaml, retreat plan in
+  #    READER_RETRAIN_PLAN.md §6);
+  #  - does NOT permit deleting or overwriting v1 artifacts, the v1 adapter,
+  #    or the b2 fingerprint. v2 gets its own freeze;
+  #  - does NOT relax `validate_against_b2_freeze`. It will report drift once
+  #    v2 exists; that is correct, and the answer is a new fingerprint.
+  frozen: false
+  frozen_until: "2026-09-07"
+  successor: vilegal-sedar-v2
+  submission_reader_until_v2_passes: vilegal-sedar-v1
+
+  # Both fields stay null on purpose. `freeze_r0.py` reads
+  # `reader.checkpoint_path` from the stage config passed as `--config`
+  # (r0_baseline.yaml), NOT from this file, hashes that path with sha256 over
+  # the file bytes, and records `reader_checksum_equals_task00` as
+  # DEFERRED_GPU when the path is absent. On the Windows dev box the checkpoint
+  # bytes do not exist, so DEFERRED_GPU is the honest state.
+  #
+  # Fill these only from the GPU server, and only with a value produced there:
+  #   sha256 of the checkpoint file at checkpoints/sedar_sft/<run_id>/
+  # Do NOT paste the adapter hash recorded in the e2e manifests
+  # (6e3e2948…): that is an adapter fingerprint from a different code path and
+  # has not been shown to equal sha256 of any single checkpoint file. Putting
+  # it here would turn a DEFERRED_GPU gate into a PASS against an unverified
+  # value, which is worse than null.
   checkpoint_sha256: null
   checkpoint_path: null

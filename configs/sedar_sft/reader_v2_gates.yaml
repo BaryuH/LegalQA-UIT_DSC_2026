@@ -1,0 +1,95 @@
+# PRE-REGISTRATION — reader v2 promotion gates.
+#
+# Written BEFORE any v2 training run, per READER_RETRAIN_PLAN.md section 5.
+# This file is the commitment: it must be committed before the first v2 run,
+# and it must not be edited after any v2 number has been seen. A gate that is
+# relaxed after the fact is not a gate. If v2 fails, record the failure and
+# keep v1 (section 6, retreat plan).
+version: reader-v2-gates-v1
+written_at: "2026-09-07"
+status: pre_registered_not_yet_run
+
+control:
+  # The champion, as deployed. Every comparison below is paired against this.
+  reader: vilegal-sedar-v1
+  adapter_sha256: 6e3e294884fcac786a86df0c4a242d322a340547e71671262287e9894d3f2e63
+  renderer: 6 / 6000 / 3, dedup_article_mode=article, include_document_name=true
+  max_new_tokens: 768
+  clean_460: {meteor: 0.5501, rouge_l: 0.5614}
+
+splits:
+  # Clean-460 is spent: ~20 configurations were scored on it and the champion
+  # was taken as the max. New decisions must not be selected on it.
+  dev: {name: dev-230, n: 230, role: every_training_decision}
+  test: {name: test-230, n: 230, role: touched_exactly_once}
+  # Deciles, not quartiles. Measured on synthetic score distributions of the
+  # same shape: 4 strata leave a dev-vs-test mean difficulty gap up to 0.012,
+  # which is above the 0.008 noise floor and could move a decision on its own;
+  # 10 strata hold the worst gap at 0.0045 with no systematic direction.
+  stratify_by: champion_meteor_decile
+  strata: 10
+  seed: 42
+  dev_size: 230
+  builder: scripts/sedar_sft/make_reader_v2_splits.py
+  requirement: written_to_artifact_before_training
+
+noise_floor:
+  meteor_abs: 0.008
+  rouge_l_abs: 0.008
+  basis: >-
+    18 of 274 labelled clean-460 queries flip between rankings that differ by
+    1.5 points; judge by confidence interval, never by p-value alone.
+
+promotion:
+  # Both must hold on dev-230, then be confirmed on test-230.
+  meteor_ci_lower_gt: 0.008
+  rouge_l_ci_lower_gte: -0.008
+  paired_test:
+    tool: scripts/sedar_retrieval/compare_metrics_paired.py
+    resamples: 10000
+    seed: 20260906
+  split_half:
+    tool: scripts/sedar_retrieval/check_split_half_stability.py
+    splits: 200
+    both_halves_positive_min_rate: 0.95
+  adapter_hash:
+    must_differ_from_control: true
+    must_be_stable_across_runs: true
+
+causal_check:
+  # Anti-self-deception clause. Score alone does not promote: the stated
+  # mechanism must be observed, or the explanation is withdrawn (sections 12.4
+  # and 13.4 were withdrawn exactly this way).
+  required: true
+  round_1_hypothesis: >-
+    Training on the champion renderer teaches the reader to read the document
+    name from the header instead of recalling it parametrically.
+  round_1_observable: >-
+    On the cases where the pack contains the right document but v1 cited
+    another (group A, 29 remaining after the display-level fix), v2 must cite
+    from the pack more often than v1. And on the 45 clean-460 cases whose pack
+    holds no gold, v2 must cite a document absent from the pack LESS often
+    than v1.
+  on_mechanism_absent: withdraw_explanation_and_record
+
+prerequisites:
+  p0_1_exclusion_audit:
+    status: PASS
+    checked_at: "2026-09-07"
+    artifact: artifacts/finetuned_reader_audit/training_exclusions.jsonl
+    excluded_total: 391
+    breakdown:
+      id_and_question_overlap_warmup: 387
+      question_overlap_warmup_only: 3
+      question_overlap_public_only: 1
+    effective_train_examples: 6609
+    note: >-
+      Every excluded case is accounted for by the counts recorded in
+      ss03_summary.json. The exclusion list is stricter than the 387 id-based
+      overlap, so the effective train set is 6609, not the 6613 quoted in
+      READER_RETRAIN_PLAN.md section 3.1 (that number subtracted 387 only).
+
+blocked_by:
+  - contest_rule_external_data_and_models  # blocks phase 3 only
+  - gpu_server_stack_verified              # peft / accelerate / bitsandbytes / trl
+  - p0_3_control_baseline_on_dev_and_test
