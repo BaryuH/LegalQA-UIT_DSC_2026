@@ -47,20 +47,50 @@ def _ids_hash(ids: tuple[str, ...]) -> str:
     return hashlib.sha256("\n".join(ids).encode("utf-8")).hexdigest()
 
 
-def _load_scores(path: Path, metric: str) -> dict[str, float]:
+def _load_scores(
+    path: Path,
+    metric: str,
+    *,
+    allow_nonok_status: bool,
+) -> tuple[dict[str, float], dict[str, int]]:
+    """Read {case_id: score} from a scorer artifact, refusing unscored cases.
+
+    The scorer records a per-case `status`, and a case whose status is not ok
+    carries a score that means "not measured" rather than "measured low".
+    Stratifying on those would put non-scores in the low stratum and quietly
+    bias the split, so this fails closed unless the caller opts in.
+    """
+
     payload = json.loads(path.read_text(encoding="utf-8"))
     rows = payload.get("per_case")
     if not isinstance(rows, list):
         raise SystemExit(f"{path} has no per_case list")
     scores: dict[str, float] = {}
+    status_counts: dict[str, int] = {}
+    offending: list[str] = []
     for row in rows:
         case_id = str(row["id"])
         if case_id in scores:
             raise SystemExit(f"Duplicate case id in {path}: {case_id}")
+        status = str(row.get("status", "unknown"))
+        status_counts[status] = status_counts.get(status, 0) + 1
+        if status.lower() not in {"ok", "success", "scored"}:
+            offending.append(case_id)
+            if not allow_nonok_status:
+                continue
         if metric not in row or row[metric] is None:
             raise SystemExit(f"Case {case_id} has no {metric} score in {path}")
         scores[case_id] = float(row[metric])
-    return scores
+    if offending and not allow_nonok_status:
+        raise SystemExit(
+            f"{len(offending)} of {len(rows)} cases are not scored ok "
+            f"(status counts: {status_counts}). First ids: "
+            f"{', '.join(offending[:20])}. "
+            "Stratifying on a non-score biases the split. Pass "
+            "--allow-nonok-status to include them anyway; the choice is then "
+            "recorded in split_manifest.json."
+        )
+    return scores, status_counts
 
 
 def _split_manifest(
@@ -108,6 +138,12 @@ def main() -> int:
         default=Path("artifacts/sedar_sft/validation/clean_warmup_manifest.json"),
     )
     parser.add_argument("--metric", default="meteor")
+    parser.add_argument(
+        "--allow-nonok-status",
+        action="store_true",
+        help="Stratify on cases whose scorer status is not ok. Off by default: "
+        "their score means 'not measured', not 'measured low'.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--dev-size", type=int, default=230)
     parser.add_argument("--strata", type=int, default=4)
@@ -125,7 +161,9 @@ def main() -> int:
     args = parser.parse_args()
 
     parent = load_clean_warmup_manifest(args.parent_manifest)
-    scores = _load_scores(args.per_case, args.metric)
+    scores, status_counts = _load_scores(
+        args.per_case, args.metric, allow_nonok_status=args.allow_nonok_status
+    )
 
     scope = set(parent.included_ids)
     scored = set(scores)
@@ -170,6 +208,8 @@ def main() -> int:
         "parent_manifest_path": args.parent_manifest.as_posix(),
         "parent_included_ids_hash": parent.included_ids_hash,
         "scope_count": len(scope),
+        "per_case_status_counts": status_counts,
+        "allow_nonok_status": args.allow_nonok_status,
         "dev_ids_hash": _ids_hash(result.dev_ids),
         "test_ids_hash": _ids_hash(result.test_ids),
         "dev_ids": list(result.dev_ids),
