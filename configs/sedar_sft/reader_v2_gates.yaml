@@ -59,6 +59,35 @@ splits:
   per_case_status: all 460 scored, 0 errors (verified 2026-09-07), so the
     splitter runs without --allow-nonok-status
 
+  # FROZEN 2026-09-07 on the GPU server. These hashes are the split's identity:
+  # any later run claiming to be on dev-230 or test-230 must reproduce them.
+  frozen:
+    dev_ids_hash: 3101935ebe839d5e08dc7f5ed8106ed83b3bed338082aed70ea875a289a431fa
+    test_ids_hash: 4f74d3745cb24b24d30d1769dbbb84e64df8426f32bacc4ef1ffa3a52e3a95da
+    dev_count: 230
+    test_count: 230
+    artifacts:
+      - artifacts/sedar_sft/splits/reader_v2/split_manifest.json
+      - artifacts/sedar_sft/splits/reader_v2/dev230_manifest.json
+      - artifacts/sedar_sft/splits/reader_v2/test230_manifest.json
+    strata: 10 x 46 cases, 23 dev / 23 test each
+    score_range: 0.0285 .. 0.9929 champion METEOR
+    note: >-
+      46 divides evenly by 2, so the apportionment had no remainder and the
+      seeded tie-break never fired on this data. It still guards any other
+      dev_size, but do not claim it was exercised here.
+
+# Provenance gap, recorded rather than assumed fixed.
+# The champion's metrics.json carries scorer_source_path and
+# scorer_source_sha256 as UNRESOLVED, so the scorer itself is not pinned by
+# hash. Every gate decision is a paired comparison produced by that scorer, so
+# it must not change between the control runs and the v2 runs. Mitigation for
+# this round: P0.3 re-runs the control at the same code revision as v2, and the
+# revision goes in both run records.
+scorer:
+  pinned: false
+  mitigation: control_and_candidate_scored_at_the_same_revision
+
 noise_floor:
   meteor_abs: 0.008
   rouge_l_abs: 0.008
