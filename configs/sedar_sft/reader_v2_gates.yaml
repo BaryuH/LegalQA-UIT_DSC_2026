@@ -15,7 +15,31 @@ control:
   adapter_sha256: 6e3e294884fcac786a86df0c4a242d322a340547e71671262287e9894d3f2e63
   renderer: 6 / 6000 / 3, dedup_article_mode=article, include_document_name=true
   max_new_tokens: 768
-  clean_460: {meteor: 0.5501, rouge_l: 0.5614}
+  run_id: val01_packwide_docname_cap768
+  per_case: >-
+    /mnt/G/sedar-legalqa/artifacts/sedar_retrieval/eval/task20_pack_ablation/
+    val01_packwide_docname_cap768/metrics.json
+  clean_460: {meteor: 0.5458, rouge_l: 0.5640}
+
+  # CORRECTED 2026-09-07, before any v2 run. This file first recorded
+  # 0.5501 / 0.5614, which is `val01_pack_wide_cap768` - the pack_wide run
+  # WITHOUT the document name. That is not what is deployed. The document name
+  # was enabled on 2026-09-06 under reason code
+  # `enabled_for_legal_correctness_not_score`, and it costs METEOR: the
+  # deployed run scores 0.5458 / 0.5640, i.e. -0.0043 METEOR / +0.0026 ROUGE-L
+  # against the run whose numbers were written here.
+  #
+  # It matters twice over. The gate asks for a METEOR CI lower bound above
+  # +0.008, and that is a different bar against 0.5458 than against 0.5501.
+  # And the two runs changed 411 of 460 answers, so per-case scores differ far
+  # more than the 0.004 mean gap suggests - stratifying on the wrong one gives
+  # a materially different split.
+  #
+  # The superseded run is kept as a reference point only, never as the control.
+  reference_not_control:
+    run_id: val01_pack_wide_cap768
+    note: same pack budget, document name off; superseded 2026-09-06
+    clean_460: {meteor: 0.5501, rouge_l: 0.5614}
 
 splits:
   # Clean-460 is spent: ~20 configurations were scored on it and the champion
@@ -26,12 +50,14 @@ splits:
   # same shape: 4 strata leave a dev-vs-test mean difficulty gap up to 0.012,
   # which is above the 0.008 noise floor and could move a decision on its own;
   # 10 strata hold the worst gap at 0.0045 with no systematic direction.
-  stratify_by: champion_meteor_decile
+  stratify_by: champion_meteor_decile   # from control.per_case, not the 0.5501 run
   strata: 10
   seed: 42
   dev_size: 230
   builder: scripts/sedar_sft/make_reader_v2_splits.py
   requirement: written_to_artifact_before_training
+  per_case_status: all 460 scored, 0 errors (verified 2026-09-07), so the
+    splitter runs without --allow-nonok-status
 
 noise_floor:
   meteor_abs: 0.008

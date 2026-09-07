@@ -116,7 +116,7 @@ Không phải đoán schema: nó đọc đúng định dạng `per_case` mà
 
 ```bash
 python scripts/sedar_sft/make_reader_v2_splits.py \
-  --per-case <val01_pack_wide_cap768/scored.json> \
+  --per-case /mnt/G/sedar-legalqa/artifacts/sedar_retrieval/eval/task20_pack_ablation/val01_packwide_docname_cap768/metrics.json \
   --parent-manifest artifacts/sedar_sft/validation/clean_warmup_manifest.json \
   --metric meteor --seed 42 --dev-size 230 --strata 10
 ```
@@ -125,6 +125,17 @@ Xuất ba file vào `artifacts/sedar_sft/splits/reader_v2/`: `split_manifest.jso
 (hồ sơ kiểm toán: seed, sha256 nguồn, phân tầng, hash danh sách id) cộng
 `dev230_manifest.json` và `test230_manifest.json` dùng trực tiếp được với
 `run_sedar_e2e.py --manifest`.
+
+**Dùng `val01_packwide_docname_cap768`, không phải `val01_pack_wide_cap768`.**
+Bản deploy là bản **có** tên văn bản, và nó có METEOR **thấp hơn**: 0.5458 /
+0.5640 so với 0.5501 / 0.5614 của bản không docname. Đó là quyết định có chủ ý
+ngày 06-09 (`enabled_for_legal_correctness_not_score`). Hai run này đổi 411/460
+đáp án, nên điểm per-case lệch nhau nhiều hơn khoảng cách 0.004 ở mức trung bình
+gợi ra — phân tầng sai file cho ra split khác hẳn. Control của gate cũng là
+0.5458 / 0.5640, không phải 0.5501 / 0.5614.
+
+Status của cả 460 case đều `scored`, 0 error (kiểm 07-09), nên **không** cần
+`--allow-nonok-status`.
 
 **Phân tầng theo thập phân vị, không phải tứ phân vị.** Đo trên phân bố điểm
 tổng hợp cùng hình dạng: 4 tầng để lại chênh lệch độ khó dev-vs-test tới 0.012,
