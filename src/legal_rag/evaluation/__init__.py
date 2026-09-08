@@ -1,6 +1,13 @@
 """Local, deterministic evaluation for Vietnamese legal QA answers."""
 
 from .alignment import AlignmentError, DuplicateIDError, align_records
+from .answer_in_context import (
+    ANSWER_IN_CONTEXT_SCHEMA_VERSION,
+    AnswerInContextResult,
+    AnswerInContextSummary,
+    answer_in_context,
+    summarize_answer_in_context,
+)
 from .error_classifier import (
     DEFAULT_THRESHOLDS,
     Classification,
@@ -74,4 +81,9 @@ __all__ = [
     "RetrievalTrace",
     "generate_error_report",
     "write_error_report",
+    "ANSWER_IN_CONTEXT_SCHEMA_VERSION",
+    "AnswerInContextResult",
+    "AnswerInContextSummary",
+    "answer_in_context",
+    "summarize_answer_in_context",
 ]
