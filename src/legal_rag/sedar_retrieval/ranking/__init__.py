@@ -50,6 +50,21 @@ from .ltr_ranker import (
     split_query_ids,
     train_lambdarank,
 )
+from .vietnamese_reranker import (
+    VIETNAMESE_RERANKER_SCHEMA_VERSION,
+    CutoffPolicy,
+    CutoffResult,
+    LoadedUnit,
+    RerankedCandidate,
+    VietnameseRerankerConfig,
+    VietnameseRerankerError,
+    VietnameseRerankerScorer,
+    apply_cutoff,
+    load_rerank_units,
+    merge_children_to_parent,
+    rerank_query,
+    unit_text,
+)
 
 __all__ = [
     "FEATURE_GROUPS",
@@ -96,4 +111,17 @@ __all__ = [
     "split_query_ids",
     "train_lambdarank",
     "validate_feature_schema",
+    "CutoffPolicy",
+    "CutoffResult",
+    "LoadedUnit",
+    "RerankedCandidate",
+    "VIETNAMESE_RERANKER_SCHEMA_VERSION",
+    "VietnameseRerankerConfig",
+    "VietnameseRerankerError",
+    "VietnameseRerankerScorer",
+    "apply_cutoff",
+    "load_rerank_units",
+    "merge_children_to_parent",
+    "rerank_query",
+    "unit_text",
 ]
