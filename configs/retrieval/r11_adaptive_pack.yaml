@@ -1,0 +1,146 @@
+# SEDAR Retrieval — R11: adaptive evidence-pack sizing.
+#
+# Decision record and runbook: docs/sedar_retrieval/TASK25_ADAPTIVE_PACK.md
+# Evidence survey: docs/sedar_retrieval/INDEX_METHOD_EVIDENCE.md §2 (last block)
+#
+# This is the step the project's own error analysis pointed at:
+#   progress.md 2026-09-06: "bottom quartile is starved packs, not any coded
+#   error"; "monotone dose-response between evidence characters and METEOR";
+#   "evidence_top_k binds before max_total_chars when micro-chunks win
+#   retrieval"; "65 UNDER_SPECIFIED cases blamed on the generation cap are
+#   actually out of content, not out of budget".
+#
+# The champion (6 / 6000 / 3, cap 768) already bought +0.0492 METEOR by widening
+# characters and per-document count. What it still cannot do is vary the pack per
+# query, or say WHY a pack ended. Both are what this stage adds.
+
+version: sedar-retrieval-v3
+stage: R11
+status: ablation_ready
+depends_on:
+  - R0
+  - R10   # reranker scores are what the relevance gate reads
+
+data:
+  units: artifacts/sedar_retrieval/corpus_v4/<run_id>/units.jsonl
+  ranking: artifacts/sedar_retrieval/reranker/reranked_zeroshot.jsonl
+  scores: artifacts/sedar_retrieval/reranker/ce_scores.jsonl
+  scope: clean_manifest
+  labels_role: evaluation_only
+
+# ---------------------------------------------------------------------------
+# Arm A — control. Must reproduce the champion pack exactly.
+# target_chars == max_total_chars and no gate means: fill to the cap in rank
+# order, same as today. Run this first; if it does not reproduce the champion
+# metrics, the wiring is wrong and no other arm means anything.
+# ---------------------------------------------------------------------------
+control:
+  min_blocks: 1
+  max_blocks: 6
+  target_chars: 6000
+  max_total_chars: 6000
+  max_per_document: 3
+  score_floor: null
+  relative_margin: null
+  max_marginal_blocks: null
+  starvation_backfill: true
+  starvation_ratio: 0.75
+  expand_to_parent: false      # off in the control: it changes block text
+  suppress_nested: false       # off in the control: v3 packs have no nesting
+  respect_packable: true
+  order: best_first
+  min_block_chars: 0
+  candidate_window: 32
+
+# ---------------------------------------------------------------------------
+# Arm B — adaptive size. The gate decides eligibility, the character target
+# decides how many fit, and backfill stops a strict gate from starving a pack.
+#
+# score_floor is null until calibrated: run Arm A, read
+# `score_floor_percentiles` out of its report (that is the score of the last
+# block a champion-sized pack would have taken), and set the floor from it. A
+# floor below p50 changes almost nothing; above p75 it starts trimming.
+# ---------------------------------------------------------------------------
+adaptive:
+  min_blocks: 2               # 38% of gold answers cite two or more Điều
+  max_blocks: 8
+  target_chars: 4500          # headroom under the cap for backfill to use
+  max_total_chars: 6000
+  max_per_document: 3
+  score_floor: null           # calibrate from Arm A
+  relative_margin: 3.0
+  max_marginal_blocks: 1      # distractor guard, see below
+  starvation_backfill: true
+  starvation_ratio: 0.75
+  expand_to_parent: true
+  suppress_nested: true
+  respect_packable: true
+  order: best_first
+  min_block_chars: 220        # above the corpus v4 micro floor of 120
+  candidate_window: 32
+
+sweep:
+  # One dimension at a time. Three changes at once cannot be attributed, and
+  # progress.md records this project being wrong three times in one day by
+  # prioritising on frequency instead of measured effect.
+  score_floor: [null, "<p50>", "<p75>", "<p90>"]
+  target_chars: [4000, 4500, 5000, 6000]
+  max_blocks: [6, 8, 10]
+  max_marginal_blocks: [null, 1, 2]
+  order: [best_first, best_last]
+  expand_to_parent: [false, true]
+  starvation_backfill: [true, false]   # the OFF arm is the diagnostic, not a candidate
+
+rationale:
+  fill_not_cut: >
+    The retrieval literature says cut: DRiLL@VLSP 2025 moved F2 0.3636 -> 0.6714
+    (+0.308) by replacing a fixed top-10 with a variable-size answer set, and
+    "The Power of Noise" (SIGIR 2024) measures one related-but-answer-free
+    distractor at -25% accuracy and several at up to -67%. Our own data says
+    fill: a monotone dose-response between evidence characters and METEOR, with
+    the bottom quartile starved. Both hold, because the metrics differ - macro-F2
+    over cited articles punishes over-retrieval, METEOR/ROUGE-L over generated
+    prose punishes an answer with nothing to ground itself in. Task 2 is scored
+    on the prose, so the policy fills toward a target under a relevance gate
+    rather than cutting to the confident few.
+  distractor_guard: >
+    max_marginal_blocks caps how many blocks may come from below the relative
+    margin, so starvation backfill cannot flood a pack with near-misses. This is
+    the one place the "cut" evidence binds: the harm from related-but-answer-free
+    evidence is measured and large.
+  parent_expansion: >
+    A selected article_part is swapped for its parent Điều when the parent fits
+    the remaining budget. A generator that must quote statute wants a whole
+    article, not a clause fragment; this is the small-to-big / auto-merge pattern
+    with the parent chosen by authoritative structure rather than a
+    fraction-of-children threshold.
+  ordering: >
+    best_first reproduces the champion and matches the primacy half of
+    "Lost in the Middle" (TACL 2024). best_last places the top block adjacent to
+    the question, which is where "The Power of Noise" measures accuracy highest.
+    The champion prompt puts the question after the evidence, so best_last is
+    the arm that actually tests it. Ablate, do not assume.
+
+evaluation:
+  primary_metric: meteor
+  secondary_metrics: [rouge_l, article_at_4, answer_in_context]
+  baseline:
+    # Frozen champion: pack 6 / 6000 / 3, generation cap 768.
+    meteor: 0.5501
+    rouge_l: 0.5614
+    article_at_4: 0.7920
+  gates: configs/retrieval/gates.yaml
+  require_paired_bootstrap: true
+  diagnostics_to_watch:
+    - starvation_rate          # share of packs under starvation_ratio of target
+    - stop_reasons             # budget_exhausted vs content_exhausted
+    - fill_ratio               # p05/p25 are where the starved quartile shows
+    - backfilled_blocks_total  # how often the gate had to be overridden
+    - expanded_blocks_total
+    - suppressed_nested_total
+  notes: >
+    answer_in_context (does the gold answer text survive into the pack actually
+    sent) is the metric worth adding here: it correlates with F1 at +0.50 against
+    retrieval recall's +0.31, and separates a 4.6x EM gap even when every gold
+    document was retrieved. Retrieval recall does not predict answer quality;
+    what survives into the context does.

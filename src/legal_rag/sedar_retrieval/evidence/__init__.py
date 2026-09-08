@@ -2,6 +2,14 @@
 
 from dataclasses import dataclass
 
+from .adaptive_pack import (
+    ADAPTIVE_PACK_SCHEMA_VERSION,
+    AdaptivePackPolicy,
+    AdaptivePackSelection,
+    PackCandidate,
+    SelectedBlock,
+    select_adaptive_pack,
+)
 from .curation import (
     DEFAULT_BUDGETS,
     CandidateEvidence,
@@ -33,4 +41,10 @@ __all__ = [
     "SufficiencyResult",
     "curate_evidence",
     "fail_closed_sufficiency",
+    "ADAPTIVE_PACK_SCHEMA_VERSION",
+    "AdaptivePackPolicy",
+    "AdaptivePackSelection",
+    "PackCandidate",
+    "SelectedBlock",
+    "select_adaptive_pack",
 ]
