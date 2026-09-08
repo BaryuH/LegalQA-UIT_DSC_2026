@@ -96,6 +96,11 @@ artifacts/sedar_retrieval/indexes/
 artifacts/sedar_retrieval/retrieval/
 artifacts/sedar_retrieval/eval/
 artifacts/sedar_retrieval/graphs/
+artifacts/sedar_retrieval/corpus_v4/
+artifacts/sedar_retrieval/reranker/
+artifacts/sedar_retrieval/pack/
+artifacts/sedar_retrieval/colbert/
+artifacts/sedar_retrieval/fusion/
 
 # Local IDE / nested tooling checkouts
 .cursor/
