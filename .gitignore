@@ -43,6 +43,7 @@ venv.bak/
 *.tar.gz
 *.7z
 *.rar
+data/selected-contexts/
 checkpoints/
 models/
 weights/
@@ -83,6 +84,9 @@ memory-bank/
 
 # Local runtime cache
 cache/
+cache_nhan/
+*.pkl
+*.npy
 
 # Generated validation and experiment outputs
 artifacts/data-validation/

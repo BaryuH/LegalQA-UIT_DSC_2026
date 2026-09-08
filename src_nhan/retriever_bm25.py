@@ -1,12 +1,13 @@
-"""BM25 lexical retriever with Vietnamese word segmentation.
+"""BM25 lexical retriever with Vietnamese word segmentation and multi-core acceleration.
 
-Uses underthesea tokenization for Vietnamese-aware BM25 indexing,
-which correctly handles compound legal terms like "quyền_sử_dụng_đất".
+Uses underthesea tokenization for Vietnamese-aware BM25 indexing.
+Accelerated with multi-core multiprocessing on AMD EPYC and persistent disk/RAM caching.
 """
 
 from __future__ import annotations
 
 import logging
+import multiprocessing as mp
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,7 +31,7 @@ class BM25Hit:
 
 
 class BM25Retriever:
-    """BM25 retriever with Vietnamese tokenization."""
+    """BM25 retriever with Vietnamese tokenization, parallel build, and caching."""
 
     def __init__(
         self,
@@ -38,24 +39,66 @@ class BM25Retriever:
         *,
         k1: float = 1.5,
         b: float = 0.75,
+        cache_dir: str | Path | None = None,
+        num_workers: int = 30,
     ) -> None:
         self._chunks = chunks
         self._chunk_index: dict[int, LegalChunk] = {
             i: c for i, c in enumerate(chunks)
         }
 
-        logger.info(
-            "Tokenizing %d chunks for BM25 index (underthesea)...", len(chunks)
-        )
-        self._tokenized_corpus = [
-            segment(chunk.retrieval_text) for chunk in chunks
-        ]
+        # Check disk cache first
+        cache_path: Path | None = None
+        if cache_dir:
+            cache_path = Path(cache_dir) / f"bm25_index_{len(chunks)}.pkl"
+            if cache_path.is_file():
+                logger.info("Loading cached BM25 index from %s...", cache_path)
+                try:
+                    loaded = self.load_index(cache_path)
+                    if len(loaded._chunks) == len(chunks):
+                        self._chunks = loaded._chunks
+                        self._chunk_index = loaded._chunk_index
+                        self._tokenized_corpus = loaded._tokenized_corpus
+                        self._bm25 = loaded._bm25
+                        logger.info("BM25 index successfully restored from cache.")
+                        return
+                    logger.warning("Cache size mismatch, re-building index.")
+                except Exception as exc:
+                    logger.warning("Failed to load BM25 cache (%s), re-building.", exc)
 
-        logger.info("Building BM25 index (k1=%.2f, b=%.2f)...", k1, b)
-        self._bm25 = BM25Okapi(
-            self._tokenized_corpus, k1=k1, b=b
-        )
+        # Multi-core tokenization on AMD EPYC
+        texts = [chunk.retrieval_text for chunk in chunks]
+        workers = max(1, min(num_workers, mp.cpu_count() or 1))
+
+        if workers > 1 and len(texts) > 200:
+            logger.info(
+                "Tokenizing %d chunks for BM25 index in parallel across %d CPU workers (underthesea)...",
+                len(texts),
+                workers,
+            )
+            ctx = mp.get_context("fork")
+            chunksize = max(50, len(texts) // (workers * 8))
+            with ctx.Pool(processes=workers) as pool:
+                self._tokenized_corpus = pool.map(
+                    segment, texts, chunksize=chunksize
+                )
+        else:
+            logger.info(
+                "Tokenizing %d chunks for BM25 index sequentially (underthesea)...",
+                len(texts),
+            )
+            self._tokenized_corpus = [segment(t) for t in texts]
+
+        logger.info("Building BM25Okapi index (k1=%.2f, b=%.2f)...", k1, b)
+        self._bm25 = BM25Okapi(self._tokenized_corpus, k1=k1, b=b)
         logger.info("BM25 index built with %d documents.", len(chunks))
+
+        # Persist to disk cache
+        if cache_path:
+            try:
+                self.save_index(cache_path)
+            except Exception as exc:
+                logger.warning("Failed to save BM25 cache: %s", exc)
 
     def retrieve(self, query: str, *, top_n: int = 30) -> list[BM25Hit]:
         """Retrieve top-N chunks for a query."""
@@ -103,6 +146,7 @@ class BM25Retriever:
                     "tokenized_corpus": self._tokenized_corpus,
                 },
                 fh,
+                protocol=pickle.HIGHEST_PROTOCOL,
             )
         logger.info("BM25 index saved to %s", cache_path)
 

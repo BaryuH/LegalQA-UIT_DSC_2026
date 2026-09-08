@@ -33,6 +33,7 @@ class ChunkingSection(BaseModel):
     max_chars: int = Field(default=1200, gt=0)
     overlap_chars: int = Field(default=200, ge=0)
     min_chars: int = Field(default=100, gt=0)
+    num_workers: int = Field(default=30, gt=0)
 
     @model_validator(mode="after")
     def validate_overlap(self) -> Self:
@@ -49,6 +50,7 @@ class BM25Section(BaseModel):
     top_n: int = Field(default=30, gt=0)
     k1: float = Field(default=1.5, gt=0)
     b: float = Field(default=0.75, ge=0, le=1)
+    num_workers: int = Field(default=30, gt=0)
 
 
 class DenseSection(BaseModel):
@@ -60,7 +62,7 @@ class DenseSection(BaseModel):
     top_n: int = Field(default=30, gt=0)
     query_prefix: str = "query: "
     passage_prefix: str = "passage: "
-    batch_size: int = Field(default=64, gt=0)
+    batch_size: int = Field(default=128, gt=0)
 
 
 class HybridSection(BaseModel):
@@ -81,7 +83,7 @@ class RerankerSection(BaseModel):
     enabled: bool = True
     model_name: str = "namdp-ptit/ViRanker"
     top_k: int = Field(default=3, gt=0)
-    batch_size: int = Field(default=32, gt=0)
+    batch_size: int = Field(default=64, gt=0)
 
 
 class GeneratorSection(BaseModel):

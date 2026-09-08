@@ -80,13 +80,18 @@ def main() -> None:
 
         from .chunker import chunk_corpus
 
-        chunks = chunk_corpus(
+        corpus_result = chunk_corpus(
             documents,
             max_chars=config.chunking.max_chars,
             overlap_chars=config.chunking.overlap_chars,
             min_chars=config.chunking.min_chars,
+            num_workers=config.chunking.num_workers,
         )
-        logger.info("Created %d chunks.", len(chunks))
+        logger.info(
+            "Created %d child chunks and %d parent documents.",
+            len(corpus_result.chunks),
+            len(corpus_result.parents),
+        )
 
         logger.info("DRY RUN complete. Config and data are valid.")
         sys.exit(0)

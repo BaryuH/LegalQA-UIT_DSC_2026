@@ -3,26 +3,28 @@
 
 data:
   data_dir: data
-  question_path: data/warmup.json
+  question_path: data/public-official.json
   selected_contexts_path: data/selected-contexts.zip
-  split: warmup
+  split: public-official
 
 chunking:
   max_chars: 1200
   overlap_chars: 200
   min_chars: 100
+  num_workers: 30
 
 bm25:
   top_n: 30
   k1: 1.5
   b: 0.75
+  num_workers: 30
 
 dense:
   model_name: mainguyen9/vietlegal-e5
   top_n: 30
   query_prefix: "query: "
   passage_prefix: "passage: "
-  batch_size: 64
+  batch_size: 128
 
 hybrid:
   rrf_k: 60
@@ -32,14 +34,14 @@ reranker:
   enabled: true
   model_name: namdp-ptit/ViRanker
   top_k: 3
-  batch_size: 32
+  batch_size: 64
 
 generator:
   model_name: thangvip/qwen3-1.7b-vietnamese-legal-grpo-phase-2
   max_new_tokens: 1024
   temperature: 0.0
   do_sample: false
-  dtype: auto
+  dtype: bfloat16
 
 evidence:
   max_total_chars: 4000

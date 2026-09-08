@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .chunker import LegalChunk, chunk_corpus
+from .chunker import LegalChunk, ParentChunk, chunk_corpus
 from .config import PipelineConfig
 from .data_loader import (
     InferenceQuestion,
@@ -61,11 +61,40 @@ def _set_seed(seed: int) -> None:
         pass
 
 
-def _resolve_device(setting: str) -> str | None:
-    """Resolve device setting to torch device string."""
-    if setting == "auto":
-        return None  # Let transformers/sentence-transformers auto-detect
-    return setting
+def _resolve_device_and_optimize(setting: str) -> str:
+    """Resolve device and optimize PyTorch runtime for RTX 3090 (Ampere) and AMD EPYC (30 cores)."""
+    import os
+
+    # Pin OpenMP and MKL thread pools to 30 CPU cores
+    os.environ["OMP_NUM_THREADS"] = "30"
+    os.environ["MKL_NUM_THREADS"] = "30"
+    os.environ["OPENBLAS_NUM_THREADS"] = "30"
+    os.environ["VECLIB_MAXIMUM_THREADS"] = "30"
+    os.environ["NUMEXPR_NUM_THREADS"] = "30"
+    os.environ["TOKENIZERS_PARALLELISM"] = "true"
+
+    resolved = "cuda" if setting in ("auto", "cuda") else "cpu"
+    try:
+        import torch
+
+        # Limit PyTorch intra-op threads to 30 CPU cores (prevents cross-socket NUMA penalty)
+        torch.set_num_threads(30)
+
+        if torch.cuda.is_available() and resolved == "cuda":
+            # Enable TensorFloat-32 (TF32) on Ampere architecture (RTX 3090)
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            try:
+                torch.set_float32_matmul_precision("high")
+            except Exception:
+                pass
+            logger.info(
+                "Hardware optimization enabled: RTX 3090 (TF32 + bfloat16), AMD EPYC (30 threads)."
+            )
+            return "cuda"
+    except ImportError:
+        pass
+    return resolved
 
 
 def run_pipeline(config: PipelineConfig) -> PipelineResult:
@@ -89,7 +118,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     outputs_dir.mkdir(parents=True, exist_ok=True)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    device = _resolve_device(config.runtime.device)
+    device = _resolve_device_and_optimize(config.runtime.device)
 
     # --- Step 1: Load questions ---
     logger.info("Loading questions from %s...", config.data.question_path)
@@ -107,22 +136,31 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     logger.info("Loaded %d legal documents.", len(documents))
 
     # --- Step 3: Chunk documents ---
-    logger.info("Chunking %d documents...", len(documents))
-    chunks = chunk_corpus(
+    logger.info("Chunking %d documents (clause-level & parent-child)...", len(documents))
+    corpus_result = chunk_corpus(
         documents,
         max_chars=config.chunking.max_chars,
         overlap_chars=config.chunking.overlap_chars,
         min_chars=config.chunking.min_chars,
+        num_workers=config.chunking.num_workers,
     )
-    logger.info("Created %d chunks from %d documents.", len(chunks), len(documents))
+    chunks = corpus_result.chunks
+    parents_by_id = corpus_result.parents_by_id
+    chunks_by_id = corpus_result.chunks_by_id
+    logger.info(
+        "Created %d child chunks and %d parent documents from %d documents.",
+        len(chunks),
+        len(corpus_result.parents),
+        len(documents),
+    )
 
-    # Build chunk lookup
-    chunks_by_id: dict[str, LegalChunk] = {c.chunk_id: c for c in chunks}
-
-    # --- Step 4: Build retrievers ---
-    logger.info("Building BM25 retriever...")
+    logger.info("Building BM25 retriever (multi-core & caching enabled)...")
     bm25_retriever = BM25Retriever(
-        chunks, k1=config.bm25.k1, b=config.bm25.b
+        chunks,
+        k1=config.bm25.k1,
+        b=config.bm25.b,
+        cache_dir=str(cache_dir),
+        num_workers=config.bm25.num_workers,
     )
 
     logger.info("Building dense retriever (vietlegal-e5)...")
@@ -205,10 +243,11 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
                     for h in hybrid_hits[: config.reranker.top_k]
                 ]
 
-            # Pack evidence
+            # Pack evidence using Small-to-Big (Parent Document)
             packed = pack_evidence(
                 reranked,
                 chunks_by_id,
+                parents_by_id=parents_by_id,
                 max_total_chars=config.evidence.max_total_chars,
             )
 

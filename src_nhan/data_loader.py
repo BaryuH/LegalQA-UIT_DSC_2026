@@ -111,7 +111,7 @@ def load_legal_contexts(zip_path: str | Path) -> list[LegalDocument]:
     with zipfile.ZipFile(archive_path, "r") as zf:
         members = sorted(
             name for name in zf.namelist()
-            if name.endswith(".json") and "/" not in name
+            if name.endswith(".json") and Path(name).name.startswith("context_")
         )
         if not members:
             raise DataLoadError(

@@ -1,8 +1,8 @@
 """Evidence packing from reranked chunks for LLM context.
 
-Renders the top reranked chunks into a formatted evidence string
-with document provenance, respecting the max character budget.
-Tracks included, dropped, and truncated chunks explicitly.
+Supports Small-to-Big / Parent Document Retrieval:
+Resolves top reranked child chunks to their Parent Documents (Điều),
+deduplicating parents while preserving relevance ranking and character budget.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from .chunker import LegalChunk
+from .chunker import LegalChunk, ParentChunk
 from .reranker import RerankHit
 
 logger = logging.getLogger(__name__)
@@ -25,22 +25,30 @@ class PackedEvidence:
     dropped_ids: tuple[str, ...]
     truncated_ids: tuple[str, ...]
     total_chars: int
+    included_parent_ids: tuple[str, ...] = ()
 
 
 def pack_evidence(
     reranked_hits: list[RerankHit],
     chunks_by_id: dict[str, LegalChunk],
+    parents_by_id: dict[str, ParentChunk] | None = None,
     *,
     max_total_chars: int = 4000,
 ) -> PackedEvidence:
     """Pack reranked chunks into a character-budgeted evidence string.
 
-    Includes chunks in rerank order until the character budget is exceeded.
-    Each chunk is prefixed with its document name for provenance.
+    If parents_by_id is provided (Small-to-Big architecture):
+      Resolves top child hits -> parent_id -> Parent Document (entire Điều).
+      Deduplicates parent documents if multiple child hits map to the same Điều,
+      preserving the rank order of the best-matching child chunk.
+    Otherwise:
+      Falls back to chunk-level packing.
     """
     included_ids: list[str] = []
     dropped_ids: list[str] = []
     truncated_ids: list[str] = []
+    included_parent_ids: list[str] = []
+    seen_parent_ids: set[str] = set()
     parts: list[str] = []
     current_chars = 0
 
@@ -50,28 +58,52 @@ def pack_evidence(
             dropped_ids.append(hit.chunk_id)
             continue
 
-        # Format: [Document: <doc_id>] <text>
-        header = f"[Văn bản: {chunk.document_id}]"
-        chunk_text = f"{header}\n{chunk.raw_text}"
+        # Small-to-Big: resolve to Parent Document if parents_by_id is available
+        if parents_by_id is not None:
+            parent = parents_by_id.get(chunk.parent_id)
+            if parent is not None:
+                # Deduplicate: if this parent document is already included, record chunk and continue
+                if parent.parent_id in seen_parent_ids:
+                    included_ids.append(hit.chunk_id)
+                    continue
 
-        if current_chars + len(chunk_text) > max_total_chars:
+                header = f"[Văn bản: {parent.document_id} - {parent.header}]"
+                doc_text = f"{header}\n{parent.raw_text.strip()}"
+                target_id = parent.parent_id
+            else:
+                header = f"[Văn bản: {chunk.document_id} - {chunk.section_label}]"
+                doc_text = f"{header}\n{chunk.raw_text.strip()}"
+                target_id = chunk.chunk_id
+        else:
+            header = f"[Văn bản: {chunk.document_id}]"
+            doc_text = f"{header}\n{chunk.raw_text.strip()}"
+            target_id = chunk.chunk_id
+
+        sep_len = 2 if parts else 0
+        if current_chars + sep_len + len(doc_text) <= max_total_chars:
+            parts.append(doc_text)
+            included_ids.append(hit.chunk_id)
+            if parents_by_id is not None and target_id not in seen_parent_ids:
+                seen_parent_ids.add(target_id)
+                included_parent_ids.append(target_id)
+            current_chars += sep_len + len(doc_text)
+        else:
             # Try to fit a truncated version
-            remaining = max_total_chars - current_chars
+            remaining = max_total_chars - current_chars - sep_len
             if remaining > len(header) + 100:  # At least 100 useful chars
-                truncated_text = chunk_text[:remaining].rstrip()
+                truncated_text = doc_text[:remaining].rstrip()
                 parts.append(truncated_text)
                 included_ids.append(hit.chunk_id)
-                truncated_ids.append(hit.chunk_id)
-                current_chars += len(truncated_text)
+                truncated_ids.append(target_id)
+                if parents_by_id is not None and target_id not in seen_parent_ids:
+                    seen_parent_ids.add(target_id)
+                    included_parent_ids.append(target_id)
+                current_chars += sep_len + len(truncated_text)
             else:
                 dropped_ids.append(hit.chunk_id)
             break
 
-        parts.append(chunk_text)
-        included_ids.append(hit.chunk_id)
-        current_chars += len(chunk_text)
-
-    # Also drop remaining hits that weren't processed
+    # Mark remaining hits as dropped
     processed = set(included_ids) | set(dropped_ids)
     for hit in reranked_hits:
         if hit.chunk_id not in processed:
@@ -83,8 +115,9 @@ def pack_evidence(
         logger.warning("Evidence packing produced empty text.")
 
     logger.info(
-        "Evidence packed: %d included, %d dropped, %d truncated, %d chars",
+        "Evidence packed: %d chunks included, %d parents included, %d dropped, %d truncated, %d chars",
         len(included_ids),
+        len(included_parent_ids),
         len(dropped_ids),
         len(truncated_ids),
         len(rendered),
@@ -96,4 +129,5 @@ def pack_evidence(
         dropped_ids=tuple(dropped_ids),
         truncated_ids=tuple(truncated_ids),
         total_chars=len(rendered),
+        included_parent_ids=tuple(included_parent_ids),
     )
