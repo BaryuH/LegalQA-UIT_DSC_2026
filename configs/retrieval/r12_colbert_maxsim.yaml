@@ -1,0 +1,168 @@
+# SEDAR Retrieval — R12: fine-tuned ColBERT MaxSim reranker over the top-100.
+#
+# Decision record and runbook: docs/sedar_retrieval/TASK26_COLBERT_MAXSIM.md
+# Evidence survey: docs/sedar_retrieval/INDEX_METHOD_EVIDENCE.md §7
+#
+# Position in the cascade: R9 fusion -> R10 cross-encoder -> **R12 MaxSim** ->
+# R11 adaptive pack. R12 is a RERANKER, not an index: article@500 is already
+# 0.9745, so PLAID/WARP index machinery would buy recall we have. The measured
+# gain of late interaction on the closest published Vietnamese legal corpus is
+# entirely at the top of the list, which is where our article@4 (0.7920) vs
+# article@10 (0.8832) gap lives.
+
+version: sedar-retrieval-v3
+stage: R12
+status: code_ready_requires_finetuning
+depends_on:
+  - R0
+  - R9
+  - R10
+
+# ---------------------------------------------------------------------------
+# THE PRECONDITION. Read before allocating GPU time.
+#
+# Zero-shot late interaction LOSES on Vietnamese: MRR@10 21.54 vs BM25's 23.09
+# (Findings of EACL 2026). And as of September 2026 there is no credible,
+# benchmarked Vietnamese ColBERT checkpoint:
+#   - iambestfeed/halong_colbert : PyLate format, xlm-roberta, GATED, 0 downloads,
+#                                  ZERO published numbers. Unvalidated.
+#   - jinaai/jina-colbert-v2     : real ColBERT, 128-dim, 8192 ctx, `vi` tagged,
+#                                  but CC-BY-NC-4.0 and NO Vietnamese numbers.
+#   - antoinelouis/colbert-xm    : MIT, 128-dim, but 256-token documents — which
+#                                  truncates most corpus v4 units.
+#   - AITeamVN/*                 : dense-only exports; neither ships
+#                                  colbert_linear.pt. No VN multi-vector head.
+# So this stage means fine-tuning our own. The config refuses a bare base
+# encoder by default because PyLate silently appends a RANDOMLY INITIALISED
+# Dense(hidden->128) to one: it loads, it encodes, and the numbers are noise.
+# ---------------------------------------------------------------------------
+
+environment:
+  # Hard pin, verified from the package metadata. ST 6.x ships its own
+  # MultiVectorEncoder and cannot coexist with pylate in one environment.
+  pylate: "1.6.0"
+  sentence_transformers: "==5.3.0"
+  scipy_required_for: token_pooling
+  note: >
+    Install pylate in its own venv on the training server. Do not upgrade
+    sentence-transformers inside it.
+
+base_model:
+  # Recommended starting point: MIT licence, 8194 positions, no word
+  # segmentation requirement. Needs the modular constructor because
+  # models.ColBERT("BAAI/bge-m3") fails — bge-m3's modules.json is
+  # Transformer/Pooling/Normalize with no Dense, and PyLate tries to convert
+  # the Pooling module into a Dense.
+  name: BAAI/bge-m3
+  modular_construction: true
+  hidden_size: 1024
+  embedding_size: 128
+  alternatives:
+    jinaai/jina-colbert-v2: "already a ColBERT, 8192 ctx — but CC-BY-NC-4.0"
+    antoinelouis/colbert-xm: "MIT — but 256-token documents"
+    vinai/phobert-base-v2: "what TVPL used — AGPL-3.0, 256 positions, needs VnCoreNLP segmentation"
+
+finetune:
+  # Pairs come from build_reranker_training_data.py: SEMI-HARD negatives, n=10.
+  # Hard negatives at n=2 halved reranker MRR@10 (0.5584 -> 0.2689) on a 261k
+  # Vietnamese legal corpus because 50.87% of them were false negatives.
+  pairs: artifacts/sedar_retrieval/reranker/train_data/pairs.jsonl
+  loss: cached_contrastive     # accumulation-safe; plain Contrastive is not
+  temperature: 0.02            # "often used in the literature" per PyLate docs
+  mini_batch_size: 16
+  epochs: 1
+  batch_size: 16
+  learning_rate: 1.0e-5
+  gradient_accumulation_steps: 1
+  query_length: 32
+  document_length: 512
+  dev_fraction: 0.05
+  split_unit: query
+  seed: 42
+  reference_recipe: >
+    TVPL (arXiv:2412.00657): PhoBERT-base-v2 + CoT-MAE pretraining, 15 negatives
+    per query, ~290k steps, batch size 16, 507k synthetic queries. They reached
+    ColBERT MRR@10 74.61 against their own fine-tuned bi-encoder's 70.69.
+
+runtime:
+  backend: pylate              # bge_m3 is the no-finetuning baseline arm
+  dim: 128
+  query_length: 32
+  document_length: 512
+  # SUM over query tokens — the ColBERT/ColBERTv2 definition and what PyLate
+  # implements. BGE-M3's colbert_score AVERAGES instead, so its scores live on
+  # [-1, 1] while these live on ~[0, 32]. Ranking within a query is unaffected;
+  # any fixed-weight fusion or score threshold is NOT.
+  reduction: sum
+  score_scale: "[0, 32] approx"
+  top_k: 100
+  batch_size: 32
+  device: cuda
+  # Token pooling: factor 2 measured at 100.62% of unpooled quality (i.e. free),
+  # factor 3 at 99.03%, factor 6 at 90.67%. Ward linkage on 1-cos.
+  pool_factor: 1               # ablate 1 -> 2 -> 3
+  quantize_cache: true         # int8 doc-embedding cache, 4x smaller
+  merge_children: true
+  aggregate: max
+  text_field: reader_text
+
+cascade:
+  # Two orders worth measuring; they are not equivalent.
+  order_a: "fusion -> cross-encoder top-100 -> MaxSim top-30 -> pack"
+  order_b: "fusion -> MaxSim top-100 -> cross-encoder top-30 -> pack"
+  note: >
+    The cross-encoder reads the pair jointly and is the stronger single ranker;
+    MaxSim is cheaper per candidate and degrades less on long units. Order A
+    spends the expensive model on 100 and the cheap one on 30, which is the
+    wrong way round on cost. Start with MaxSim replacing nothing — measure it
+    against the fused list alone — before stacking.
+
+sweep:
+  pool_factor: [1, 2, 3]
+  top_k: [50, 100, 200]
+  text_field: [reader_text, breadcrumb_reader_text]
+  document_length: [512, 1024]
+  aggregate: [max, mean]
+
+storage:
+  # For a reranker the cache is small; these numbers are for the day someone
+  # proposes a full late-interaction INDEX instead.
+  reranker_cache: "int8 token vectors for the units actually reranked"
+  index_reference_tvpl:
+    # arXiv:2412.00657 Table 6, on 224,006 Vietnamese legal passages.
+    colbert_1bit: {storage_mb: 647.33, mrr_at_10: 73.61}
+    colbert_2bit: {storage_mb: 1094.04, mrr_at_10: 74.61}
+    colbert_4bit: {storage_mb: 1987.48, mrr_at_10: 74.93}
+    colbert_8bit: {storage_mb: 3774.34, mrr_at_10: 75.02}
+    dense_bi_encoder: {storage_mb: 672.02, mrr_at_10: 70.69}
+    reading: >
+      1-bit ColBERT (647 MB) beats a dense bi-encoder (672 MB) by +2.92 MRR@10
+      at the SAME storage; 8-bit buys only +1.41 over 1-bit for 5.8x the space.
+      2 bits is the knee. Note PyLate's PLAID default is nbits=4, not 2.
+
+evaluation:
+  scope: clean_manifest
+  labels_role: evaluation_only
+  primary_metric: article_at_4
+  secondary_metrics: [article_at_10, mrr_at_10, meteor, rouge_l]
+  baseline:
+    fusion_only:
+      article_at_4: 0.7920
+      article_at_10: 0.8832
+      mrr_at_10: 0.6645
+    reader_champion:
+      meteor: 0.5501
+      rouge_l: 0.5614
+  gates: configs/retrieval/gates.yaml
+  require_paired_bootstrap: true
+  expected_shape_of_the_win: >
+    On TVPL, ColBERT gained +3.92 MRR@10 and +1.95 R@10 while R@100 went
+    slightly DOWN (96.41 vs 96.92). Expect the same shape here: article@4 and
+    MRR@10 move, article@100+ does not. If article@100 improves a lot, suspect
+    the wiring rather than celebrating.
+  notes: >
+    Measure three arms in this order: (1) bge_m3 multi-vector zero-shot, the
+    no-training baseline — MIRACL vi says multi-vector beats M3's own dense by
+    +2.2 nDCG@10, so this arm is not obviously worthless; (2) our fine-tuned
+    ColBERT; (3) fine-tuned ColBERT stacked with the cross-encoder. One change
+    at a time.
