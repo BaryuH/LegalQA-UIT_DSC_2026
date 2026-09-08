@@ -30,6 +30,27 @@ def main() -> int:
         type=Path,
         default=None,
     )
+    parser.add_argument(
+        "--k1",
+        type=float,
+        default=1.5,
+        help=(
+            "BM25 term-frequency saturation. Published tuned values for "
+            "Vietnamese legal corpora disagree: 0.5 (DRiLL@VLSP 2025, ~60k "
+            "articles) vs 1.5 (Findings of EACL 2026, Underthesea-segmented). "
+            "Grid it; do not trust either default."
+        ),
+    )
+    parser.add_argument(
+        "--b",
+        type=float,
+        default=0.75,
+        help=(
+            "BM25 length normalisation. Lower b favours longer units, which is "
+            "the corrective direction for short-unit dominance. Both tuned "
+            "values published for legal text sit at or below 0.75."
+        ),
+    )
     parser.add_argument("--smoke-query", default="Điều 76")
     parser.add_argument("--top-k", type=int, default=10)
     args = parser.parse_args()
@@ -46,7 +67,7 @@ def main() -> int:
     reloaded = load_bm25_index(
         args.cache_root,
         fp,
-        BM25Config(version="sedar-retrieval-v3-bm25"),
+        BM25Config(k1=args.k1, b=args.b, version="sedar-retrieval-v3-bm25"),
     )
     assert reloaded.index is not None
     hits2 = search_passages(reloaded.index, args.smoke_query, top_k=args.top_k)

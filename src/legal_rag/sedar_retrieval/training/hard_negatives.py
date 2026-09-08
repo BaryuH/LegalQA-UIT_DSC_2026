@@ -88,6 +88,20 @@ class CandidateHit:
     sources: tuple[MiningSource, ...] = ()
 
 
+#: Upper bound on negatives per query. Raised from 5 to 16 because the closest
+#: published experiment on a Vietnamese legal corpus (SoICT 2024, 261,446
+#: documents; arXiv:2507.14619) measures the optimum at **10 semi-hard
+#: negatives**: MRR@10 0.7681 at n=2, 0.7821 at n=5, **0.7911 at n=10**. The old
+#: ceiling of 5 made the best measured setting unreachable. The *default* stays
+#: 5 so no existing run changes; only the ceiling moved.
+#:
+#: Do not read this as "more negatives is better" - the same table shows *hard*
+#: negatives at n=2 collapsing to 0.2689, because 50.87% of them sat at cosine
+#: >= 0.9 with the positive, i.e. they were false negatives. The count only
+#: helps inside the semi-hard band.
+MAX_NEGATIVES_CEILING = 16
+
+
 @dataclass(frozen=True, slots=True)
 class HardNegativeMiningConfig:
     """Deterministic selection and audit policy."""
@@ -101,8 +115,11 @@ class HardNegativeMiningConfig:
     dense_false_negative_threshold: float = 0.65
 
     def __post_init__(self) -> None:
-        if not 2 <= self.min_negatives <= self.max_negatives <= 5:
-            raise ValueError("negative counts must satisfy 2 <= min <= max <= 5")
+        if not 2 <= self.min_negatives <= self.max_negatives <= MAX_NEGATIVES_CEILING:
+            raise ValueError(
+                "negative counts must satisfy "
+                f"2 <= min <= max <= {MAX_NEGATIVES_CEILING}"
+            )
         if self.random_rank <= 0:
             raise ValueError("random_rank must be positive")
         for name in (
