@@ -1,0 +1,88 @@
+# SEDAR Retrieval — R9: convex score fusion as the tunable alternative to RRF.
+#
+# Rationale and citations: docs/sedar_retrieval/INDEX_METHOD_EVIDENCE.md §1.
+# Short version: rank-based fusion discards score magnitude, and every source
+# found (ACM TOIS 2023; Findings of EACL 2026 on ten Vietnamese datasets;
+# OpenSearch benchmarking its own default; the DRiLL@VLSP 2025 top-3 system)
+# puts tuned score fusion ahead of RRF on relevance. The Vietnamese optimum is
+# alpha 0.6-0.8 on the dense leg.
+#
+# This config is an ablation, not a promotion. The frozen champion stays
+# weighted RRF until a paired comparison on clean-460 clears the gates in
+# configs/retrieval/gates.yaml.
+
+version: sedar-retrieval-v3
+stage: R9
+status: ablation_ready
+depends_on:
+  - R0
+  - R8
+
+data:
+  # Point this at a corpus_v4 build once its indexes exist; the fusion change is
+  # independent of the corpus version and can be ablated on either.
+  passages_view: artifacts/sedar_retrieval/views/full_r1_r2a_retry_02/passages_r2a.jsonl
+  question_split: warmup
+  scope: clean_manifest
+  labels_role: evaluation_only
+
+retrievers:
+  bm25:
+    enabled: true
+    source_name: bm25
+    top_k: 100
+  qwen:
+    enabled: true
+    source_name: dense
+    model: Qwen/Qwen3-Embedding-4B
+    top_k: 100
+
+fusion:
+  method: convex
+  # Per-query, per-source scaling. theoretical_minmax widens the range to each
+  # retriever's theoretical bounds instead of the observed min of a truncated
+  # top-100, which is an artefact of the cut-off rather than the distribution.
+  normalization: minmax
+  # What a passage absent from one retriever contributes. BM25-only recall@4 is
+  # 0.5219 against the dense leg's 0.7774, so the legs differ enough in recall
+  # that 'skip' (average over the sources that returned it) is worth ablating.
+  missing_score: theoretical_min
+  union_cap: 300
+  weights:
+    bm25: 0.3
+    dense: 0.7
+  theoretical_bounds:
+    bm25: [0.0, null]
+    dense: [-1.0, 1.0]
+
+sweep:
+  # Weights are normalised internally, so this is a sweep over alpha on the
+  # dense leg. Start at 0.7; the published Vietnamese range is 0.6-0.8.
+  dense_weight: [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  bm25_weight: [1.0]
+  normalization: [minmax, theoretical_minmax]
+  missing_score: [theoretical_min, skip]
+
+baseline:
+  # The frozen champion this must beat, clean-460, level-aware.
+  method: weighted_rrf
+  rrf_k: 60
+  weights:
+    bm25: 0.25
+    dense: 1.0
+  metrics:
+    article_at_4: 0.7920
+    article_at_10: 0.8832
+    article_at_20: 0.9197
+    article_at_500: 0.9745
+    mrr_at_10: 0.6645
+
+promotion:
+  # Reuse the standing engineering gates; no new tolerance is introduced here.
+  gates: configs/retrieval/gates.yaml
+  primary_metric: article_at_4
+  require_paired_bootstrap: true
+  notes: >
+    Fusion depth must stay at 100 per leg for the comparison to be meaningful.
+    A count-based cap that binds before the metric being measured is the same
+    class of defect as evidence_top_k binding before max_total_chars.

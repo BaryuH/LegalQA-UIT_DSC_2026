@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Fuse BM25 (+ optional dense/legal) candidates with RRF or pure union."""
+"""Fuse BM25 (+ optional dense/legal) candidates with RRF, convex sum or union.
+
+``--fusion-method convex`` is the score-preserving alternative to weighted RRF.
+Sweep ``--dense-weight`` against a fixed ``--bm25-weight`` on a held-out slice to
+tune the single mixing parameter; the published Vietnamese optimum is 0.6-0.8 on
+the dense leg (Findings of EACL 2026), and the DRiLL@VLSP 2025 top-3 system used
+0.6. See ``docs/sedar_retrieval/INDEX_METHOD_EVIDENCE.md``.
+"""
 
 from __future__ import annotations
 
@@ -12,8 +19,20 @@ from legal_rag.sedar_retrieval.io.jsonl import iter_jsonl_lines
 from legal_rag.sedar_retrieval.retrieval.fusion import (
     RetrieverHit,
     candidate_union,
+    convex_score_fusion,
     reciprocal_rank_fusion,
 )
+
+#: Theoretical score ranges used by ``--normalization theoretical_minmax``.
+#: BM25 is bounded below by 0; cosine similarity on L2-normalised embeddings is
+#: bounded by [-1, 1]. Widening the observed range to these bounds stops the
+#: top-k cut-off from setting the normaliser's floor.
+_THEORETICAL_BOUNDS: dict[str, tuple[float | None, float | None]] = {
+    "bm25": (0.0, None),
+    "dense": (-1.0, 1.0),
+    "legal": (-1.0, 1.0),
+    "colbert": (-1.0, 1.0),
+}
 
 
 def _load_source(path: Path, source: str) -> dict[str, list[RetrieverHit]]:
@@ -67,9 +86,28 @@ def main() -> int:
     parser.add_argument("--union-cap", type=int, default=250)
     parser.add_argument(
         "--fusion-method",
-        choices=("weighted_rrf", "union"),
+        choices=("weighted_rrf", "convex", "union"),
         default="weighted_rrf",
-        help=("Rank merged candidates with weighted RRF or preserve pure union order."),
+        help=(
+            "weighted_rrf keeps the frozen rank-based default; convex takes a "
+            "weighted sum of per-query normalised scores; union preserves pure "
+            "candidate order."
+        ),
+    )
+    parser.add_argument(
+        "--normalization",
+        choices=("minmax", "theoretical_minmax", "zscore", "none"),
+        default="minmax",
+        help="Per-query, per-source score scaling for --fusion-method=convex.",
+    )
+    parser.add_argument(
+        "--missing-score",
+        choices=("theoretical_min", "observed_min", "zero", "skip"),
+        default="theoretical_min",
+        help=(
+            "What a passage absent from one retriever contributes under convex "
+            "fusion. 'skip' averages over the sources that returned it."
+        ),
     )
     parser.add_argument("--bm25-weight", type=float, default=1.0)
     parser.add_argument("--dense-weight", type=float, default=1.0)
@@ -91,14 +129,25 @@ def main() -> int:
     }
     if args.fusion_method == "union":
         if any(weight != 1.0 for weight in weights.values()):
-            raise SystemExit("--*-weight options require --fusion-method=weighted_rrf")
+            raise SystemExit(
+                "--*-weight options require --fusion-method=weighted_rrf or convex"
+            )
+    method_label = {
+        "union": "candidate_union",
+        "weighted_rrf": "weighted_rrf",
+        "convex": f"convex_{args.normalization}_{args.missing_score}",
+    }[args.fusion_method]
     fusion_metadata = {
-        "method": "candidate_union"
-        if args.fusion_method == "union"
-        else "weighted_rrf",
+        "method": method_label,
         "rrf_k": args.rrf_k if args.fusion_method == "weighted_rrf" else None,
         "union_cap": args.union_cap,
-        "weights": weights if args.fusion_method == "weighted_rrf" else None,
+        "weights": None if args.fusion_method == "union" else weights,
+        "normalization": args.normalization
+        if args.fusion_method == "convex"
+        else None,
+        "missing_score": args.missing_score
+        if args.fusion_method == "convex"
+        else None,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as handle:
@@ -112,6 +161,15 @@ def main() -> int:
                 lists["legal"] = legal[qid]
             if args.fusion_method == "union":
                 fused = candidate_union(lists, union_cap=args.union_cap)
+            elif args.fusion_method == "convex":
+                fused = convex_score_fusion(
+                    lists,
+                    weights=weights,
+                    normalization=args.normalization,
+                    missing_score=args.missing_score,
+                    theoretical_bounds=_THEORETICAL_BOUNDS,
+                    union_cap=args.union_cap,
+                )
             else:
                 fused = reciprocal_rank_fusion(
                     lists,
@@ -136,6 +194,8 @@ def main() -> int:
                                 "legal_score": c.legal_score,
                                 "legal_rank": c.legal_rank,
                                 "rrf_score": c.rrf_score,
+                                "fusion_score": c.fusion_score,
+                                "fusion_method": c.fusion_method,
                                 "fused_rank": c.fused_rank,
                             }
                             for c in fused

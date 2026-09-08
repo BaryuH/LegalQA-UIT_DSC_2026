@@ -1,4 +1,29 @@
-"""Multi-retriever candidate fusion (TASK 08 / R3)."""
+"""Multi-retriever candidate fusion (TASK 08 / R3, TASK 23 convex fusion).
+
+Two fusion families live here.
+
+``reciprocal_rank_fusion`` merges ranks and discards score magnitude. That is
+what makes it robust across retrievers with incomparable score scales, and it is
+also its cost: a candidate ranked #1 by both legs is unbeatable under RRF no
+matter how much better a #2 candidate's actual scores were.
+
+``convex_score_fusion`` keeps magnitude: it normalises each leg's scores and
+takes a weighted sum. The published evidence favours it. Bruch et al. (ACM TOIS
+2023, arXiv:2210.11934) measure convex combination above RRF both in and out of
+domain on MS MARCO and BEIR (nDCG@1000 0.454 vs 0.425), find RRF's ``k`` does not
+transfer between collections while a single alpha does, and show the convex
+parameter is sample-efficient to tune. OpenSearch's own benchmark of its own
+default reports RRF 3.86% below score normalisation on nDCG@10 across six BEIR
+sets. For Vietnamese specifically, "Which Works Best for Vietnamese?" (Findings
+of EACL 2026) reports linear alpha-fusion above both standalone legs on all ten
+datasets tested, with the optimum at alpha 0.6-0.8, and states that RRF
+"generally underperformed linear interpolation"; the top-3 DRiLL@VLSP 2025 system
+used a weighted sum with lambda 0.6 rather than RRF.
+
+Neither function replaces the other. RRF stays the frozen default so existing
+runs stay reproducible; convex fusion is the tunable alternative to ablate
+against it.
+"""
 
 from __future__ import annotations
 
@@ -28,6 +53,10 @@ class FusedCandidate:
     fused_rank: int
     legal_score: float | None = None
     legal_rank: int | None = None
+    #: Score produced by a non-RRF fusion function, kept in its own field so
+    #: ``rrf_score`` never carries a value that is not an RRF score.
+    fusion_score: float | None = None
+    fusion_method: str | None = None
 
 
 def _validated_source_hits(
@@ -64,6 +93,8 @@ def _fused_candidate(
     legal: Mapping[str, RetrieverHit],
     rrf_score: float | None,
     fused_rank: int,
+    fusion_score: float | None = None,
+    fusion_method: str | None = None,
 ) -> FusedCandidate:
     bm25_hit = bm25.get(passage_id)
     dense_hit = dense.get(passage_id)
@@ -81,6 +112,8 @@ def _fused_candidate(
         fused_rank=fused_rank,
         legal_score=None if legal_hit is None else legal_hit.score,
         legal_rank=None if legal_hit is None else legal_hit.rank,
+        fusion_score=fusion_score,
+        fusion_method=fusion_method,
     )
 
 
@@ -184,4 +217,188 @@ def candidate_union(
             fused_rank=index,
         )
         for index, passage_id in enumerate(capped, start=1)
+    )
+
+
+NORMALIZATIONS = ("minmax", "theoretical_minmax", "zscore", "none")
+MISSING_POLICIES = ("theoretical_min", "observed_min", "zero", "skip")
+
+
+def _normalize_scores(
+    scores: Mapping[str, float],
+    *,
+    method: str,
+    theoretical_min: float | None,
+    theoretical_max: float | None,
+) -> tuple[dict[str, float], float]:
+    """Map one retriever's raw scores onto a comparable scale.
+
+    Returns the normalised scores and the value a passage missing from this
+    retriever should take under the ``theoretical_min`` policy. Bruch et al.
+    normalise with the *theoretical* minimum where the retriever has one -
+    cosine similarity on L2-normalised vectors is bounded below by -1 and BM25 by
+    0 - because the observed minimum of a truncated top-k list is an artefact of
+    the cut-off, not of the score distribution.
+    """
+
+    if method not in NORMALIZATIONS:
+        raise ValueError(f"Unknown normalization: {method!r}")
+    values = list(scores.values())
+    if not values:
+        return {}, 0.0
+    if method == "none":
+        return dict(scores), float(theoretical_min if theoretical_min is not None else 0.0)
+    if method == "zscore":
+        mean = sum(values) / len(values)
+        variance = sum((value - mean) ** 2 for value in values) / len(values)
+        deviation = math.sqrt(variance)
+        if deviation <= 0.0:
+            return {key: 0.0 for key in scores}, 0.0
+        return {key: (value - mean) / deviation for key, value in scores.items()}, min(
+            (value - mean) / deviation for value in values
+        )
+
+    observed_min = min(values)
+    observed_max = max(values)
+    lower = observed_min
+    upper = observed_max
+    if method == "theoretical_minmax":
+        if theoretical_min is not None:
+            lower = min(theoretical_min, observed_min)
+        if theoretical_max is not None:
+            upper = max(theoretical_max, observed_max)
+    span = upper - lower
+    if span <= 0.0:
+        return {key: 1.0 for key in scores}, 0.0
+    normalized = {key: (value - lower) / span for key, value in scores.items()}
+    return normalized, 0.0
+
+
+def convex_score_fusion(
+    ranked_lists: Mapping[str, Sequence[RetrieverHit]],
+    *,
+    weights: Mapping[str, float] | None = None,
+    normalization: str = "minmax",
+    missing_score: str = "theoretical_min",
+    theoretical_bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
+    union_cap: int = 250,
+) -> tuple[FusedCandidate, ...]:
+    """Fuse ranked lists by a weighted sum of per-query normalised scores.
+
+    ``weights`` are normalised to sum to one, so a two-source call with
+    ``{"bm25": 0.3, "dense": 0.7}`` is the usual ``alpha`` parameterisation with
+    ``alpha = 0.7`` on the dense leg. Weights are per source and need not sum to
+    one on input.
+
+    ``normalization`` is applied *per query and per source*, which is what makes
+    the two legs comparable at all:
+
+    ``minmax``
+        ``(s - min) / (max - min)`` over the candidates this retriever returned.
+    ``theoretical_minmax``
+        the same, but the bounds are widened to the retriever's theoretical range
+        where one is supplied via ``theoretical_bounds`` (for example ``(0.0,
+        None)`` for BM25 or ``(-1.0, 1.0)`` for cosine). Preferred when the
+        candidate lists are deep, because the observed minimum then reflects the
+        top-k cut rather than the score distribution.
+    ``zscore``
+        standardise to zero mean and unit deviation.
+    ``none``
+        use raw scores. Only sensible when the legs already share a scale.
+
+    ``missing_score`` decides what a passage that one retriever did not return
+    contributes: its theoretical minimum (the default, and the choice in Bruch et
+    al.), the observed minimum of that retriever's list, zero, or nothing at all
+    (``skip``, i.e. average over the sources that did return it). ``skip``
+    rewards passages found by a single strong leg and is the right choice when
+    the legs have very different recall.
+    """
+
+    if union_cap <= 0:
+        raise ValueError("union_cap must be positive")
+    if missing_score not in MISSING_POLICIES:
+        raise ValueError(f"Unknown missing_score policy: {missing_score!r}")
+
+    source_hits = _validated_source_hits(ranked_lists)
+    raw_weights: dict[str, float] = {}
+    for source in source_hits:
+        weight = (weights or {}).get(source, 1.0)
+        if isinstance(weight, bool) or not isinstance(weight, (int, float)):
+            raise ValueError(f"Fusion weight must be numeric: {source!r}")
+        numeric = float(weight)
+        if not math.isfinite(numeric) or numeric < 0.0:
+            raise ValueError(f"Fusion weight must be finite and non-negative: {source!r}")
+        raw_weights[source] = numeric
+    total_weight = sum(raw_weights.values())
+    if total_weight <= 0.0:
+        raise ValueError("At least one fusion weight must be positive")
+    normalized_weights = {
+        source: weight / total_weight for source, weight in raw_weights.items()
+    }
+
+    bounds = dict(theoretical_bounds or {})
+    per_source_scores: dict[str, dict[str, float]] = {}
+    per_source_missing: dict[str, float] = {}
+    for source, hits_by_passage in source_hits.items():
+        lower, upper = bounds.get(source, (None, None))
+        raw = {
+            passage_id: float(hit.score)
+            for passage_id, hit in hits_by_passage.items()
+        }
+        scaled, missing_value = _normalize_scores(
+            raw,
+            method=normalization,
+            theoretical_min=lower,
+            theoretical_max=upper,
+        )
+        per_source_scores[source] = scaled
+        if missing_score == "theoretical_min":
+            per_source_missing[source] = missing_value
+        elif missing_score == "observed_min":
+            per_source_missing[source] = min(scaled.values()) if scaled else 0.0
+        else:
+            per_source_missing[source] = 0.0
+
+    all_ids: set[str] = set()
+    for scaled in per_source_scores.values():
+        all_ids |= set(scaled)
+
+    fused_scores: dict[str, float] = {}
+    for passage_id in all_ids:
+        total = 0.0
+        weight_seen = 0.0
+        for source, scaled in per_source_scores.items():
+            weight = normalized_weights[source]
+            if passage_id in scaled:
+                total += weight * scaled[passage_id]
+                weight_seen += weight
+            elif missing_score == "skip":
+                continue
+            else:
+                total += weight * per_source_missing[source]
+                weight_seen += weight
+        if missing_score == "skip" and weight_seen > 0.0:
+            total /= weight_seen
+        fused_scores[passage_id] = total
+
+    ordered = sorted(fused_scores.items(), key=lambda item: (-item[1], item[0]))
+    capped = ordered[:union_cap]
+    method_label = f"convex_{normalization}_{missing_score}"
+    bm25 = source_hits.get("bm25", {})
+    dense = source_hits.get("dense", {})
+    colbert = source_hits.get("colbert", {})
+    legal = source_hits.get("legal", {})
+    return tuple(
+        _fused_candidate(
+            passage_id,
+            bm25=bm25,
+            dense=dense,
+            colbert=colbert,
+            legal=legal,
+            rrf_score=None,
+            fused_rank=index,
+            fusion_score=score,
+            fusion_method=method_label,
+        )
+        for index, (passage_id, score) in enumerate(capped, start=1)
     )
