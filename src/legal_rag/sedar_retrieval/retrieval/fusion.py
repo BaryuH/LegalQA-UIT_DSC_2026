@@ -309,9 +309,20 @@ def convex_score_fusion(
     ``missing_score`` decides what a passage that one retriever did not return
     contributes: its theoretical minimum (the default, and the choice in Bruch et
     al.), the observed minimum of that retriever's list, zero, or nothing at all
-    (``skip``, i.e. average over the sources that did return it). ``skip``
-    rewards passages found by a single strong leg and is the right choice when
-    the legs have very different recall.
+    (``skip``, i.e. average over the sources that did return it).
+
+    ``skip`` is **pathological under ``minmax``** and measured as such: it lost
+    0.06-0.10 article@4 at every alpha in the A1 sweep
+    (``docs/sedar_retrieval/A1_CONVEX_FUSION_RESULTS.md``). Min-max maps each
+    leg's rank-1 hit to exactly 1.0, so under ``skip`` a passage only one leg
+    returned is scored on that leg alone, undiluted - the lexical leg's rank-1
+    hit then scores 1.0 and tops the fused list however weak it is, with the
+    dense leg's opinion discarded. ``theoretical_min`` charges an absent leg its
+    minimum, which is what makes cross-leg agreement earn a top position. The
+    two policies are numerically identical when only one leg has weight, which
+    is how the A1 sweep identified this as the mechanism rather than a
+    coincidence. Revisit ``skip`` only under ``theoretical_minmax``, where the
+    observed maximum no longer pins each leg's top hit to 1.0.
     """
 
     if union_cap <= 0:

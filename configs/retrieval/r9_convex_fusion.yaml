@@ -43,11 +43,21 @@ fusion:
   # retriever's theoretical bounds instead of the observed min of a truncated
   # top-100, which is an artefact of the cut-off rather than the distribution.
   normalization: minmax
-  # What a passage absent from one retriever contributes. BM25-only recall@4 is
-  # 0.5219 against the dense leg's 0.7774, so the legs differ enough in recall
-  # that 'skip' (average over the sources that returned it) is worth ablating.
+  # What a passage absent from one retriever contributes.
+  # MEASURED 2026-09-09: theoretical_min wins at every alpha and 'skip' loses
+  # 0.06-0.10 article@4 - the opposite of the expectation recorded here before
+  # the run, which was that charging a dense-only find the lexical minimum would
+  # be harsh given BM25-only article@4 0.5219 against the dense leg's 0.7774.
+  # Min-max pins each leg's rank-1 hit to 1.0, so 'skip' scores a single-leg
+  # passage undiluted and hands the top of the list to whichever leg shouted
+  # loudest. See docs/sedar_retrieval/A1_CONVEX_FUSION_RESULTS.md.
   missing_score: theoretical_min
   union_cap: 300
+  # MEASURED OPTIMUM (2026-09-09): alpha = 0.7 on the dense leg, article@4
+  # 0.8102 / MRR@10 0.6876 against the reproduced RRF control 0.7883 / 0.6522.
+  # Chosen as the centre of the 0.6-0.8 plateau (440 / 444 / 438 of 548), not as
+  # the grid argmax. Still `status: ablation_ready` - the paired bootstrap and
+  # the theoretical_minmax arm have not run.
   weights:
     bm25: 0.3
     dense: 0.7

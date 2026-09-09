@@ -118,12 +118,16 @@ done
 ```
 
 `missing_score` is swept alongside α rather than after it because the two
-interact, and under `minmax` the interaction is severe: a passage absent from
-one leg is normalised to **0.0**, so at α = 0.5 a passage the dense leg ranked
-first scores 0.5 and loses to anything mid-list in both. That penalty shrinks as
-α rises, which is a second reason the broken grid's curve climbed monotonically
-to its edge. `skip` (average over the legs that returned it) removes the penalty
-entirely and is the principled choice when the legs' recall differs this much.
+interact, and under `minmax` the interaction is severe.
+
+**This sweep has now run — `docs/sedar_retrieval/A1_CONVEX_FUSION_RESULTS.md`
+has the result.** α = 0.7 with `theoretical_min` measures article@4 0.8102 /
+MRR@10 0.6876 against the reproduced control's 0.7883 / 0.6522, an interior
+unimodal optimum on a 0.6–0.8 plateau. `skip` was expected to help and lost
+0.06–0.10 article@4 at every α: min-max pins each leg's rank-1 hit to exactly
+1.0, so `skip` scores a single-leg passage undiluted and hands the top of the
+fused list to whichever leg shouted loudest. Keep `theoretical_min`. What is
+left before promotion is the paired bootstrap and the `theoretical_minmax` arm.
 
 Two reads before drawing any conclusion:
 
@@ -139,6 +143,21 @@ observed minimum of a truncated top-100).
 
 Gate: beat the **reproduced control** article@4 = 0.7883 / MRR@10 = 0.6522 with
 a paired bootstrap — not the frozen 0.7920, which this control sits 0.0037 under.
+
+The paired bootstrap needs per-query rows, which `eval_retrieval.py` did not
+emit until now (it wrote aggregates only, so `require_paired_bootstrap: true`
+was not satisfiable). Add `--per-case-out` to both the control and the candidate
+eval, then:
+
+```bash
+python scripts/sedar_retrieval/compare_metrics_paired.py \
+  artifacts/sedar_retrieval/eval/rrf_control.percase.json \
+  artifacts/sedar_retrieval/eval/convex_a0.7_theoretical_min.percase.json \
+  --metrics article_at_4 rr_at_10 \
+  --json-out artifacts/sedar_retrieval/eval/a1_paired.json
+```
+
+`--per-case-bundle` defaults to `article_expanded`, the ranking-gate bundle.
 
 ### A2. BM25 grid  *(hours, cheap)*
 
