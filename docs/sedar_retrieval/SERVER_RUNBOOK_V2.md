@@ -76,7 +76,63 @@ Exit code 1 on any FAIL. The two it will almost certainly report on the champion
 
 ---
 
+## RE-PLAN 2026-09-09 — read this before picking the next arm
+
+A1 measured the split's resolution as a side effect of failing on it:
+**|Δ| must exceed ~4.4 pp on article@4** for `ci_low` to clear the 0.008 noise
+floor at n = 305 (derivation in `A1_CONVEX_FUSION_RESULTS.md`). That bound is a
+property of the split, not of A1, so it re-orders everything below.
+
+Two consequences that change the plan:
+
+1. **Arms with sub-4 pp expected effects cannot be decided here.** A2's BM25
+   k1/b grid is the clearest case: skip it.
+2. **Prefer decisions on the end metric.** Task 2 is scored on generated prose.
+   METEOR and ROUGE-L are *continuous*, so a paired test on 230 dev cases
+   resolves far smaller effects per case than a binary hit@4 on 305 — and it
+   measures the thing that is actually scored rather than a proxy. Retrieval
+   metrics stay as diagnostics; they stop being the promotion gate for anything
+   whose effect lands under the bound.
+
+### The order
+
+| # | arm | why here | gate |
+| --- | --- | --- | --- |
+| 1 | **A3 cross-encoder reranker** | only retrieval arm with a published effect (5–7 pts) above the bound | article@4, paired |
+| 2 | **B corpus v4 head-to-head** | structural, not a tweak: micro-units 33.1%→2.68%, median unit 233→932 chars, 1,289→0 documents with no retrievable unit, and it recovers the 15 `article_not_in_passages` A0 could not | article@4 + label coverage |
+| 3 | **A4/A5 evidence pack** (AIC baseline, then adaptive sizing) | `progress.md` records a monotone dose-response between evidence characters and METEOR — measured on prose, so the bound does not apply | METEOR / ROUGE-L on dev230 |
+| 4 | **Reader v2 retrain** | the largest documented headroom, and authorised since 2026-09-07 (`gates.yaml reader.frozen: false`) | `reader_v2_gates.yaml` on test230 |
+| 5 | **C ColBERT** | cannot run zero-shot, needs a fine-tune first | last, only if time remains |
+
+**Reader last, and that is deliberate.** Steps 2 and 3 both change what the
+reader sees. Retraining before them means retraining twice, and the runbook's
+own warning applies in reverse: a pack arm that looks negative against a reader
+trained on the *old* renderer is not evidence the pack is wrong. Fix the
+evidence pipeline, freeze the renderer, then retrain once on it.
+
+### Two things to fold into A3 rather than run separately
+
+- **Re-score the full α grid on the v3 labels first** (minutes; the twelve fused
+  candidate files still exist). α = 0.7 was chosen against the broken labels. It
+  cannot make A1 promotable, but it decides which fusion carries into A3.
+- **Run the reranker over both the RRF control and the α=0.7 convex candidate.**
+  A cross-encoder reorders the whole top-100, so it may absorb whatever fusion
+  contributes. Two reranker passes answer "does A1 still matter" at the same
+  time as A3, instead of leaving it open.
+
+### A methodological trap in step 2
+
+Silver labels are built **against a passage view**, so v3 and v4 do not share a
+label set and their absolute numbers are not comparable. Build labels on each
+view from the same answers, then compare the arms on the **intersection** of
+queries labelled in both, and report v4's extra label coverage (the 15 recovered
+articles among them) as a separate, additive result. Comparing a v4 arm scored
+on v4 labels against a v3 arm scored on v3 labels measures nothing.
+
 ## Track A — measurable today, no corpus migration
+
+> A1: closed, no promotion (`A1_CONVEX_FUSION_RESULTS.md`). A2: **skipped**, see
+> the re-plan above. A3 is the next arm.
 
 ### A0. Rebuild the silver labels FIRST  *(~1 hour, blocks everything below)*
 
