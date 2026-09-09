@@ -123,6 +123,35 @@ def _write_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
     return questions_path, passages_path, output_path
 
 
+def _build_single_label_case(
+    tmp_path: Path,
+    answer: str,
+    passages: tuple[CanonicalPassage, ...],
+    *,
+    stem: str,
+) -> dict[str, object]:
+    questions_path = tmp_path / f"{stem}-questions.json"
+    questions_path.write_text(
+        json.dumps({"q": {"answer": answer}}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    passages_path = tmp_path / f"{stem}-passages.jsonl"
+    passages_path.write_text(
+        "".join(
+            json.dumps(passage.model_dump(mode="json"), ensure_ascii=False) + "\n"
+            for passage in passages
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / f"{stem}-labels.jsonl"
+    build_silver_labels_from_answers(
+        questions_path=questions_path,
+        passages_path=passages_path,
+        output_path=output_path,
+    )
+    return json.loads(output_path.read_text(encoding="utf-8").strip())
+
+
 def test_builder_scopes_articles_to_cited_document(tmp_path: Path) -> None:
     questions_path, passages_path, output_path = _write_fixture(tmp_path)
 
@@ -217,6 +246,170 @@ def test_builder_keeps_articleless_answer_unlabeled(tmp_path: Path) -> None:
     assert row["note"] == "no_article_citation"
     assert row["relevant_ids"] == []
     assert row["resolution_reasons"] == {"no_article_citation": 1}
+
+
+def test_name_narrows_ambiguous_document_number(tmp_path: Path) -> None:
+    passages = (
+        _passage(
+            "doc-a-art-12",
+            "doc-a",
+            "Nghi-dinh-Huong-dan-2021-55-2021-ND-CP-1",
+            "12",
+        ),
+        _passage(
+            "doc-b-art-12",
+            "doc-b",
+            "Nghi-dinh-Khac-2021-55-2021-ND-CP-2",
+            "12",
+        ),
+    )
+
+    row = _build_single_label_case(
+        tmp_path,
+        "Theo Điều 12 Nghị định 55/2021/NĐ-CP, Nghị định Hướng dẫn 2021.",
+        passages,
+        stem="name-narrows-number",
+    )
+
+    assert row["provenance"] == "silver"
+    assert row["relevant_ids"] == ["doc-a-art-12"]
+    assert row["resolution_reasons"] == {"resolved_document_name": 1}
+
+
+def test_unique_name_recovers_unknown_document_number(tmp_path: Path) -> None:
+    passages = (
+        _passage(
+            "doc-a-art-12",
+            "doc-a",
+            "Nghi-dinh-Huong-dan-2021-55-2021-ND-CP-1",
+            "12",
+        ),
+    )
+
+    row = _build_single_label_case(
+        tmp_path,
+        "Theo Điều 12 Nghị định 999/2021/NĐ-CP, Nghị định Hướng dẫn 2021.",
+        passages,
+        stem="name-recovers-number-miss",
+    )
+
+    assert row["provenance"] == "silver"
+    assert row["relevant_ids"] == ["doc-a-art-12"]
+    assert row["resolution_reasons"] == {
+        "resolved_document_name_after_number_miss": 1
+    }
+
+
+def test_unknown_document_number_without_name_stays_unlabeled(
+    tmp_path: Path,
+) -> None:
+    passages = (
+        _passage(
+            "doc-a-art-12",
+            "doc-a",
+            "Nghi-dinh-Huong-dan-2021-55-2021-ND-CP-1",
+            "12",
+        ),
+    )
+
+    row = _build_single_label_case(
+        tmp_path,
+        "Theo Điều 12 Nghị định 999/2021/NĐ-CP.",
+        passages,
+        stem="number-miss-without-name",
+    )
+
+    assert row["provenance"] == "unlabeled"
+    assert row["relevant_ids"] == []
+    assert row["resolution_reasons"] == {"document_number_not_in_corpus": 1}
+
+
+def test_ambiguous_document_number_without_name_stays_unlabeled(
+    tmp_path: Path,
+) -> None:
+    passages = (
+        _passage(
+            "doc-a-art-12",
+            "doc-a",
+            "Nghi-dinh-Huong-dan-2021-55-2021-ND-CP-1",
+            "12",
+        ),
+        _passage(
+            "doc-b-art-12",
+            "doc-b",
+            "Nghi-dinh-Khac-2021-55-2021-ND-CP-2",
+            "12",
+        ),
+    )
+
+    row = _build_single_label_case(
+        tmp_path,
+        "Theo Điều 12 Nghị định 55/2021/NĐ-CP.",
+        passages,
+        stem="ambiguous-number-without-name",
+    )
+
+    assert row["provenance"] == "unlabeled"
+    assert row["relevant_ids"] == []
+    assert row["resolution_reasons"] == {"ambiguous_document_number": 1}
+
+
+def test_conflicting_document_name_and_number_remains_unlabeled(
+    tmp_path: Path,
+) -> None:
+    passages = (
+        _passage(
+            "doc-a-art-12",
+            "doc-a",
+            "Nghi-dinh-Huong-dan-2021-55-2021-ND-CP-1",
+            "12",
+        ),
+        _passage(
+            "doc-b-art-12",
+            "doc-b",
+            "Nghi-dinh-Khac-2021-99-2021-ND-CP-2",
+            "12",
+        ),
+    )
+
+    row = _build_single_label_case(
+        tmp_path,
+        "Theo Điều 12 Nghị định Khác 2021 Nghị định 55/2021/NĐ-CP.",
+        passages,
+        stem="conflicting-name-number",
+    )
+
+    assert row["provenance"] == "unlabeled"
+    assert row["relevant_ids"] == []
+    assert row["resolution_reasons"] == {"ambiguous_document_scope": 1}
+
+
+def test_ambiguous_document_name_remains_unlabeled(tmp_path: Path) -> None:
+    passages = (
+        _passage(
+            "doc-a-art-12",
+            "doc-a",
+            "Nghi-dinh-Huong-dan-2021-1",
+            "12",
+        ),
+        _passage(
+            "doc-b-art-12",
+            "doc-b",
+            "Nghi-dinh-Huong-dan-2021-2",
+            "12",
+        ),
+    )
+
+    row = _build_single_label_case(
+        tmp_path,
+        "Theo Điều 12 Nghị định Hướng dẫn 2021.",
+        passages,
+        stem="ambiguous-name",
+    )
+
+    assert row["provenance"] == "unlabeled"
+    assert row["relevant_ids"] == []
+    assert row["resolution_reasons"] == {"ambiguous_document_name": 1}
 
 
 def test_builder_records_article_not_in_passages_scope(tmp_path: Path) -> None:

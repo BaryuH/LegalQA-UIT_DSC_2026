@@ -134,6 +134,19 @@ def _document_ids_for_text(
     )
 
 
+def _best_document_ids(distances: Mapping[str, int]) -> frozenset[str]:
+    """Return all documents tied at the nearest citation distance."""
+
+    if not distances:
+        return frozenset()
+    best_distance = min(distances.values())
+    return frozenset(
+        document_id
+        for document_id, distance in distances.items()
+        if distance == best_distance
+    )
+
+
 def _segment_bounds(text: str, start: int, end: int) -> tuple[int, int]:
     """Return a punctuation-bounded citation segment."""
 
@@ -167,43 +180,80 @@ def _resolve_article_document(
         article_end,
     )
     local_distances: dict[str, int] = {}
+    local_name_distances: dict[str, int] = {}
     local_number_mention_count = 0
     for mention in document_mentions:
         mention_start = mention.start
         mention_end = mention.end
         if mention_end <= segment_start or mention_start >= segment_end:
             continue
-        local_number_mention_count += 1
-        candidates = _document_ids_for_number(mention.document_number, scopes)
         distance = min(
             abs(article_start - mention_end),
             abs(mention_start - article_end),
         )
-        for document_id in candidates:
-            previous = local_distances.get(document_id)
-            local_distances[document_id] = (
-                distance if previous is None else min(previous, distance)
-            )
+        if mention.document_number:
+            local_number_mention_count += 1
+            candidates = _document_ids_for_number(mention.document_number, scopes)
+            for document_id in candidates:
+                previous = local_distances.get(document_id)
+                local_distances[document_id] = (
+                    distance if previous is None else min(previous, distance)
+                )
+        if mention.document_name:
+            name_candidates = _document_ids_for_text(mention.raw, scopes)
+            for document_id in name_candidates:
+                previous = local_name_distances.get(document_id)
+                local_name_distances[document_id] = (
+                    distance if previous is None else min(previous, distance)
+                )
 
     if local_distances:
+        best_documents = _best_document_ids(local_distances)
+        best_name_documents = _best_document_ids(local_name_distances)
         best_distance = min(local_distances.values())
-        best_documents = {
-            document_id
-            for document_id, distance in local_distances.items()
-            if distance == best_distance
-        }
+        best_name_distance = (
+            min(local_name_distances.values()) if local_name_distances else None
+        )
         if len(best_documents) == 1:
-            return next(iter(best_documents)), "resolved_document_number"
+            document_id = next(iter(best_documents))
+            if (
+                len(best_name_documents) == 1
+                and document_id not in best_name_documents
+                and best_name_distance is not None
+                and best_name_distance <= best_distance
+            ):
+                return None, "ambiguous_document_scope"
+            return document_id, "resolved_document_number"
+        if len(best_name_documents) == 1:
+            document_id = next(iter(best_name_documents))
+            if document_id in best_documents:
+                return document_id, "resolved_document_name"
         return None, "ambiguous_document_number"
 
     segment = answer[segment_start:segment_end]
-    if local_number_mention_count:
-        return None, "document_number_not_in_corpus"
+    best_name_documents = _best_document_ids(local_name_distances)
+    if len(best_name_documents) == 1:
+        resolution = (
+            "resolved_document_name_after_number_miss"
+            if local_number_mention_count
+            else "resolved_document_name"
+        )
+        return next(iter(best_name_documents)), resolution
+    if len(best_name_documents) > 1:
+        return None, "ambiguous_document_name"
+
     alias_candidates = _document_ids_for_text(segment, scopes)
     if len(alias_candidates) == 1:
-        return next(iter(alias_candidates)), "resolved_document_name"
+        resolution = (
+            "resolved_document_name_after_number_miss"
+            if local_number_mention_count
+            else "resolved_document_name"
+        )
+        return next(iter(alias_candidates)), resolution
     if len(alias_candidates) > 1:
         return None, "ambiguous_document_name"
+    if local_number_mention_count:
+        return None, "document_number_not_in_corpus"
 
     global_candidates = {
         document_id
@@ -230,7 +280,9 @@ def _build_label_row(
 ) -> tuple[dict[str, object], int, int]:
     citations = parse_citations(answer)
     article_mentions = tuple(item for item in citations if item.article)
-    document_mentions = tuple(item for item in citations if item.document_number)
+    document_mentions = tuple(
+        item for item in citations if item.document_number or item.document_name
+    )
     scopes_by_id = {scope.document_id: scope for scope in scopes}
     resolved_scopes: list[dict[str, str]] = []
     unresolved_scopes: list[dict[str, str]] = []

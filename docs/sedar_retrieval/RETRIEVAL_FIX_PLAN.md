@@ -1239,7 +1239,7 @@ không cứu được nhóm feature citation. Muốn LTR khá hơn thì phải s
 query huấn luyện (L3) và bổ sung nhóm aggregation (L8), còn L6 `point_match`
 chỉ đáng làm cho phía label chứ không phải để tăng điểm inference.
 
-##### Rủi ro hồi quy do chính Q1 tạo ra — cần kiểm tra trên server
+##### Rủi ro hồi quy do chính Q1 tạo ra — đã xử lý ở resolver
 
 `eval/silver_labels.py::_resolve_article_document` ngắt sớm:
 
@@ -1261,8 +1261,25 @@ Với mỗi segment đó:
 
 Không đo được tỷ lệ này ở local vì cần `passages_r2a.jsonl`. Chạy audit trên
 server rồi so `resolution_reason_counts["document_number_not_in_corpus"]` trước
-và sau. Nếu nó tăng, sửa bằng cách **thử alias trước khi ngắt sớm** — chỉ trả
-`document_number_not_in_corpus` khi cả alias cũng thất bại.
+và sau. Resolver hiện đã thử alias tên văn bản trong cùng citation segment trước
+khi trả về `document_number_not_in_corpus`, và chỉ trả reason này khi cả số hiệu
+lẫn alias đều không xác định được.
+
+Resolver cũng đưa các `document_name` mentions vào phép tính khoảng cách:
+
+- tên văn bản duy nhất trong cùng segment có thể phá hòa khi một số hiệu ánh xạ
+  nhiều document;
+- tên duy nhất có thể cứu một số hiệu không có trong corpus, ghi reason
+  `resolved_document_name_after_number_miss`;
+- xung đột tên/số hiệu, nhiều alias, và khoảng cách hòa vẫn giữ
+  `unlabeled`/fail-closed.
+
+Các thay đổi này chỉ sửa định danh document ở biên evaluation. Chúng không dùng
+reference answer trong retrieval hoặc inference. Sau khi cập nhật code, phải
+build label artifact ở đường dẫn mới và audit lại; không ghi đè artifact cũ.
+Chỉ dùng artifact mới nếu `silver_query_count > 274`,
+`unresolved_with_article_query_count < 146`, `warnings == []`, và
+`missing_passage_id_count == 0`.
 
 
 **Chẩn đoán.** `query/citation_parser.py`:
