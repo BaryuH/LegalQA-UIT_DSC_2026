@@ -175,15 +175,88 @@ Route 2 changes the measurement plane, so the frozen reference numbers
 (article@4 0.7920, MRR@10 0.6645) do not carry across it. Re-measure the control
 on the new labels and never mix the two sets of numbers in one comparison.
 
+## Re-measured on the rebuilt labels (relabel_v3_20260909, n = 305)
+
+A0 delivered, and criterion 3 — the only one that mattered — **passed**:
+article@4 discordance rose from **8 of 274 to 32 of 305** (a 3.6× higher rate).
+The instrument now resolves effects it previously could not: the
+`theoretical_minmax` arm came back at −0.0590 with p = 0.0016, a verdict the
+stale labels could never have produced.
+
+| arm | article@4 | Δ vs control | RR@10 | Δ | verdict |
+| --- | --- | --- | --- | --- | --- |
+| weighted RRF control | 0.7902 | — | 0.6621 | — | control |
+| convex α=0.7 `theoretical_min` | 0.8132 | **+0.0230** | 0.6985 | **+0.0364** | point-estimate winner, gate not cleared |
+| convex α=0.7 `theoretical_minmax` | 0.7311 | −0.0590 | 0.6259 | −0.0362 | **rejected**, p = 0.0016 / 0.0076 |
+| all `skip` arms | — | — | — | — | rejected |
+
+`theoretical_minmax` losing this badly is consistent: widening BM25's lower
+bound to 0 and cosine's to −1 compresses the observed spread of both legs into a
+narrow band near the top of the range, so the fused score stops discriminating
+among the candidates that actually matter. Its only defensible use was the one
+`skip` needed, and `skip` is already refuted.
+
+Note the control barely moved across the relabelling (0.7883 → 0.7902). The two
+numbers are **not** comparable — 274 and 305 are different query sets — so this
+is not evidence that the triplication was harmless. What the relabelling bought
+was discordance, not a level shift.
+
+## A1 verdict: closed, no promotion — and the reason is structural
+
+**The +2.30 pp winner is below this split's resolution, and no amount of
+re-running changes that.**
+
+The gate is `ci_low > noise_floor` with `noise_floor = 0.008`. For a paired
+binary metric, SE = √D / n where D is the discordant count — a model that
+reproduces the observed CI to four decimals (D = 32, n = 305 gives
+[−0.0954, −0.0227] against the reported [−0.0951, −0.0230]). So the minimum
+detectable effect on this split is
+
+    |Δ| > 0.008 + 1.96·√(r/n) = 0.008 + 1.96·√(0.105/305) ≈ **0.044**
+
+For the +0.0230 winner to clear the floor would take **n ≈ 1,790 labelled
+queries**. Warmup contains 500, of which 305 carry labels. It is not reachable.
+
+This is the honest close: convex fusion at α=0.7 with `theoretical_min` is
+**probably a small real improvement** — +2.3 pp article@4 and +3.6 pp RR@10,
+both positive on a fixed instrument, with the α optimum interior, unimodal and
+where the literature predicted. It is **not demonstrable at this sample size**,
+so it stays a documented candidate and the frozen champion stays weighted RRF.
+
+### The consequence for the rest of Track A
+
+The ~4.4 pp resolution is a property of the split, not of A1, so it applies to
+every remaining arm:
+
+| arm | expected effect | adoptable on this split? |
+| --- | --- | --- |
+| A2 BM25 k1/b grid | ~1 pp | **no** — structurally unmeasurable |
+| A3 cross-encoder reranker | 5–7 pts published | **yes** |
+| A5 adaptive pack | unknown, scored on prose not article@4 | different metric, unaffected |
+
+**Skip A2.** A k1/b grid cannot produce an effect this split can see, so running
+it can only yield another inconclusive verdict at the cost of hours. Go to A3,
+whose published effect is comfortably above the resolution. Revisit A2 only if a
+larger labelled set appears, or bundled with other changes once something has
+actually moved.
+
 ## What remains before promotion
 
-1. ~~Paired bootstrap~~ — **run, and inconclusive on the primary metric.** See
-   above. `eval_retrieval.py --per-case-out` made the gate runnable at all;
-   before it the retrieval evaluator wrote aggregates only.
-2. **Power.** Route 1 or Route 2 above. Route 1 is hours; Route 2 is the one
-   that unblocks the rest of Track A.
-3. **`--normalization theoretical_minmax` at α = 0.7**, the last planned arm.
-   Worth running now because it is minutes, but expect the same power wall.
-4. Name the 1 offset query.
+1. ~~Paired bootstrap~~ — run twice: inconclusive on the stale labels, and
+   below the split's resolution on the rebuilt ones.
+2. ~~Power~~ — A0 delivered; discordance 8/274 → 32/305.
+3. ~~`theoretical_minmax`~~ — run, **rejected** at p = 0.0016.
+4. **Open: re-score the full α grid on the v3 labels.** α = 0.7 was selected
+   against the broken labels. The twelve fused candidate files still exist, so
+   re-scoring is minutes. It cannot make A1 promotable — the resolution bound
+   applies to every cell — but it is what decides whether α = 0.7 is still the
+   right *documented candidate* to carry into A3, or whether the optimum moved
+   once the ruler was fixed. Do this before A3, not after.
+5. **Open: the primary metric.** The champion pack is 6 blocks, so article@4
+   gates nothing the reader actually sees. If `primary_metric` should be
+   article@6 or evidence coverage at the pack size, that is a defensible change
+   — but it must be pre-registered for A3 onward, stated with its reason, and
+   applied uniformly including a re-score of A1. Changing it now, having just
+   failed on it, is metric shopping.
 
 Only then does `r9_convex_fusion.yaml` change status from `ablation_ready`.
