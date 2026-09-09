@@ -117,11 +117,57 @@ python scripts/sedar_retrieval/audit_silver_labels.py \
   --output artifacts/sedar_retrieval/eval/silver_label_audit_v3.json
 ```
 
-Accept the rebuild only if the audit shows **silver queries > 274** and
-**`unresolved_with_article` < 146** — the gate already recorded in
-`memory-bank`. Then sanity-check the shape: `relevant_ids` counts should stop
-being ~98% divisible by three, and a query's gold should no longer span three
-documents for one article number.
+#### A0 accept criteria — DECISION 2026-09-09, pre-registered
+
+The original criteria were *silver queries > 274* and
+*`unresolved_with_article` < 146*. The first still stands. **The second is
+retired**, and it is retired on principle, before any A1 number is looked at
+again — not because a run missed it by 4.
+
+Why it is the wrong gate for the current resolver: it was calibrated against
+the resolver that **guessed**, and a resolver that guesses has a *lower*
+unresolved count precisely because it wrongly resolves things. Making the
+resolver fail closed — the fix — must push this number **up**. Holding the
+corrected resolver to a threshold set by the broken one penalises the fix.
+
+Worse, the number mixes two failure classes with different owners, which
+`audit_silver_labels.py` now reports separately as `unresolved_by_class`:
+
+| class | meaning | owner |
+| --- | --- | --- |
+| `corpus_coverage` | the document was identified, the article has no node in the corpus | **corpus v3 parse debt** — no resolver can fix it |
+| `answer_ambiguity` | the answer text does not determine which document | **nobody** — failing closed is correct |
+
+Neither class is a resolver defect, so no threshold on their sum is a statement
+about label quality. Gating on it makes A0 unachievable on a corpus with known
+unparsed documents.
+
+**The three criteria that replace it** are the properties A0 actually exists to
+guarantee:
+
+1. **Soundness — no false positives.** `missing_passage_id_count == 0`,
+   `warnings == 0`, and the resolver fail-closed. Every `relevant_id` is an
+   article the answer really cites in that document.
+2. **The pathology is gone.** The 2026-08-10 artifact had 98.0% of
+   `relevant_ids` counts divisible by three and 216 queries whose gold was one
+   article number spread over three documents. Both must collapse to near zero.
+   This is the defect being removed, and it is directly checkable.
+3. **Power — the only criterion A1 actually needs.** Re-score the twelve fusion
+   candidate files that already exist against the new labels and count the
+   discordant pairs between the control and α=0.7. It was **8 of 274**
+   (p = 0.0703). It needs roughly **16–20** for a 2 pp effect to be resolvable.
+   Minutes of compute, and it answers the question directly instead of by proxy.
+
+Criterion 3 is the go/no-go. If discordance does not rise, *then* the corpus-v4
+question below becomes live; until it is measured, it is speculation.
+
+Record the `corpus_coverage` count as v3 parse debt with the article numbers
+named. It is not a blocker — it is a **measurement of what corpus v4 buys**, and
+belongs in the Track B v3-vs-v4 comparison rather than in A0's way.
+
+Note the countervailing effect on power: the rebuild drops silver queries from
+377 to ~305, so n falls while discordance rises. The two pull in opposite
+directions, which is exactly why criterion 3 is measured rather than assumed.
 
 **The rebuild moves the measurement plane.** Every frozen reference in this
 document (article@4 0.7920, MRR@10 0.6645, reader METEOR 0.5501) was measured
@@ -129,6 +175,19 @@ against the stale labels and does **not** carry across. Re-measure the weighted
 RRF control on `$LABELS` first, record it as the new control, and never compare
 a new number against an old one. Absolute recall will **drop**; that is the
 defect being removed, not a regression.
+
+#### Do NOT move Track A onto corpus v4 to get past A0
+
+It is the wrong move for three reasons, none of which is about v4's quality:
+
+- v4 has **no indexes built**, so this is not a swap, it is B1 plus an index
+  build plus a full retrieval re-run.
+- It changes the corpus and the fusion in one step. `progress.md` records this
+  project being wrong three times in one day for exactly this class of mistake,
+  and the standing rule is one change at a time against a control that
+  reproduces the champion.
+- Track B already owns this comparison, and the `corpus_coverage` count from A0
+  is now one of its inputs. Spending it to unblock A1 destroys the evidence.
 
 Every step below uses `$LABELS`.
 

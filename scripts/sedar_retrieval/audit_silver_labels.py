@@ -51,6 +51,35 @@ def main(argv: list[str] | None = None) -> int:
 
     warnings = payload.get("warnings", [])
     warning_count = len(warnings) if isinstance(warnings, list) else 0
+
+    # Classify WHY a citation stayed unresolved. A single unresolved count mixes
+    # two failure classes with different owners, and gating on the sum makes the
+    # gate unachievable on a corpus with known unparsed documents:
+    #
+    #   corpus_coverage  - the document was identified but the article has no node
+    #                      in the selected corpus. No resolver can fix this; only
+    #                      corpus coverage can. This is v3 parse debt and is what
+    #                      corpus v4 exists to reduce.
+    #   answer_ambiguity - the answer text itself does not determine which
+    #                      document the article belongs to. Failing closed here is
+    #                      CORRECT behaviour, not a defect; guessing is what
+    #                      produced the cross-document label expansion that the
+    #                      2026-08-10 artifact carried.
+    #
+    # Classes are counted over queries and a query can appear in both, so they
+    # need not sum to unresolved_with_article_query_count.
+    reason_counts = payload.get("unresolved_query_reason_counts", {}) or {}
+    by_class: dict[str, int] = {"corpus_coverage": 0, "answer_ambiguity": 0, "other": 0}
+    per_reason: dict[str, str] = {}
+    for reason, count in reason_counts.items():
+        if "not_in_passages" in reason or "not_in_corpus" in reason:
+            bucket = "corpus_coverage"
+        elif reason.startswith("ambiguous_") or reason.endswith("_not_found"):
+            bucket = "answer_ambiguity"
+        else:
+            bucket = "other"
+        by_class[bucket] += int(count)
+        per_reason[reason] = bucket
     print(
         json.dumps(
             {
@@ -66,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
                 "unresolved_query_reason_counts": payload[
                     "unresolved_query_reason_counts"
                 ],
+                "unresolved_by_class": by_class,
+                "unresolved_reason_class": per_reason,
                 "multi_document_query_count": payload["multi_document_query_count"],
                 "missing_passage_id_count": payload["missing_passage_id_count"],
                 "warnings": warning_count,
