@@ -8,9 +8,10 @@ be built from diluted silver labels.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from legal_rag.sedar_retrieval.corpus_v4.citations import Citation, extract_citations
 from legal_rag.evaluation.answer_in_context import (
     ANSWER_IN_CONTEXT_SCHEMA_VERSION,
     answer_in_context,
@@ -18,6 +19,8 @@ from legal_rag.evaluation.answer_in_context import (
     summarize_answer_in_context,
     tokenize,
 )
+from legal_rag.sedar_retrieval.corpus_v4.citations import Citation, extract_citations
+from scripts.sedar_retrieval.eval_answer_in_context import _load_raw_units
 
 _ANSWER = (
     "Căn cứ Điều 76 Bộ luật Lao động 2019 quy định về ký kết thỏa ước lao động "
@@ -47,6 +50,27 @@ def _resolver(mapping: dict[tuple[str, str], tuple[str, ...]]):
 
 
 _RESOLVE = _resolver({("76", "Bộ luật Lao động"): (_TARGET,)})
+
+
+def test_aic_unit_loader_normalizes_v3_passage_ids(tmp_path) -> None:
+    path = tmp_path / "passages_r2a.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "passage_id": "bldd2019::art::76",
+                "document_id": "bldd2019",
+                "article_number": "76",
+                "reader_text": _GROUNDED_TEXT,
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rows = _load_raw_units(path)
+
+    assert rows[0]["unit_id"] == "bldd2019::art::76"
 
 
 # --- the headline metric --------------------------------------------------

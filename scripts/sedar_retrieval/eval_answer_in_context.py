@@ -26,12 +26,15 @@ import json
 from pathlib import Path
 from typing import Any
 
-from legal_rag.sedar_retrieval.corpus_v4.citations import CitationIndex
-from legal_rag.sedar_retrieval.corpus_v4.export import article_id_for, build_article_id_map
 from legal_rag.evaluation.answer_in_context import (
     DEFAULT_SHINGLE_SIZE,
     answer_in_context,
     summarize_answer_in_context,
+)
+from legal_rag.sedar_retrieval.corpus_v4.citations import CitationIndex
+from legal_rag.sedar_retrieval.corpus_v4.export import (
+    article_id_for,
+    build_article_id_map,
 )
 from legal_rag.sedar_retrieval.ranking.vietnamese_reranker import (
     load_rerank_units,
@@ -71,6 +74,35 @@ def _load_pack_ids(
     if not per_query:
         raise SystemExit(f"No pack rows found in {source}")
     return per_query
+
+
+def _load_raw_units(path: Path) -> list[dict[str, Any]]:
+    """Load corpus rows with the common id expected by the AIC mapper.
+
+    ``load_rerank_units`` accepts both corpus v4 ``unit_id`` rows and v3
+    ``passage_id`` rows.  The article-mapping pass must apply the same
+    compatibility rule; otherwise a valid v3 AIC run fails after loading with
+    ``KeyError: 'unit_id'``.
+    """
+
+    rows: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            row = dict(json.loads(line))
+            unit_id = row.get("unit_id") or row.get("passage_id")
+            if not unit_id:
+                raise SystemExit(
+                    f"Corpus row {line_number} in {path} has neither "
+                    "'unit_id' nor 'passage_id'"
+                )
+            row["unit_id"] = str(unit_id)
+            rows.append(row)
+    if not rows:
+        raise SystemExit(f"No corpus rows found in {path}")
+    return rows
 
 
 def main() -> int:
@@ -135,7 +167,7 @@ def main() -> int:
 
     # Citations resolve to ARTICLE identity, so a pack unit counts for its
     # parent article and an article_part is not a miss.
-    raw_units = [json.loads(line) for line in args.units.open(encoding="utf-8")]
+    raw_units = _load_raw_units(args.units)
     article_id_map = build_article_id_map(raw_units)
     # Index by id first: resolving each unit's parent by scanning the list is
     # O(n^2) and hangs on a 300k-unit build.
