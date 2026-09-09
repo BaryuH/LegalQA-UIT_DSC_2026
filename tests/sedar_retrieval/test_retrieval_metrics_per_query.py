@@ -108,6 +108,7 @@ def test_every_aggregate_is_the_mean_of_the_rows() -> None:
         assert bundle.recall_at[cutoff] == mean_of(f"recall_at_{cutoff}")
         assert bundle.article_recall_at[cutoff] == mean_of(f"article_at_{cutoff}")
         assert bundle.document_recall_at[cutoff] == mean_of(f"document_at_{cutoff}")
+        assert bundle.evidence_coverage_at[cutoff] == mean_of(f"coverage_at_{cutoff}")
     assert bundle.mrr_at_10 == mean_of("rr_at_10")
     assert bundle.ndcg_at_10 == mean_of("ndcg_at_10")
 
@@ -128,6 +129,7 @@ def test_rows_are_keyed_by_the_configured_cutoffs() -> None:
         per_query_sink=sink,
     )
     row = next(iter(sink.values()))
+    assert "coverage_at_3" in row and "coverage_at_7" in row
     assert "article_at_3" in row and "article_at_7" in row
     assert "rr_at_5" in row and "ndcg_at_5" in row
     assert "article_at_4" not in row
@@ -149,5 +151,6 @@ def test_article_and_document_fields_absent_without_level_maps() -> None:
     )
     row = next(iter(sink.values()))
     assert "recall_at_4" in row
+    assert "coverage_at_4" in row  # needs no level map
     assert "article_at_4" not in row
     assert "document_at_4" not in row

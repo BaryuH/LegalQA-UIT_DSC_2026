@@ -262,9 +262,14 @@ def evaluate_retrieval(
             recall[k].append(recall_k)
             if row is not None:
                 row[f"recall_at_{k}"] = recall_k
-            coverage[k].append(
-                evidence_coverage_at_k(ranked_unique, label.relevant_ids, k)
-            )
+            coverage_k = evidence_coverage_at_k(ranked_unique, label.relevant_ids, k)
+            coverage[k].append(coverage_k)
+            if row is not None:
+                # Continuous, unlike recall/article/document, which are 0/1. A
+                # paired test on a fractional metric draws on every query that
+                # differs at all instead of only those that cross a cutoff
+                # boundary, which is where a binary metric loses its power.
+                row[f"coverage_at_{k}"] = coverage_k
             mh = multi_hit_at_k(ranked_unique, label.relevant_ids, k)
             if mh is not None:
                 multi_hit[k].append(mh)
