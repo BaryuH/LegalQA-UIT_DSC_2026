@@ -216,6 +216,29 @@ def main() -> int:
     parser.add_argument("--ndcg-cutoff", type=int, default=10)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
+        "--per-case-out",
+        type=Path,
+        default=None,
+        help=(
+            "Also write per-query rows to this path as "
+            '{"per_case": [{"id": ..., "article_at_4": ..., "rr_at_10": ...}]}, '
+            "the format scripts/sedar_retrieval/compare_metrics_paired.py reads. "
+            "Required for any promotion decision: the gates ask for a paired "
+            "bootstrap, and without per-query rows only aggregates can be "
+            "compared, which is the unpaired test they do not accept."
+        ),
+    )
+    parser.add_argument(
+        "--per-case-bundle",
+        choices=("article_expanded", "top_level"),
+        default="article_expanded",
+        help=(
+            "Which label bundle the per-query rows are scored against. "
+            "article_expanded is the ranking-gate bundle (relevant_ids widened "
+            "to article siblings); top_level is exact passage_id relevance."
+        ),
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Allow overwriting an existing metrics artifact.",
@@ -308,7 +331,11 @@ def main() -> int:
             "Labels, rankings and --passages must share one corpus fingerprint."
         )
 
-    def _evaluate(label_rows: list[QueryRelevance]) -> dict[str, object]:
+    def _evaluate(
+        label_rows: list[QueryRelevance],
+        *,
+        per_query_sink: dict[str, dict[str, float]] | None = None,
+    ) -> dict[str, object]:
         return metrics_to_dict(
             evaluate_retrieval(
                 predictions,
@@ -319,6 +346,7 @@ def main() -> int:
                 passage_to_clause=passage_to_clause,
                 mrr_cutoff=args.mrr_cutoff,
                 ndcg_cutoff=args.ndcg_cutoff,
+                per_query_sink=per_query_sink,
             )
         )
 
@@ -329,8 +357,18 @@ def main() -> int:
         article_members=article_members,
     )
 
-    metrics = _evaluate(labels)
-    metrics["article_expanded"] = _evaluate(labels_expanded)
+    top_level_sink: dict[str, dict[str, float]] | None = None
+    expanded_sink: dict[str, dict[str, float]] | None = None
+    if args.per_case_out is not None:
+        if args.per_case_bundle == "top_level":
+            top_level_sink = {}
+        else:
+            expanded_sink = {}
+
+    metrics = _evaluate(labels, per_query_sink=top_level_sink)
+    metrics["article_expanded"] = _evaluate(
+        labels_expanded, per_query_sink=expanded_sink
+    )
     metrics["evaluator"] = {
         "level_aware": True,
         "cutoffs": list(cutoffs),
@@ -354,6 +392,36 @@ def main() -> int:
             ),
         },
     }
+    if args.per_case_out is not None:
+        if args.per_case_out.exists() and not args.force:
+            raise SystemExit(f"Refusing to overwrite artifact: {args.per_case_out}")
+        sink = top_level_sink if top_level_sink is not None else expanded_sink
+        assert sink is not None
+        per_case = [
+            {"id": query_id, **sink[query_id]} for query_id in sorted(sink)
+        ]
+        args.per_case_out.parent.mkdir(parents=True, exist_ok=True)
+        args.per_case_out.write_text(
+            json.dumps(
+                {
+                    "bundle": args.per_case_bundle,
+                    "pred_path": str(args.pred),
+                    "labels_path": str(args.labels),
+                    "passages_path": str(args.passages),
+                    "id_scope": id_scope,
+                    "mrr_cutoff": args.mrr_cutoff,
+                    "ndcg_cutoff": args.ndcg_cutoff,
+                    "cutoffs": list(cutoffs),
+                    "n_per_case": len(per_case),
+                    "per_case": per_case,
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(metrics, indent=2, ensure_ascii=False) + "\n",
@@ -364,7 +432,10 @@ def main() -> int:
     for key, value in metrics.items():
         lines.append(f"- `{key}`: `{value}`")
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(json.dumps({"metrics": str(args.output), "markdown": str(md_path)}))
+    printed = {"metrics": str(args.output), "markdown": str(md_path)}
+    if args.per_case_out is not None:
+        printed["per_case"] = str(args.per_case_out)
+    print(json.dumps(printed))
     return 0
 
 

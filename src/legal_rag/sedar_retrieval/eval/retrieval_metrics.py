@@ -39,7 +39,7 @@ Duplicate Rate
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -201,8 +201,18 @@ def evaluate_retrieval(
     passage_to_clause: Mapping[str, str] | None = None,
     mrr_cutoff: int = 10,
     ndcg_cutoff: int = 10,
+    per_query_sink: MutableMapping[str, dict[str, float]] | None = None,
 ) -> RetrievalMetricBundle:
-    """Evaluate ranked lists against labeled relevance with stable averages."""
+    """Evaluate ranked lists against labeled relevance with stable averages.
+
+    ``per_query_sink``, when given, is filled with one row per LABELED query:
+    ``{query_id: {"recall_at_4": 0.0|1.0, "article_at_4": ..., "rr_at_10": ...}}``.
+    Every aggregate this function returns is a plain mean over those rows, so the
+    rows are the paired sample a paired bootstrap needs - without them, adoption
+    decisions can only compare aggregates, which is the unpaired test this
+    project's gates explicitly do not accept. Purely additive: the default None
+    leaves every returned value bit-identical.
+    """
 
     label_by_id = {item.query_id: item for item in labels}
     if len(label_by_id) != len(labels):
@@ -245,8 +255,13 @@ def evaluate_retrieval(
         if label.provenance == "unlabeled" or not label.relevant_ids:
             continue
 
+        row: dict[str, float] | None = {} if per_query_sink is not None else None
+
         for k in cutoffs:
-            recall[k].append(recall_at_k(ranked_unique, label.relevant_ids, k))
+            recall_k = recall_at_k(ranked_unique, label.relevant_ids, k)
+            recall[k].append(recall_k)
+            if row is not None:
+                row[f"recall_at_{k}"] = recall_k
             coverage[k].append(
                 evidence_coverage_at_k(ranked_unique, label.relevant_ids, k)
             )
@@ -265,9 +280,10 @@ def evaluate_retrieval(
                     for pid in label.relevant_ids
                     if pid in passage_to_document
                 )
-                doc_recall[k].append(
-                    1.0 if gold_docs and retrieved_docs & gold_docs else 0.0
-                )
+                doc_hit = 1.0 if gold_docs and retrieved_docs & gold_docs else 0.0
+                doc_recall[k].append(doc_hit)
+                if row is not None:
+                    row[f"document_at_{k}"] = doc_hit
             if passage_to_article is not None:
                 retrieved_arts = {
                     passage_to_article[pid]
@@ -279,9 +295,10 @@ def evaluate_retrieval(
                     for pid in label.relevant_ids
                     if pid in passage_to_article
                 )
-                art_recall[k].append(
-                    1.0 if gold_arts and retrieved_arts & gold_arts else 0.0
-                )
+                art_hit = 1.0 if gold_arts and retrieved_arts & gold_arts else 0.0
+                art_recall[k].append(art_hit)
+                if row is not None:
+                    row[f"article_at_{k}"] = art_hit
             if passage_to_clause is not None:
                 retrieved_cls = {
                     passage_to_clause[pid]
@@ -297,17 +314,22 @@ def evaluate_retrieval(
                     1.0 if gold_cls and retrieved_cls & gold_cls else 0.0
                 )
 
-        mrr_values.append(
-            reciprocal_rank_at_k(ranked_unique, label.relevant_ids, mrr_cutoff)
+        rr_value = reciprocal_rank_at_k(
+            ranked_unique, label.relevant_ids, mrr_cutoff
         )
-        ndcg_values.append(
-            ndcg_at_k(
-                ranked_unique,
-                label.relevant_ids,
-                ndcg_cutoff,
-                graded=label.graded,
-            )
+        mrr_values.append(rr_value)
+        ndcg_value = ndcg_at_k(
+            ranked_unique,
+            label.relevant_ids,
+            ndcg_cutoff,
+            graded=label.graded,
         )
+        ndcg_values.append(ndcg_value)
+        if row is not None:
+            row[f"rr_at_{mrr_cutoff}"] = rr_value
+            row[f"ndcg_at_{ndcg_cutoff}"] = ndcg_value
+            assert per_query_sink is not None
+            per_query_sink[query_id] = row
 
         if passage_to_document is not None and ranked_unique:
             top_doc = passage_to_document.get(ranked_unique[0])
