@@ -137,6 +137,13 @@ here — **compresses discordance to nearly nothing**: two rankings have to diff
 a lot before they differ on a target this wide. 8 discordant pairs out of 274 is
 that compression, not a property of convex fusion.
 
+**The cause is a stale artifact, not missing code.**
+`warmup_silver_labels.jsonl` was built **2026-08-10**. The commit that fixes
+exactly this — `469de3d fix: scope silver labels by document and article` —
+landed **2026-08-31**, and the labels were never rebuilt. The current builder
+resolves each article mention to one document or fails closed, so the fix is a
+one-hour rerun (`SERVER_RUNBOOK_V2.md` A0), not a piece of work.
+
 This is the same defect the answer-in-context calibration surfaced from the
 other direction (query 101515: six listed articles, one identified by the
 citation resolver). It is already a known gate in `memory-bank`
@@ -144,7 +151,9 @@ citation resolver). It is already a known gate in `memory-bank`
 to be blocked by it, and every arm after it — A2's BM25 grid, A3's reranker,
 A5's pack — is measured on the same instrument and will hit the same wall.
 
-**The bottleneck has moved from the ideas to the measurement.**
+**The bottleneck has moved from the ideas to the measurement**, and every Track
+A number produced so far — including the frozen champion's 0.7920 — is a
+measurement against a known-broken instrument.
 
 ## Two independent routes to a decision on A1
 
@@ -155,11 +164,12 @@ Both raise power; they are additive and neither is a re-analysis of this run.
    rate, 349 gives ~10 discordant pairs (p ≈ 0.02 at 7:1) and the full 460 with
    labels would give ~13 (p ≈ 0.01). Re-run the α=0.7 candidate and the control
    over every labelled query available, then re-run the bootstrap.
-2. **De-duplicate the gold (fixes the instrument).** Collapse `relevant_ids` to
-   distinct resolved articles — or rebuild them with the corpus v4 citation
-   resolver, which resolves 92.63% of citations to a single article identity.
-   This *lowers* every absolute recall number, which is correct, and it raises
-   discordance, which is what makes small effects measurable at all.
+2. **Rebuild the labels with the builder that already exists (fixes the
+   instrument).** `build_silver_labels.py` post-`469de3d` resolves each article
+   mention to one document or fails closed. This *lowers* every absolute recall
+   number, which is correct, and it raises discordance, which is what makes
+   small effects measurable at all. Runbook A0 has the commands and the accept
+   criteria. Do this one.
 
 Route 2 changes the measurement plane, so the frozen reference numbers
 (article@4 0.7920, MRR@10 0.6645) do not carry across it. Re-measure the control

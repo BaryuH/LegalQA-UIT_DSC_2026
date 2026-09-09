@@ -57,7 +57,7 @@ python scripts/sedar_retrieval/check_run_readiness.py \
   --passages artifacts/sedar_retrieval/views/<champion_view>/passages_r2a.jsonl \
   --bm25-manifest artifacts/sedar_retrieval/indexes/manifests/<bm25>.json \
   --dense-manifest artifacts/sedar_retrieval/indexes/manifests/<dense>.json \
-  --labels artifacts/sedar_retrieval/eval/warmup_silver_labels.jsonl \
+  --labels "$LABELS" \
   --union-cap 300 --leg-top-k 100 --leg-top-k 100 \
   --evidence-top-k 6 --candidate-window 6 \
   --max-total-chars 6000 --max-chunks-per-document 3 \
@@ -77,6 +77,60 @@ Exit code 1 on any FAIL. The two it will almost certainly report on the champion
 ---
 
 ## Track A — measurable today, no corpus migration
+
+### A0. Rebuild the silver labels FIRST  *(~1 hour, blocks everything below)*
+
+> **The label artifact every Track A number has been measured against is stale
+> by three weeks.** `"$LABELS"`
+> was built **2026-08-10**. The fix for the exact defect it carries —
+> `469de3d fix: scope silver labels by document and article` — landed
+> **2026-08-31**. The labels were never rebuilt afterwards, and this runbook
+> pointed at the stale file in five places.
+
+What the stale build does: it expands each cited `Điều N` to **every passage in
+the corpus whose article number is N**, across unrelated documents. Measured on
+its 349 labelled rows — 216 queries have a gold set that is *one* article number
+spread over *three* documents, 303 (86.8%) span more than one document with at
+most two distinct article numbers, and 342 (98.0%) have a `relevant_ids` count
+divisible by three. Article recall hits if any one of them is retrieved, so
+every query has three chances at k=4.
+
+Consequences, both measured in A1:
+
+- absolute recall is **inflated** (three targets instead of one), and
+- **discordance is crushed**, which destroys the power of every paired test.
+  A1 got 8 discordant queries out of 274 and could not resolve a +2.2 pp effect
+  (p = 0.0703). See `A1_CONVEX_FUSION_RESULTS.md`.
+
+The current builder resolves each article mention to **one** document or fails
+closed, so the rebuild needs no new code — only running it:
+
+```bash
+VIEW=artifacts/sedar_retrieval/views/<champion_view>/passages_r2a.jsonl
+LABELS=artifacts/sedar_retrieval/eval/warmup_silver_labels_v3.jsonl
+
+python scripts/sedar_retrieval/build_silver_labels.py \
+  --passages "$VIEW" --questions data/warmup.json --output "$LABELS"
+
+python scripts/sedar_retrieval/audit_silver_labels.py \
+  --labels "$LABELS" --passages "$VIEW" \
+  --output artifacts/sedar_retrieval/eval/silver_label_audit_v3.json
+```
+
+Accept the rebuild only if the audit shows **silver queries > 274** and
+**`unresolved_with_article` < 146** — the gate already recorded in
+`memory-bank`. Then sanity-check the shape: `relevant_ids` counts should stop
+being ~98% divisible by three, and a query's gold should no longer span three
+documents for one article number.
+
+**The rebuild moves the measurement plane.** Every frozen reference in this
+document (article@4 0.7920, MRR@10 0.6645, reader METEOR 0.5501) was measured
+against the stale labels and does **not** carry across. Re-measure the weighted
+RRF control on `$LABELS` first, record it as the new control, and never compare
+a new number against an old one. Absolute recall will **drop**; that is the
+defect being removed, not a regression.
+
+Every step below uses `$LABELS`.
 
 ### A1. Fusion: convex instead of RRF  *(hours, +1–4% relative expected)*
 
@@ -110,7 +164,7 @@ for AB in "0.5 0.5 0.5" "0.6 0.4 0.6" "0.7 0.3 0.7" \
       --output artifacts/sedar_retrieval/fusion/convex_"$TAG".jsonl --force
     python scripts/sedar_retrieval/eval_retrieval.py \
       --pred artifacts/sedar_retrieval/fusion/convex_"$TAG".jsonl \
-      --labels artifacts/sedar_retrieval/eval/warmup_silver_labels.jsonl \
+      --labels "$LABELS" \
       --passages artifacts/sedar_retrieval/views/<champion_view>/passages_r2a.jsonl \
       --output artifacts/sedar_retrieval/eval/convex_"$TAG".json
   done
@@ -205,7 +259,7 @@ corpus, because 50.87% of them sat at cosine ≥ 0.9 with the positive:
 
 ```bash
 python scripts/sedar_retrieval/build_reranker_training_data.py \
-  --labels artifacts/sedar_retrieval/eval/warmup_silver_labels.jsonl \
+  --labels "$LABELS" \
   --candidates artifacts/sedar_retrieval/fusion/<winner>.jsonl \
   --units artifacts/sedar_retrieval/views/<champion_view>/passages_r2a.jsonl \
   --questions data/warmup.json --split warmup --negatives 10 \
@@ -317,7 +371,7 @@ python scripts/sedar_retrieval/verify_corpus_v4.py \
 
 python scripts/sedar_retrieval/export_corpus_v4_passages.py \
   --units artifacts/sedar_retrieval/corpus_v4/<run_id>/units.jsonl \
-  --labels artifacts/sedar_retrieval/eval/warmup_silver_labels.jsonl \
+  --labels "$LABELS" \
   --output artifacts/sedar_retrieval/views/v4_<run_id>/passages_v4.jsonl \
   --report artifacts/sedar_retrieval/views/v4_<run_id>/export_report.json
 ```
@@ -346,7 +400,7 @@ roll-up works with **no change to the evaluator**.
 ```bash
 python scripts/sedar_retrieval/check_run_readiness.py \
   --passages artifacts/sedar_retrieval/views/v4_<run_id>/passages_v4.jsonl \
-  --labels artifacts/sedar_retrieval/eval/warmup_silver_labels.jsonl ...
+  --labels "$LABELS" ...
 ```
 
 Then A1 → A5 against the v4 view, and compare v3 vs v4 at the same fusion and
