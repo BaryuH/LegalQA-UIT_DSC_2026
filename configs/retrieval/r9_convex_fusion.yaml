@@ -56,10 +56,29 @@ fusion:
     dense: [-1.0, 1.0]
 
 sweep:
-  # Weights are normalised internally, so this is a sweep over alpha on the
-  # dense leg. Start at 0.7; the published Vietnamese range is 0.6-0.8.
-  dense_weight: [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-  bm25_weight: [1.0]
+  # Weights are normalised to sum to one INSIDE convex_score_fusion, so what the
+  # fusion actually sees is alpha = dense_weight / (bm25_weight + dense_weight).
+  #
+  # Sweep the PAIR, not dense_weight against a fixed bm25_weight of 1.0. The
+  # first A1 run did the latter and it is a broken grid: dense_weight 0.5..1.0
+  # against bm25_weight 1.0 spans alpha 0.333..0.500 only, so it never reaches
+  # the published Vietnamese optimum of 0.6-0.8, and every cell gives BM25 more
+  # relative weight than the RRF champion does (bm25 0.25 / dense 1.0 is
+  # alpha = 0.8). BM25-only article@4 is 0.5219 against the dense leg's 0.7774,
+  # so that grid is skewed toward the weaker leg by construction. It read as
+  # convex losing by -0.0146 article@4 with the best cell sitting exactly on the
+  # grid's upper edge (alpha = 0.5) - the signature of an optimum outside the
+  # grid, not of a fusion method that does not work.
+  weight_pairs:
+    - {alpha_dense: 0.5, bm25_weight: 0.5, dense_weight: 0.5}
+    - {alpha_dense: 0.6, bm25_weight: 0.4, dense_weight: 0.6}
+    - {alpha_dense: 0.7, bm25_weight: 0.3, dense_weight: 0.7}
+    - {alpha_dense: 0.8, bm25_weight: 0.2, dense_weight: 0.8}
+    - {alpha_dense: 0.9, bm25_weight: 0.1, dense_weight: 0.9}
+    # alpha 1.0 is the dense-only anchor, not a fusion cell: it must land near
+    # the standalone dense leg (article@4 0.7774). If it does not, the wiring is
+    # wrong before any fusion question is being asked.
+    - {alpha_dense: 1.0, bm25_weight: 0.0, dense_weight: 1.0}
   normalization: [minmax, theoretical_minmax]
   missing_score: [theoretical_min, skip]
 
@@ -70,6 +89,15 @@ baseline:
   weights:
     bm25: 0.25
     dense: 1.0
+  # Reproduced control, measured on the server 2026-09-09 in the same run as the
+  # convex arm: article@4 0.7883, MRR@10 0.6522. Compare against THIS, not
+  # against the frozen numbers below - the control is 0.0037 under the frozen
+  # article@4 and 0.0123 under the frozen MRR@10, which is close enough to call
+  # the wiring sound and far enough that mixing the two comparators would
+  # manufacture an effect.
+  reproduced_control:
+    article_at_4: 0.7883
+    mrr_at_10: 0.6522
   metrics:
     article_at_4: 0.7920
     article_at_10: 0.8832

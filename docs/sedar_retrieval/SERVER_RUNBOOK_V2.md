@@ -80,32 +80,65 @@ Exit code 1 on any FAIL. The two it will almost certainly report on the champion
 
 ### A1. Fusion: convex instead of RRF  *(hours, +1–4% relative expected)*
 
-Sweep α on the dense leg. Published Vietnamese optimum is 0.6–0.8; the frozen
-champion is weighted RRF with `bm25_w=0.25`.
+> **The first run of this step used a broken grid — do not repeat it.** It swept
+> `--dense-weight 0.5..1.0` against a fixed `--bm25-weight 1.0`. Weights are
+> normalised to sum to one inside `convex_score_fusion`, so that grid spans
+> **α = 0.333 … 0.500 only** and never reaches the published Vietnamese optimum
+> of 0.6–0.8. Worse, every cell in it gives BM25 *more* relative weight than the
+> RRF champion does (`bm25 0.25 / dense 1.0` is α = 0.8), against a lexical leg
+> whose standalone article@4 is 0.5219 versus the dense leg's 0.7774. It
+> measured convex at −0.0146 article@4 with the best cell sitting exactly on the
+> grid's upper edge — the fingerprint of an optimum outside the grid, not of a
+> method that does not work. Sweep the **pair** below instead.
+
+α on the dense leg is `dense_weight / (bm25_weight + dense_weight)`. The pairs
+are chosen so α is exactly the listed value.
 
 ```bash
-for W in 0.5 0.6 0.7 0.8 0.9 1.0; do
-  python scripts/sedar_retrieval/fuse_candidates.py \
-    --bm25 artifacts/.../bm25_top100.jsonl \
-    --dense artifacts/.../dense_top100.jsonl \
-    --fusion-method convex --normalization minmax \
-    --missing-score theoretical_min \
-    --bm25-weight 1.0 --dense-weight "$W" --union-cap 300 \
-    --output artifacts/sedar_retrieval/fusion/convex_w"$W".jsonl --force
-  python scripts/sedar_retrieval/eval_retrieval.py \
-    --pred artifacts/sedar_retrieval/fusion/convex_w"$W".jsonl \
-    --labels artifacts/sedar_retrieval/eval/warmup_silver_labels.jsonl \
-    --passages artifacts/sedar_retrieval/views/<champion_view>/passages_r2a.jsonl \
-    --output artifacts/sedar_retrieval/eval/convex_w"$W".json
+# α: 0.5 0.6 0.7 0.8 0.9 1.0   (bm25_w, dense_w)
+for AB in "0.5 0.5 0.5" "0.6 0.4 0.6" "0.7 0.3 0.7" \
+          "0.8 0.2 0.8" "0.9 0.1 0.9" "1.0 0.0 1.0"; do
+  set -- $AB; A=$1; BW=$2; DW=$3
+  for MISS in theoretical_min skip; do
+    TAG="a${A}_${MISS}"
+    python scripts/sedar_retrieval/fuse_candidates.py \
+      --bm25 artifacts/.../bm25_top100.jsonl \
+      --dense artifacts/.../dense_top100.jsonl \
+      --fusion-method convex --normalization minmax \
+      --missing-score "$MISS" \
+      --bm25-weight "$BW" --dense-weight "$DW" --union-cap 300 \
+      --output artifacts/sedar_retrieval/fusion/convex_"$TAG".jsonl --force
+    python scripts/sedar_retrieval/eval_retrieval.py \
+      --pred artifacts/sedar_retrieval/fusion/convex_"$TAG".jsonl \
+      --labels artifacts/sedar_retrieval/eval/warmup_silver_labels.jsonl \
+      --passages artifacts/sedar_retrieval/views/<champion_view>/passages_r2a.jsonl \
+      --output artifacts/sedar_retrieval/eval/convex_"$TAG".json
+  done
 done
 ```
 
-Then ablate `--normalization theoretical_minmax` and `--missing-score skip` at
-the winning weight. `skip` matters here: BM25-only recall@4 is 0.5219 against
-the dense leg's 0.7774, so the legs differ enough in recall that charging a
-dense-only find the lexical minimum is harsh.
+`missing_score` is swept alongside α rather than after it because the two
+interact, and under `minmax` the interaction is severe: a passage absent from
+one leg is normalised to **0.0**, so at α = 0.5 a passage the dense leg ranked
+first scores 0.5 and loses to anything mid-list in both. That penalty shrinks as
+α rises, which is a second reason the broken grid's curve climbed monotonically
+to its edge. `skip` (average over the legs that returned it) removes the penalty
+entirely and is the principled choice when the legs' recall differs this much.
 
-Gate: beat article@4 = **0.7920** with a paired bootstrap.
+Two reads before drawing any conclusion:
+
+- **α = 1.0 must land near the standalone dense leg** (article@4 0.7774). If it
+  does not, the wiring is wrong and no fusion question is being answered yet.
+- **The interior must beat both edges.** If the best cell is again α = 0.5 or
+  α = 1.0, convex fusion genuinely has nothing to add here and A1 is closed
+  negative — record it and move to A2 rather than widening the grid again.
+
+Only then ablate `--normalization theoretical_minmax` at the winning α (it
+widens BM25's lower bound to 0 and cosine's to −1 instead of trusting the
+observed minimum of a truncated top-100).
+
+Gate: beat the **reproduced control** article@4 = 0.7883 / MRR@10 = 0.6522 with
+a paired bootstrap — not the frozen 0.7920, which this control sits 0.0037 under.
 
 ### A2. BM25 grid  *(hours, cheap)*
 

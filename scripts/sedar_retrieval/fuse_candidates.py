@@ -2,10 +2,23 @@
 """Fuse BM25 (+ optional dense/legal) candidates with RRF, convex sum or union.
 
 ``--fusion-method convex`` is the score-preserving alternative to weighted RRF.
-Sweep ``--dense-weight`` against a fixed ``--bm25-weight`` on a held-out slice to
-tune the single mixing parameter; the published Vietnamese optimum is 0.6-0.8 on
-the dense leg (Findings of EACL 2026), and the DRiLL@VLSP 2025 top-3 system used
-0.6. See ``docs/sedar_retrieval/INDEX_METHOD_EVIDENCE.md``.
+The weights are normalised to sum to one inside ``convex_score_fusion``, so the
+single mixing parameter is
+
+    alpha = dense_weight / (bm25_weight + dense_weight)
+
+Sweep the PAIR so alpha lands where you intend: ``--bm25-weight 0.2
+--dense-weight 0.8`` is alpha = 0.8. Do NOT sweep ``--dense-weight`` alone
+against a fixed ``--bm25-weight 1.0`` - that spans alpha 0.333-0.500 only and
+cannot reach the published Vietnamese optimum of 0.6-0.8 on the dense leg
+(Findings of EACL 2026; the DRiLL@VLSP 2025 top-3 system used 0.6). The first
+A1 sweep in this repo made that mistake and read as a negative result; see
+``docs/sedar_retrieval/SERVER_RUNBOOK_V2.md`` A1.
+
+For reference, the frozen weighted-RRF champion's ``bm25 0.25 / dense 1.0`` is
+alpha = 0.8 under the same normalisation, so an alpha below that hands the
+lexical leg more relative weight than the control does.
+See ``docs/sedar_retrieval/INDEX_METHOD_EVIDENCE.md``.
 """
 
 from __future__ import annotations
