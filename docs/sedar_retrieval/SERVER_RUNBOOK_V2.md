@@ -368,28 +368,34 @@ python scripts/sedar_retrieval/run_vietnamese_reranker.py \
 `--units` accepts a v3 passages file directly; `LoadedUnit.from_row` reads both
 schemas, and `parent_unit_id` is absent there so child merging is a no-op.
 
-Then fine-tune. **Mine semi-hard negatives, n=10** — hard negatives at n=2 took
-reranker MRR@10 from 0.5584 to **0.2689** on a 261k-document Vietnamese legal
-corpus, because 50.87% of them sat at cosine ≥ 0.9 with the positive:
+Then fine-tune. **Mine semi-hard negatives, n=10** — use the approved `train`
+split, not `warmup`: derive a filtered train question artifact outside `data/`
+after removing the recorded warmup/public overlaps, and rebuild both its v4
+labels and fused candidates. Keep warmup query-disjoint for evaluation.
+Hard negatives at n=2 took reranker MRR@10 from 0.5584 to **0.2689** on a
+261k-document Vietnamese legal corpus, because 50.87% of them sat at cosine
+≥ 0.9 with the positive:
 
 ```bash
 python scripts/sedar_retrieval/build_reranker_training_data.py \
-  --labels "$LABELS" \
-  --candidates artifacts/sedar_retrieval/fusion/<winner>.jsonl \
-  --units artifacts/sedar_retrieval/views/<champion_view>/passages_r2a.jsonl \
-  --questions data/warmup.json --split warmup --negatives 10 \
-  --output-dir artifacts/sedar_retrieval/reranker/train_data
+  --labels "$TRAIN_LABELS" \
+  --candidates "$TRAIN_FUSED" \
+  --units artifacts/sedar_retrieval/corpus_v4/<run>/units.jsonl \
+  --questions "$TRAIN_QUESTIONS" --split train --negatives 10 \
+  --output-dir artifacts/sedar_retrieval/reranker/train_data_v4
 # READ audit.json before training: band_share_of_examined and
 # suspected_false_negative_share are the two numbers that decide the run.
 
 python scripts/sedar_retrieval/train_vietnamese_reranker.py \
-  --pairs artifacts/sedar_retrieval/reranker/train_data/pairs.jsonl \
+  --pairs artifacts/sedar_retrieval/reranker/train_data_v4/pairs.jsonl \
   --model models/vietnamese_reranker \
-  --output-dir artifacts/sedar_retrieval/reranker/ft_v1
+  --output-dir artifacts/sedar_retrieval/reranker/ft_v1_train_v4
 ```
 
-⚠️ **The labels you are mining against are diluted** — see §Track B / B0. Consider
-building the training pairs from the v4 citation resolver instead.
+The v4 citation resolver is required for `TRAIN_LABELS`; do not reuse the
+diluted legacy label file. Re-run A3 on warmup with the fine-tuned checkpoint
+and compare paired AIC against the frozen zero-shot reranker before changing
+the cutoff or pack.
 
 ### A4. AIC baseline — do this before touching the pack
 

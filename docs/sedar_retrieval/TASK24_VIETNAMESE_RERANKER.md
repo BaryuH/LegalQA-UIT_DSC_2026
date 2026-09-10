@@ -217,26 +217,38 @@ the threshold is too loose, `min_keep_override` appearing means it is too tight.
 
 ### 5.5 Build training pairs, then fine-tune
 
+Training must use the approved `train` split, not `warmup`. Before this step,
+derive `TRAIN_QUESTIONS` outside `data/` from `data/train.json` and remove the
+recorded warmup/public ID and normalized-question overlaps
+(`artifacts/finetuned_reader_audit/training_exclusions.jsonl`). Build the
+candidate ranking and v4-scoped labels from that same filtered set. Also run
+the pre-registered character 3-gram audit in
+`A6_RERANKER_FINETUNE_PREREG.md` and exclude every train ID at cosine `>= 0.90`.
+Warmup is reserved for the paired zero-shot-versus-fine-tuned evaluation.
+
 ```bash
 python scripts/sedar_retrieval/build_reranker_training_data.py \
-  --labels artifacts/.../silver_labels.jsonl \
-  --candidates artifacts/.../fused.jsonl \
+  --labels artifacts/.../train_silver_labels.jsonl \
+  --candidates artifacts/.../train_fused.jsonl \
   --units artifacts/sedar_retrieval/corpus_v4/<run>/units.jsonl \
-  --questions data/warmup.json --split warmup \
+  --questions artifacts/.../train_questions_excluding_warmup.json \
+  --split train \
   --negatives 10 --false-negative-above 0.75 --easy-below 0.15 \
-  --output-dir artifacts/sedar_retrieval/reranker/train_data
+  --output-dir artifacts/sedar_retrieval/reranker/train_data_v4
 
 # Read audit.json before training. band_share_of_examined and
 # suspected_false_negative_share are the two numbers that matter.
 
 python scripts/sedar_retrieval/train_vietnamese_reranker.py \
-  --pairs artifacts/sedar_retrieval/reranker/train_data/pairs.jsonl \
+  --pairs artifacts/sedar_retrieval/reranker/train_data_v4/pairs.jsonl \
   --model models/vietnamese_reranker \
-  --output-dir artifacts/sedar_retrieval/reranker/ft_v1 \
-  --run-id vietnamese-reranker-ft-v1
+  --output-dir artifacts/sedar_retrieval/reranker/ft_v1_train_v4 \
+  --run-id vietnamese-reranker-ft-v1-train-v4
 ```
 
-Then re-run 5.3 and 5.4 against `.../ft_v1/checkpoint` and compare.
+Then re-run 5.3 on the warmup candidates against
+`.../ft_v1_train_v4/checkpoint`, with the same top-100, raw-logit and corpus
+settings as zero-shot, and compare paired AIC on the identical query IDs.
 
 ### 5.6 Order of measurement — do not skip this
 

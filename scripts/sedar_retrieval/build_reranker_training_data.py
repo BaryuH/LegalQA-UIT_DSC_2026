@@ -140,6 +140,19 @@ def _normalise(scores: list[float]) -> list[float]:
     return [(value - low) / span for value in scores]
 
 
+def _children_by_parent(units: dict[str, Any]) -> dict[str, tuple[str, ...]]:
+    """Index containment once instead of scanning the corpus per positive."""
+
+    children: dict[str, list[str]] = defaultdict(list)
+    for unit_id, unit in units.items():
+        parent_id = unit.parent_unit_id
+        if parent_id:
+            children[parent_id].append(unit_id)
+    return {
+        parent_id: tuple(sorted(unit_ids)) for parent_id, unit_ids in children.items()
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--labels", type=Path, required=True)
@@ -205,6 +218,7 @@ def main() -> int:
     labels = _load_labels(args.labels)
     candidates = _load_candidates(args.candidates)
     units = load_rerank_units(args.units)
+    children_by_parent = _children_by_parent(units)
     questions = {
         item.id: item.question
         for item in load_inference_questions(args.questions, split=args.split)
@@ -252,9 +266,7 @@ def main() -> int:
                 gold_unit = units[gid]
                 if gold_unit.parent_unit_id:
                     forbidden.add(gold_unit.parent_unit_id)
-            for unit_id, unit in units.items():
-                if unit.parent_unit_id and unit.parent_unit_id in gold_ids:
-                    forbidden.add(unit_id)
+                forbidden.update(children_by_parent.get(gid, ()))
 
             normalised = _normalise([score for _, score, _ in rows])
             band: list[str] = []
@@ -285,7 +297,11 @@ def main() -> int:
                 counters["queries_without_enough_negatives"] += 1
                 if not band:
                     continue
-            chosen = band if len(band) <= args.negatives else rng.sample(band, args.negatives)
+            chosen = (
+                band
+                if len(band) <= args.negatives
+                else rng.sample(band, args.negatives)
+            )
             counters["accepted_negatives"] += len(chosen)
 
             for gid in sorted(gold_ids):
@@ -328,7 +344,9 @@ def main() -> int:
             "median": round(statistics.median(band_scores), 4) if band_scores else 0.0,
         },
         "excluded_score": {
-            "mean": round(statistics.mean(excluded_scores), 4) if excluded_scores else 0.0,
+            "mean": (
+                round(statistics.mean(excluded_scores), 4) if excluded_scores else 0.0
+            ),
         },
         "pairs_path": str(pairs_path),
     }

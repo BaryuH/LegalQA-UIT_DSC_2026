@@ -88,3 +88,92 @@ own thesis and the thesis won. The arms that follow the thesis — raising
 `target_chars`, `starvation_backfill`, `expand_to_parent`, `min_blocks` — are
 the ones worth running, and every one of them must be judged on the reader for
 exactly the monotonicity reason above.
+
+
+---
+
+# A5 — Arm B on the reader: a null, and the null is the finding
+
+dev230, 230/230 cases, same `included_ids_hash`, same reader adapter hash, same
+scorer and checkpoint. Controls clean.
+
+| metric | Arm A | Arm B | Δ | CI95 | p |
+| --- | --- | --- | --- | --- | --- |
+| METEOR | 0.5384 | 0.5439 | +0.0055 | [−0.0122, +0.0234] | 0.5514 |
+| ROUGE-L | 0.5660 | 0.5661 | +0.0001 | [−0.0154, +0.0162] | 0.9898 |
+
+**Arm B is not promoted, and the distractor hypothesis is NOT confirmed.**
+
+## The direction carries no information
+
+It is tempting to read "+0.0055, trending the right way". It is not a trend.
+Against each interval's own half-width the effect is
+
+    METEOR   Δ / half-width = 0.31
+    ROUGE-L  Δ / half-width = 0.01
+
+ROUGE-L moved by one ten-thousandth — indistinguishable from having changed
+nothing. Two metrics landing barely positive is what two coin flips look like.
+The data is consistent with the distractor hypothesis, equally consistent with
+no effect at all, and also consistent with Arm B being **1.2 pp of METEOR
+worse**. The pre-registered reading was *Arm B wins on the reader → distractors
+confirmed*, and Arm B did not win. Recording it as "consistent with the
+hypothesis" would smuggle in a result the experiment did not produce.
+
+## Equivalence is not established either
+
+A failed superiority test is not non-inferiority. Testing the other direction
+against `gates.yaml regression_tolerance.meteor_abs = 0.003`:
+
+- observed CI low = **−0.0122**, which is **4.1×** outside the margin;
+- establishing `CI_low > −0.003` at this effect and variance needs **~1,009
+  cases**. dev230 has 230.
+
+Neither superiority nor non-inferiority is reachable here. **The measurement is
+exhausted, in both directions.**
+
+## What the null does establish, and it is substantive
+
+Arm B removed **~48% of the pack** (to 886 tokens/query) and measurably
+destroyed grounding (citation coverage −2.44 pp, `better = 0`, `worse = 18`,
+p < 0.0001) — and the answers came out indistinguishable.
+
+**About half the evidence pack is not reaching the answers.**
+
+That contradicts the premise this arm was built on. `progress.md` records a
+monotone dose-response between evidence characters and METEOR; if it were still
+real and steep, halving the pack and losing 2.4 pp of grounding had to show. It
+did not. The likely reason is **A3**: that curve was fitted *before* the
+reranker was promoted. A cross-encoder reorders the whole top-100, so the six
+blocks that survive into the pack are now far better sorted than when the curve
+was measured, and the marginal blocks it credited are now inert.
+
+**The reranker invalidated the pre-A3 evidence for pack sizing.** Any further
+pack arm citing the dose-response as motivation must re-derive it under the
+current champion first — and the resolution limits above make that
+re-derivation unaffordable on dev230.
+
+## Consequence: park the pack, spend the time upstream
+
+| arm | effect | verdict |
+| --- | --- | --- |
+| A1 convex fusion | +2.3 pp article@4 | below the split's ~4.4 pp resolution |
+| A3 reranker | +6.1 pp AIC coverage | **cleared, wide margin** |
+| A5 Arm B pack floor | ±0 on the reader | unmeasurable in both directions |
+
+The pattern is consistent, and it is about the splits rather than the ideas:
+**only large effects are adjudicable here.** So the pack question is **parked at
+Arm A** — frozen champion, zero risk — and the remaining time goes to the two
+candidates whose published or documented effects are large:
+
+1. **Reranker fine-tune** — Legal Zalo Acc@1 0.7274 → 0.7944 for this
+   checkpoint. Upstream of the pack, so it goes first.
+2. **Reader v2 retrain** — the largest documented headroom, authorised since
+   2026-09-07, gated on test230 (held out; dev230 was correctly used here).
+
+One option worth noting rather than planning: Arm B buys the same answers for
+half the evidence tokens. That is not a quality claim and cannot be promoted as
+one, but at reader-v2 *training* time the cheaper renderer is a live choice —
+the freed budget could go to more documents per pack or a longer generation cap.
+Decide it inside the retrain, with the renderer as a training-time variable, not
+as an inference-time knob bolted onto v1.

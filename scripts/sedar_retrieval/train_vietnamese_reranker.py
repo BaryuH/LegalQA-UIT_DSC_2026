@@ -23,6 +23,7 @@ The runner is fail-closed by design and mirrors the conventions already used by
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 from collections import defaultdict
@@ -86,6 +87,14 @@ def _split_by_query(
     train = [row for qid in query_ids if qid not in dev_ids for row in by_query[qid]]
     dev = [row for qid in sorted(dev_ids) for row in by_query[qid]]
     return train, dev
+
+
+def _query_ids_hash(rows: list[dict[str, Any]]) -> str:
+    """Fingerprint the query-level split without persisting question text."""
+
+    query_ids = sorted({str(row.get("query_id") or row["query"]) for row in rows})
+    payload = ("\n".join(query_ids) + "\n").encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _flatten(rows: list[dict[str, Any]]) -> list[tuple[str, str, float]]:
@@ -172,7 +181,9 @@ def main() -> int:
     if args.model_revision and not Path(args.model).expanduser().is_dir():
         load_kwargs["revision"] = args.model_revision
     tokenizer = AutoTokenizer.from_pretrained(args.model, **load_kwargs)
-    model = AutoModelForSequenceClassification.from_pretrained(args.model, **load_kwargs)
+    model = AutoModelForSequenceClassification.from_pretrained(
+        args.model, **load_kwargs
+    )
     if int(getattr(model.config, "num_labels", 0) or 0) != 1:
         raise SystemExit(
             f"Expected a single-logit reranker head, found "
@@ -232,7 +243,9 @@ def main() -> int:
         else None
     )
 
-    steps_per_epoch = max(1, len(train_loader) // max(1, args.gradient_accumulation_steps))
+    steps_per_epoch = max(
+        1, len(train_loader) // max(1, args.gradient_accumulation_steps)
+    )
     total_steps = int(steps_per_epoch * args.epochs)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
@@ -248,7 +261,9 @@ def main() -> int:
     history: list[dict[str, float]] = []
     step = 0
     model.train()
-    epochs_int = int(args.epochs) if float(args.epochs).is_integer() else int(args.epochs) + 1
+    epochs_int = (
+        int(args.epochs) if float(args.epochs).is_integer() else int(args.epochs) + 1
+    )
     for epoch in range(epochs_int):
         running = 0.0
         seen = 0
@@ -327,6 +342,14 @@ def main() -> int:
             "dev_pairs": len(dev_rows),
             "train_examples": len(train_examples),
             "dev_examples": len(dev_examples),
+            "train_query_count": len(
+                {str(row.get("query_id") or row["query"]) for row in train_rows}
+            ),
+            "dev_query_count": len(
+                {str(row.get("query_id") or row["query"]) for row in dev_rows}
+            ),
+            "train_query_ids_hash": _query_ids_hash(train_rows),
+            "dev_query_ids_hash": _query_ids_hash(dev_rows),
             "dev_fraction": args.dev_fraction,
             "split_unit": "query_id",
             "negative_policy": (audit or {}).get("policy"),
