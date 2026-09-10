@@ -24,13 +24,14 @@ on average with 38% citing two or more. Training a reranker to push those away
 teaches it to reject correct evidence.
 
 So this builder mines a *band*, not a top-k. A candidate is accepted as a
-semi-hard negative only when its per-query normalised retriever score sits
-strictly between ``--easy-below`` and ``--false-negative-above``. Everything
-above the upper bound is treated as a suspected false negative and excluded;
-everything below the lower bound is too easy to teach anything. The band, and
-the share of candidates each rule removed, are written to the audit so the
-distribution can be inspected before any GPU time is spent - and the run fails
-closed if the accepted band looks like the hard-negative failure case.
+semi-hard negative only when its per-query normalized score or rank sits
+strictly between ``--easy-below`` and the configured upper bound. In
+``positive_cosine`` mode, suspected false negatives are instead identified by
+cosine similarity to the query's positive passage, not by first-stage score.
+The band and the share of candidates each rule removed are written to the
+audit so the distribution can be inspected before any GPU time is spent - and
+the run fails closed if the accepted band looks like the hard-negative failure
+case.
 
 Silver retrieval labels are read here because this is an approved training task;
 the questions are loaded through ``load_inference_questions``, so no gold answer
@@ -171,6 +172,92 @@ def _children_by_parent(units: dict[str, Any]) -> dict[str, tuple[str, ...]]:
     }
 
 
+class _PositiveEmbeddingSimilarity:
+    """Read normalized passage vectors and score candidates against positives."""
+
+    def __init__(
+        self,
+        *,
+        index_path: Path,
+        metadata_path: Path,
+        manifest_path: Path,
+    ) -> None:
+        try:
+            import faiss
+            import numpy as np
+        except ImportError as exc:
+            raise SystemExit(
+                "positive-embedding false-negative detection requires faiss and numpy"
+            ) from exc
+
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("normalized") is not True:
+            raise SystemExit(
+                f"Embedding cache must be normalized for cosine scoring: "
+                f"{manifest_path}"
+            )
+        self._np = np
+        self._index = faiss.read_index(str(index_path))
+        self._id_to_ordinal: dict[str, int] = {}
+        with metadata_path.open(encoding="utf-8") as handle:
+            for ordinal, line in enumerate(handle):
+                row = json.loads(line)
+                passage_id = str(row.get("passage_id") or "")
+                if not passage_id:
+                    raise SystemExit(
+                        f"Embedding metadata row {ordinal} has no passage_id"
+                    )
+                self._id_to_ordinal[passage_id] = int(row.get("ordinal", ordinal))
+        if self._index.ntotal != len(self._id_to_ordinal):
+            raise SystemExit(
+                "Embedding index/metadata size mismatch: "
+                f"{self._index.ntotal} vs {len(self._id_to_ordinal)}"
+            )
+        self.provenance = {
+            "mode": "positive_embedding_cosine",
+            "index": str(index_path),
+            "metadata": str(metadata_path),
+            "manifest": str(manifest_path),
+            "model": manifest.get("model"),
+            "model_revision": manifest.get("model_revision"),
+            "corpus_hash": manifest.get("corpus_hash"),
+            "cache_key": manifest.get("cache_key"),
+        }
+
+    def validate_ids(self, passage_ids: set[str], *, label: str) -> None:
+        missing = sorted(set(passage_ids) - self._id_to_ordinal)
+        if missing:
+            sample = missing[:5]
+            raise SystemExit(
+                f"{len(missing)} {label} passage IDs are absent from embedding "
+                f"metadata; sample={sample}"
+            )
+
+    def max_similarity(
+        self, positive_ids: set[str], candidate_ids: list[str]
+    ) -> dict[str, float]:
+        np = self._np
+        positive_vectors = np.asarray(
+            [
+                self._index.reconstruct(self._id_to_ordinal[passage_id])
+                for passage_id in sorted(positive_ids)
+            ],
+            dtype="float32",
+        )
+        candidate_vectors = np.asarray(
+            [
+                self._index.reconstruct(self._id_to_ordinal[passage_id])
+                for passage_id in candidate_ids
+            ],
+            dtype="float32",
+        )
+        similarities = candidate_vectors @ positive_vectors.T
+        return {
+            passage_id: float(similarities[index].max())
+            for index, passage_id in enumerate(candidate_ids)
+        }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--labels", type=Path, required=True)
@@ -197,6 +284,21 @@ def main() -> int:
             "suspected false negatives and excluded, not used as negatives."
         ),
     )
+    parser.add_argument(
+        "--false-negative-mode",
+        choices=("score", "positive_cosine"),
+        default="score",
+        help="Use the band score or positive-passage cosine for false negatives.",
+    )
+    parser.add_argument(
+        "--false-negative-similarity-above",
+        type=float,
+        default=0.90,
+        help="Positive-passage cosine threshold for suspected false negatives.",
+    )
+    parser.add_argument("--embedding-index", type=Path, default=None)
+    parser.add_argument("--embedding-metadata", type=Path, default=None)
+    parser.add_argument("--embedding-manifest", type=Path, default=None)
     parser.add_argument(
         "--easy-below",
         type=float,
@@ -226,6 +328,26 @@ def main() -> int:
 
     if not 0.0 <= args.easy_below < args.false_negative_above <= 1.0:
         raise SystemExit("require 0 <= --easy-below < --false-negative-above <= 1")
+    if not 0.0 <= args.false_negative_similarity_above <= 1.0:
+        raise SystemExit("--false-negative-similarity-above must be in [0, 1]")
+    embedding_args = (
+        args.embedding_index,
+        args.embedding_metadata,
+        args.embedding_manifest,
+    )
+    if args.false_negative_mode == "positive_cosine" and any(
+        path is None for path in embedding_args
+    ):
+        raise SystemExit(
+            "positive_cosine mode requires --embedding-index, "
+            "--embedding-metadata, and --embedding-manifest"
+        )
+    if args.false_negative_mode == "score" and any(
+        path is not None for path in embedding_args
+    ):
+        raise SystemExit(
+            "embedding arguments require --false-negative-mode=positive_cosine"
+        )
     if args.negatives <= 0:
         raise SystemExit("--negatives must be positive")
     if args.output_dir.exists() and any(args.output_dir.iterdir()) and not args.force:
@@ -243,6 +365,34 @@ def main() -> int:
     candidates = _load_candidates(args.candidates)
     units = load_rerank_units(args.units)
     children_by_parent = _children_by_parent(units)
+    positive_similarity = (
+        _PositiveEmbeddingSimilarity(
+            index_path=args.embedding_index,
+            metadata_path=args.embedding_metadata,
+            manifest_path=args.embedding_manifest,
+        )
+        if args.false_negative_mode == "positive_cosine"
+        else None
+    )
+    if positive_similarity is not None:
+        positive_similarity.validate_ids(
+            {
+                passage_id
+                for query_labels in labels.values()
+                for passage_id in query_labels
+                if passage_id in units
+            },
+            label="positive",
+        )
+        positive_similarity.validate_ids(
+            {
+                passage_id
+                for query_candidates in candidates.values()
+                for passage_id, _, _ in query_candidates
+                if passage_id in units
+            },
+            label="candidate",
+        )
     questions = {
         item.id: item.question
         for item in load_inference_questions(args.questions, split=args.split)
@@ -260,6 +410,7 @@ def main() -> int:
         "candidates_examined": 0,
         "excluded_gold": 0,
         "excluded_same_article": 0,
+        "excluded_too_hard": 0,
         "excluded_suspected_false_negative": 0,
         "excluded_too_easy": 0,
         "excluded_beyond_max_rank": 0,
@@ -268,6 +419,7 @@ def main() -> int:
     }
     band_scores: list[float] = []
     excluded_scores: list[float] = []
+    excluded_similarities: list[float] = []
 
     with pairs_path.open("w", encoding="utf-8") as handle:
         for query_id in sorted(labels):
@@ -297,6 +449,14 @@ def main() -> int:
                 if args.score_mode == "rank"
                 else _normalise([score for _, score, _ in rows])
             )
+            positive_similarities = (
+                positive_similarity.max_similarity(
+                    gold_ids,
+                    [unit_id for unit_id, _, _ in rows if unit_id in units],
+                )
+                if positive_similarity is not None
+                else {}
+            )
             band: list[str] = []
             for (unit_id, _, rank), norm in zip(rows, normalised, strict=True):
                 counters["candidates_examined"] += 1
@@ -312,6 +472,19 @@ def main() -> int:
                     counters["excluded_same_article"] += 1
                     continue
                 if norm > args.false_negative_above:
+                    if args.false_negative_mode == "positive_cosine":
+                        counters["excluded_too_hard"] += 1
+                    else:
+                        counters["excluded_suspected_false_negative"] += 1
+                        excluded_scores.append(norm)
+                    continue
+                if args.false_negative_mode == "positive_cosine":
+                    similarity = positive_similarities[unit_id]
+                    if similarity >= args.false_negative_similarity_above:
+                        counters["excluded_suspected_false_negative"] += 1
+                        excluded_similarities.append(similarity)
+                        continue
+                elif norm > args.false_negative_above:
                     counters["excluded_suspected_false_negative"] += 1
                     excluded_scores.append(norm)
                     continue
@@ -357,7 +530,14 @@ def main() -> int:
         "schema_version": RERANKER_DATA_SCHEMA_VERSION,
         "policy": {
             "negatives": args.negatives,
-            "false_negative_above": args.false_negative_above,
+            "false_negative_mode": args.false_negative_mode,
+            "band_above": args.false_negative_above,
+            "false_negative_above": (
+                args.false_negative_above
+                if args.false_negative_mode == "score"
+                else None
+            ),
+            "false_negative_similarity_above": args.false_negative_similarity_above,
             "easy_below": args.easy_below,
             "max_rank": args.max_rank,
             "score_mode": args.score_mode,
@@ -377,6 +557,16 @@ def main() -> int:
                 round(statistics.mean(excluded_scores), 4) if excluded_scores else 0.0
             ),
         },
+        "excluded_positive_similarity": {
+            "mean": (
+                round(statistics.mean(excluded_similarities), 4)
+                if excluded_similarities
+                else 0.0
+            ),
+        },
+        "positive_similarity": (
+            positive_similarity.provenance if positive_similarity is not None else None
+        ),
         "pairs_path": str(pairs_path),
     }
 

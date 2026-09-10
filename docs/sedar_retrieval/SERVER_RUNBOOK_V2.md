@@ -383,6 +383,12 @@ python scripts/sedar_retrieval/build_reranker_training_data.py \
   --units artifacts/sedar_retrieval/corpus_v4/<run>/units.jsonl \
   --questions "$TRAIN_QUESTIONS" --split train --negatives 10 \
   --score-mode rank \
+  --false-negative-mode positive_cosine \
+  --false-negative-above 0.75 \
+  --false-negative-similarity-above 0.90 \
+  --embedding-index "$DENSE_INDEX/index.faiss" \
+  --embedding-metadata "$DENSE_INDEX/passage_metadata.jsonl" \
+  --embedding-manifest "$DENSE_INDEX/embedding_cache_manifest.json" \
   --output-dir artifacts/sedar_retrieval/reranker/train_data_v4
 # READ audit.json before training: band_share_of_examined and
 # suspected_false_negative_share are the two numbers that decide the run.

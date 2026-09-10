@@ -234,7 +234,13 @@ python scripts/sedar_retrieval/build_reranker_training_data.py \
   --questions artifacts/.../train_questions_excluding_warmup.json \
   --split train \
   --score-mode rank \
-  --negatives 10 --false-negative-above 0.75 --easy-below 0.15 \
+  --false-negative-mode positive_cosine \
+  --false-negative-above 0.75 \
+  --false-negative-similarity-above 0.90 \
+  --embedding-index artifacts/sedar_retrieval/experiments/<dense_run>/index/index.faiss \
+  --embedding-metadata artifacts/sedar_retrieval/experiments/<dense_run>/index/passage_metadata.jsonl \
+  --embedding-manifest artifacts/sedar_retrieval/experiments/<dense_run>/index/embedding_cache_manifest.json \
+  --negatives 10 --easy-below 0.15 \
   --output-dir artifacts/sedar_retrieval/reranker/train_data_v4
 
 # Read audit.json before training. band_share_of_examined and

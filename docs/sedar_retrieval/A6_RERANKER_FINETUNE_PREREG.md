@@ -151,3 +151,13 @@ The project therefore locks `score_mode=rank` for this arm. For each query, rank
 corpus, labels, model, and all training hyperparameters remain unchanged.
 This amendment is not based on AIC feedback and must not be changed after
 training begins.
+
+## Amendment 2 — 2026-09-10, before training and before AIC
+
+The rank upper bound remains a **band boundary**, not a false-negative label.
+For the amended run, candidates above rank-score `0.75` are recorded as
+`excluded_too_hard`; suspected false negatives inside the band are identified
+only by positive-passage embedding cosine `>= 0.90`. The cosine is computed
+from the normalized corpus-v4 legal-embedding cache already used by the v4
+first stage, against the maximum similarity to any resolved positive passage.
+The first-stage source and corpus must therefore be pinned in the audit.
