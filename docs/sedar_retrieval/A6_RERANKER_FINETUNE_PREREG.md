@@ -134,3 +134,20 @@ expected to clear the bar, on the strength of the prior. If it comes back under
 ~3.6 pp, the arm is closed as not adoptable and the zero-shot reranker stays the
 champion. No re-tuning of negatives, epochs or learning rate *after* seeing the
 AIC number counts as the same arm.
+
+## Amendment — 2026-09-10, before training and before AIC
+
+The first pre-training audit used the originally specified raw-RRF score
+normalization. It failed the pre-training band gate: `band_share_of_examined =
+0.0566 < 0.20`. No reranker checkpoint was trained and no AIC number was
+observed. The failure is a score-calibration mismatch: weighted RRF scores are
+rank-derived and their tail is compressed, so the raw-score band does not
+represent a stable candidate difficulty scale.
+
+The project therefore locks `score_mode=rank` for this arm. For each query, rank
+1 maps to `1.0` and the last observed candidate rank maps to `0.0`; the existing
+`easy_below=0.15`, `false_negative_above=0.75`, `negatives=10`, and
+`min_band_share=0.20` gates remain unchanged. The first-stage candidates,
+corpus, labels, model, and all training hyperparameters remain unchanged.
+This amendment is not based on AIC feedback and must not be changed after
+training begins.

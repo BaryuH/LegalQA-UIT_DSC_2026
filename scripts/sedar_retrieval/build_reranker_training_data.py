@@ -146,6 +146,18 @@ def _normalise(scores: list[float]) -> list[float]:
     return [(value - low) / span for value in scores]
 
 
+def _normalise_ranks(rows: list[tuple[str, float, int]]) -> list[float]:
+    """Map rank 1 to 1 and the last observed rank to 0."""
+
+    if not rows:
+        return []
+    last_rank = max(rank for _, _, rank in rows)
+    span = last_rank - 1
+    if span <= 0:
+        return [1.0] * len(rows)
+    return [(last_rank - rank) / span for _, _, rank in rows]
+
+
 def _children_by_parent(units: dict[str, Any]) -> dict[str, tuple[str, ...]]:
     """Index containment once instead of scanning the corpus per positive."""
 
@@ -192,6 +204,12 @@ def main() -> int:
         help="Candidates below this are too easy to teach anything.",
     )
     parser.add_argument("--max-rank", type=int, default=200)
+    parser.add_argument(
+        "--score-mode",
+        choices=("raw", "rank"),
+        default="raw",
+        help="Normalize fused scores or observed candidate ranks per query.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--min-band-share",
@@ -274,7 +292,11 @@ def main() -> int:
                     forbidden.add(gold_unit.parent_unit_id)
                 forbidden.update(children_by_parent.get(gid, ()))
 
-            normalised = _normalise([score for _, score, _ in rows])
+            normalised = (
+                _normalise_ranks(rows)
+                if args.score_mode == "rank"
+                else _normalise([score for _, score, _ in rows])
+            )
             band: list[str] = []
             for (unit_id, _, rank), norm in zip(rows, normalised, strict=True):
                 counters["candidates_examined"] += 1
@@ -338,6 +360,7 @@ def main() -> int:
             "false_negative_above": args.false_negative_above,
             "easy_below": args.easy_below,
             "max_rank": args.max_rank,
+            "score_mode": args.score_mode,
             "seed": args.seed,
         },
         "counters": counters,

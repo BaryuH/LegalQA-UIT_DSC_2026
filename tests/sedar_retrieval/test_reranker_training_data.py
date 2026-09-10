@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from scripts.sedar_retrieval.build_reranker_training_data import (
     _children_by_parent,
     _load_labels,
+    _normalise_ranks,
 )
 
 
@@ -28,3 +29,13 @@ def test_load_labels_accepts_v2_relevant_ids(tmp_path) -> None:
     )
 
     assert _load_labels(labels_path) == {"q1": {"doc::art::1"}}
+
+
+def test_normalise_ranks_maps_first_and_last_observed_rank() -> None:
+    rows = [
+        ("first", 0.9, 1),
+        ("middle", 0.5, 3),
+        ("last", 0.1, 5),
+    ]
+
+    assert _normalise_ranks(rows) == [1.0, 0.5, 0.0]

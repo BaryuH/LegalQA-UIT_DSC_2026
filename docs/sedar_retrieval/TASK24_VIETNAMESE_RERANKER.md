@@ -233,6 +233,7 @@ python scripts/sedar_retrieval/build_reranker_training_data.py \
   --units artifacts/sedar_retrieval/corpus_v4/<run>/units.jsonl \
   --questions artifacts/.../train_questions_excluding_warmup.json \
   --split train \
+  --score-mode rank \
   --negatives 10 --false-negative-above 0.75 --easy-below 0.15 \
   --output-dir artifacts/sedar_retrieval/reranker/train_data_v4
 
