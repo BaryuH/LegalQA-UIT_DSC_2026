@@ -75,7 +75,13 @@ def _load_labels(path: Path) -> dict[str, set[str]]:
             query_id = str(row.get("query_id") or row.get("id") or "").strip()
             if not query_id:
                 raise SystemExit(f"Label row without query_id in {path}")
-            for key in ("gold_unit_ids", "gold_passage_ids", "passage_ids", "labels"):
+            for key in (
+                "gold_unit_ids",
+                "gold_passage_ids",
+                "passage_ids",
+                "relevant_ids",
+                "labels",
+            ):
                 value = row.get(key)
                 if isinstance(value, list):
                     labels[query_id].update(str(item) for item in value)

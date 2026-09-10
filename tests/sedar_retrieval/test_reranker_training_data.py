@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from scripts.sedar_retrieval.build_reranker_training_data import (
     _children_by_parent,
+    _load_labels,
 )
 
 
@@ -17,3 +18,13 @@ def test_children_by_parent_indexes_containment_without_corpus_scan() -> None:
         "parent": ("child-a", "child-b"),
         "elsewhere": ("other",),
     }
+
+
+def test_load_labels_accepts_v2_relevant_ids(tmp_path) -> None:
+    labels_path = tmp_path / "labels.jsonl"
+    labels_path.write_text(
+        '{"query_id": "q1", "relevant_ids": ["doc::art::1"]}\n',
+        encoding="utf-8",
+    )
+
+    assert _load_labels(labels_path) == {"q1": {"doc::art::1"}}
