@@ -161,3 +161,12 @@ only by positive-passage embedding cosine `>= 0.90`. The cosine is computed
 from the normalized corpus-v4 legal-embedding cache already used by the v4
 first stage, against the maximum similarity to any resolved positive passage.
 The first-stage source and corpus must therefore be pinned in the audit.
+
+## Amendment 3 — 2026-09-10, first-stage provenance
+
+`configs/retrieval/r9_convex_fusion.yaml` describes the older v3 Qwen leg
+(`source_name=dense`) and is not the v4 A3 provenance. The v4 arm in this
+track uses the `bqbbao6/vietnamese-legal-embedding` index and the retrieval
+artifact with `source_name=legal`; its control fusion must report the same
+`["bm25", "legal"]` source set as the training fusion. The server retry must
+check both fusion JSONL headers and the v4 embedding manifest before mining.
