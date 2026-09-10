@@ -159,6 +159,12 @@ def _normalise_ranks(rows: list[tuple[str, float, int]]) -> list[float]:
     return [(last_rank - rank) / span for _, _, rank in rows]
 
 
+def _band_share(*, band_candidate_count: int, examined: int) -> float:
+    """Return the share of examined candidates that survived band filtering."""
+
+    return band_candidate_count / max(1, examined)
+
+
 def _children_by_parent(units: dict[str, Any]) -> dict[str, tuple[str, ...]]:
     """Index containment once instead of scanning the corpus per positive."""
 
@@ -414,6 +420,7 @@ def main() -> int:
         "excluded_suspected_false_negative": 0,
         "excluded_too_easy": 0,
         "excluded_beyond_max_rank": 0,
+        "band_candidates": 0,
         "accepted_negatives": 0,
         "positive_pairs": 0,
     }
@@ -492,6 +499,7 @@ def main() -> int:
                     counters["excluded_too_easy"] += 1
                     continue
                 band.append(unit_id)
+                counters["band_candidates"] += 1
                 band_scores.append(norm)
 
             if len(band) < args.negatives:
@@ -525,7 +533,10 @@ def main() -> int:
             counters["queries_written"] += 1
 
     examined = max(1, counters["candidates_examined"])
-    band_share = counters["accepted_negatives"] / examined
+    band_share = _band_share(
+        band_candidate_count=counters["band_candidates"],
+        examined=counters["candidates_examined"],
+    )
     audit: dict[str, Any] = {
         "schema_version": RERANKER_DATA_SCHEMA_VERSION,
         "policy": {

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.sedar_retrieval.build_reranker_training_data import (
+    _band_share,
     _children_by_parent,
     _load_labels,
     _normalise_ranks,
@@ -42,6 +43,11 @@ def test_normalise_ranks_maps_first_and_last_observed_rank() -> None:
     ]
 
     assert _normalise_ranks(rows) == [1.0, 0.5, 0.0]
+
+
+def test_band_share_uses_candidates_not_sampled_negatives() -> None:
+    assert _band_share(band_candidate_count=60, examined=100) == 0.6
+    assert _band_share(band_candidate_count=0, examined=0) == 0.0
 
 
 def test_positive_embedding_similarity_validates_against_metadata_keys() -> None:
