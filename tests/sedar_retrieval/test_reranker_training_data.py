@@ -1,9 +1,12 @@
 from types import SimpleNamespace
 
+import pytest
+
 from scripts.sedar_retrieval.build_reranker_training_data import (
     _children_by_parent,
     _load_labels,
     _normalise_ranks,
+    _PositiveEmbeddingSimilarity,
 )
 
 
@@ -39,3 +42,13 @@ def test_normalise_ranks_maps_first_and_last_observed_rank() -> None:
     ]
 
     assert _normalise_ranks(rows) == [1.0, 0.5, 0.0]
+
+
+def test_positive_embedding_similarity_validates_against_metadata_keys() -> None:
+    checker = object.__new__(_PositiveEmbeddingSimilarity)
+    checker._id_to_ordinal = {"known": 0}
+
+    checker.validate_ids({"known"}, label="candidate")
+
+    with pytest.raises(SystemExit, match="1 candidate passage IDs"):
+        checker.validate_ids({"missing"}, label="candidate")

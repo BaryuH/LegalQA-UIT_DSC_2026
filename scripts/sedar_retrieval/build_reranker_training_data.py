@@ -225,7 +225,7 @@ class _PositiveEmbeddingSimilarity:
         }
 
     def validate_ids(self, passage_ids: set[str], *, label: str) -> None:
-        missing = sorted(set(passage_ids) - self._id_to_ordinal)
+        missing = sorted(set(passage_ids) - set(self._id_to_ordinal))
         if missing:
             sample = missing[:5]
             raise SystemExit(
