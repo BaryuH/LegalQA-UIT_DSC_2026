@@ -85,9 +85,10 @@ finetuned_reader:
     bm25_backend: cuda
     progress_every: 100
   model:
-    # Locked HF id from playbook; local path/revision unresolved until SS-04C.
+    # The server provisions this snapshot outside the repository and links it
+    # to this portable repository-relative path.
     base_model: models/sedar_sft/vilegalqwen3-1.7b-base
-    revision: UNRESOLVED
+    revision: 258c56ed40529cced26fa7fcc3ecc0663e914c18
     tokenizer: models/sedar_sft/vilegalqwen3-1.7b-base
     loader: auto
     context_length: 4096
@@ -101,7 +102,16 @@ finetuned_reader:
     r: 16
     alpha: 32
     dropout: 0.05
-    target_modules: []
+    # Discovered from Qwen3ForCausalLM on the pinned local snapshot; lm_head
+    # is intentionally excluded from the adapter target set.
+    target_modules:
+      - down_proj
+      - gate_proj
+      - k_proj
+      - o_proj
+      - q_proj
+      - up_proj
+      - v_proj
     bias: none
   training:
     seed: 42

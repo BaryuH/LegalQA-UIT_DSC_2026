@@ -57,6 +57,19 @@ def test_sedar_config_loads_and_locks_qlora_defaults() -> None:
     assert config.finetuned_reader.training.gradient_checkpointing is True
     assert config.finetuned_reader.dataset_build.bm25_backend == "cuda"
     assert config.reranker.device == "cuda"
+    assert config.finetuned_reader.model.revision == (
+        "258c56ed40529cced26fa7fcc3ecc0663e914c18"
+    )
+    assert config.finetuned_reader.lora.target_modules == (
+        "down_proj",
+        "gate_proj",
+        "k_proj",
+        "o_proj",
+        "q_proj",
+        "up_proj",
+        "v_proj",
+    )
+    assert "lm_head" not in config.finetuned_reader.lora.target_modules
 
 
 def test_sedar_example_contract_overlay() -> None:
