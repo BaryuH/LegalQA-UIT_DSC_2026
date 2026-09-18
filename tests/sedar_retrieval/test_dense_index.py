@@ -17,6 +17,7 @@ from legal_rag.sedar_retrieval.retrieval.dense import (
     validate_embedding_matrix,
     validate_source_model_pair,
 )
+from scripts.sedar_retrieval.run_dense_retrieval import _resolve_query_format
 
 
 def test_dense_cache_fingerprint_changes_with_encoder_config() -> None:
@@ -64,6 +65,34 @@ def test_plain_format_is_identity_for_bge_m3_family() -> None:
     passage = "Điều kiện hưởng trợ cấp được quy định như sau."
     assert format_query_text(question, input_format="plain") == question
     assert format_passage_text(passage, input_format="plain") == passage
+
+
+def test_plain_manifest_does_not_require_e5_prefixes() -> None:
+    instruction, query_prefix = _resolve_query_format(
+        {
+            "query_instruction": None,
+            "query_prefix": None,
+            "passage_prefix": None,
+        },
+        "plain",
+    )
+    assert instruction
+    assert query_prefix == ""
+
+
+def test_e5_manifest_still_requires_both_prefixes() -> None:
+    with pytest.raises(
+        SystemExit,
+        match="E5 query_prefix/passage_prefix",
+    ):
+        _resolve_query_format(
+            {
+                "query_instruction": None,
+                "query_prefix": None,
+                "passage_prefix": None,
+            },
+            "e5",
+        )
 
 
 def test_plain_format_still_rejects_blank_text() -> None:

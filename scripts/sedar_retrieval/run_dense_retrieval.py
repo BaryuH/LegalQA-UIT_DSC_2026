@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +119,42 @@ def _write_predictions(
             )
 
 
+def _resolve_query_format(
+    manifest: Mapping[str, Any],
+    input_format: str,
+) -> tuple[str, str]:
+    """Resolve query formatting without applying E5 rules to plain inputs."""
+
+    raw_instruction = manifest.get("query_instruction")
+    if input_format == "qwen_instruction":
+        if raw_instruction != DEFAULT_QUERY_INSTRUCTION:
+            raise SystemExit(
+                "Dense manifest query instruction does not match the contract"
+            )
+        return DEFAULT_QUERY_INSTRUCTION, DEFAULT_E5_QUERY_PREFIX
+    if input_format == "e5":
+        raw_query_prefix = manifest.get("query_prefix")
+        raw_passage_prefix = manifest.get("passage_prefix")
+        if (
+            not isinstance(raw_query_prefix, str)
+            or not raw_query_prefix.strip()
+            or not isinstance(raw_passage_prefix, str)
+            or not raw_passage_prefix.strip()
+        ):
+            raise SystemExit(
+                "Dense manifest E5 query_prefix/passage_prefix must be "
+                "non-blank strings"
+            )
+        return DEFAULT_QUERY_INSTRUCTION, raw_query_prefix
+    if input_format == "plain":
+        if raw_instruction is not None:
+            raise SystemExit("Dense manifest plain query_instruction must be null")
+        # The plain formatter ignores instruction and prefix; an empty prefix
+        # makes the absence of a prefix explicit without applying E5 rules.
+        return DEFAULT_QUERY_INSTRUCTION, ""
+    raise SystemExit(f"Unsupported dense input format: {input_format!r}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--index-dir", type=Path, required=True)
@@ -214,29 +251,10 @@ def main() -> int:
         )
     except ValueError as exc:
         raise SystemExit(f"DENSE_SOURCE_MODEL_MISMATCH: {exc}") from exc
-    raw_instruction = loaded.manifest.get("query_instruction")
-    if input_format == "qwen_instruction":
-        if raw_instruction != DEFAULT_QUERY_INSTRUCTION:
-            raise SystemExit(
-                "Dense manifest query instruction does not match the contract"
-            )
-        instruction = DEFAULT_QUERY_INSTRUCTION
-        query_prefix = DEFAULT_E5_QUERY_PREFIX
-    else:
-        instruction = DEFAULT_QUERY_INSTRUCTION
-        raw_query_prefix = loaded.manifest.get("query_prefix")
-        raw_passage_prefix = loaded.manifest.get("passage_prefix")
-        if (
-            not isinstance(raw_query_prefix, str)
-            or not raw_query_prefix.strip()
-            or not isinstance(raw_passage_prefix, str)
-            or not raw_passage_prefix.strip()
-        ):
-            raise SystemExit(
-                "Dense manifest E5 query_prefix/passage_prefix must be "
-                "non-blank strings"
-            )
-        query_prefix = raw_query_prefix
+    instruction, query_prefix = _resolve_query_format(
+        loaded.manifest,
+        input_format,
+    )
     manifest_max_seq_length = loaded.manifest.get("max_seq_length", 8192)
     if (
         isinstance(manifest_max_seq_length, bool)
