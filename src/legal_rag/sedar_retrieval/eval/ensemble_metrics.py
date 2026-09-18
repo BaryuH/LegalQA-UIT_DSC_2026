@@ -323,7 +323,9 @@ def diagnose_ensemble(
     }
 
     union_metrics: dict[str, dict[str, object]] = {}
-    preferred_order = [name for name in ("bm25", "dense", "legal") if name in sources]
+    preferred_order = [
+        name for name in ("bm25", "dense", "legal", "vn_embedding") if name in sources
+    ]
     if len(preferred_order) >= 2:
         combinations: list[tuple[str, ...]] = []
         for left_index in range(len(preferred_order)):

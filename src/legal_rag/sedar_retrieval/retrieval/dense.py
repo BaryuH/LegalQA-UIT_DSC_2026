@@ -19,13 +19,14 @@ from legal_rag.sedar_retrieval.cuda_policy import CudaDeferredError, probe_cuda
 
 DEFAULT_DENSE_MODEL = "Qwen/Qwen3-Embedding-4B"
 DEFAULT_LEGAL_MODEL = "bqbbao6/vietnamese-legal-embedding"
+DEFAULT_VN_EMBEDDING_MODEL = "AITeamVN/Vietnamese_Embedding"
 DEFAULT_QUERY_INSTRUCTION = (
     "Retrieve Vietnamese legal provisions that directly support the answer. "
     "Prioritize applicable rules, conditions, exceptions, definitions and "
     "referenced provisions."
 )
-DENSE_INPUT_FORMATS = ("qwen_instruction", "e5")
-DenseInputFormat = Literal["qwen_instruction", "e5"]
+DENSE_INPUT_FORMATS = ("qwen_instruction", "e5", "plain")
+DenseInputFormat = Literal["qwen_instruction", "e5", "plain"]
 DEFAULT_INPUT_FORMAT: DenseInputFormat = "qwen_instruction"
 DEFAULT_E5_QUERY_PREFIX = "query: "
 DEFAULT_E5_PASSAGE_PREFIX = "passage: "
@@ -45,6 +46,7 @@ def validate_source_model_pair(
     expected = {
         "dense": (DEFAULT_DENSE_MODEL, "qwen_instruction"),
         "legal": (DEFAULT_LEGAL_MODEL, "e5"),
+        "vn_embedding": (DEFAULT_VN_EMBEDDING_MODEL, "plain"),
     }
     if source_name not in expected:
         raise ValueError(f"Unsupported dense source name: {source_name!r}")
@@ -174,6 +176,10 @@ def format_query_text(
         if not query_prefix.strip():
             raise ValueError("query_prefix must not be blank for E5 inputs")
         return f"{query_prefix}{question}"
+    if input_format == "plain":
+        # BGE-M3 family (e.g. AITeamVN/Vietnamese_Embedding) encodes raw text
+        # with no instruction or prefix; only the non-blank guard above applies.
+        return question
     raise ValueError(
         f"Unsupported dense input format: {input_format!r}; "
         f"expected one of {DENSE_INPUT_FORMATS}"
@@ -196,6 +202,9 @@ def format_passage_text(
         if not passage_prefix.strip():
             raise ValueError("passage_prefix must not be blank for E5 inputs")
         return f"{passage_prefix}{passage}"
+    if input_format == "plain":
+        # BGE-M3 family encodes raw passage text with no prefix.
+        return passage
     raise ValueError(
         f"Unsupported dense input format: {input_format!r}; "
         f"expected one of {DENSE_INPUT_FORMATS}"
@@ -527,6 +536,7 @@ __all__ = [
     "DEFAULT_DENSE_MODEL",
     "DEFAULT_E5_PASSAGE_PREFIX",
     "DEFAULT_E5_QUERY_PREFIX",
+    "DEFAULT_VN_EMBEDDING_MODEL",
     "DEFAULT_INPUT_FORMAT",
     "DEFAULT_QUERY_INSTRUCTION",
     "DENSE_INPUT_FORMATS",

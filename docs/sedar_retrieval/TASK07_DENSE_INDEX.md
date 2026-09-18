@@ -134,6 +134,56 @@ full LTR/e2e comparison, rebuild the synthetic dense + RRF candidates and the
 TASK 12/13 artifacts under the same alternate-model root, then run TASK 20
 with the unchanged reader checkpoint and evidence budget.
 
+## Replacement candidate under the 4B parameter cap: AITeamVN/Vietnamese_Embedding
+
+The pipeline must fit a 4B total-parameter budget. With the reader
+`vilegal-sedar-v1` (~1.7B) fixed and the reranker `AITeamVN/Vietnamese_Reranker`
+(~0.57B) kept, `Qwen/Qwen3-Embedding-4B` (~4.0B) alone breaks the cap.
+`AITeamVN/Vietnamese_Embedding` (~0.57B, a BGE-M3 fine-tune, 1024-dim) is the
+chosen replacement: reader 1.7B + embedding 0.57B + reranker 0.57B ≈ 2.84B.
+It shares the BGE-M3 family with the deployed reranker, which reduces the
+first-stage mismatch flagged in `A6_RERANKER_FINETUNE_RESULT.md`.
+
+Config: `configs/retrieval/r3_aiteamvn_vietnamese_embedding.yaml`. It is a
+BGE-M3 model, so it uses `--input-format plain` (raw text, no `query:`/`passage:`
+prefix and no Qwen instruction) and `--source-name vn_embedding`. Resolve and
+pin the exact revision on the server before a non-dry-run build.
+
+```bash
+ALT_ROOT="$SEDAR_WORK_ROOT/artifacts/sedar_retrieval/experiments/aiteamvn_vietnamese_embedding"
+
+python scripts/sedar_retrieval/build_dense_index.py \
+  --passages "$VIEWS/passages_r2a.jsonl" \
+  --output-dir "$ALT_ROOT/index" \
+  --model AITeamVN/Vietnamese_Embedding \
+  --model-revision <PIN_ON_SERVER> \
+  --input-format plain \
+  --max-seq-length 2048 \
+  --device cuda \
+  --dtype bf16 \
+  --batch-size 32 \
+  --shard-size 4096 \
+  --embedding-storage sharded \
+  --top-k 10 \
+  --local-files-only
+
+python scripts/sedar_retrieval/run_dense_retrieval.py \
+  --index-dir "$ALT_ROOT/index" \
+  --passages "$VIEWS/passages_r2a.jsonl" \
+  --questions "$PROJECT_ROOT/data/warmup.json" \
+  --split warmup \
+  --source-name vn_embedding \
+  --top-k 150 \
+  --batch-size 32 \
+  --output "$ALT_ROOT/eval/dense_r2a_aiteamvn_warmup500.jsonl" \
+  --local-files-only
+```
+
+This is a paired A/B against the Qwen `dense` control, not a promotion. Compare
+on clean-460 under the frozen reader and evidence budget; promote only if it
+clears `configs/retrieval/gates.yaml`. The `dense` source guard stays pinned to
+Qwen so the control remains unambiguous.
+
 ## Dense retrieval and evaluation
 
 ```bash

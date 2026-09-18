@@ -1,0 +1,46 @@
+# Replacement-candidate dense retriever under the 4B pipeline parameter cap.
+#
+# Motivation: the whole pipeline must fit a 4B total-parameter budget. With the
+# reader `vilegal-sedar-v1` (~1.7B) fixed and the cross-encoder reranker
+# `AITeamVN/Vietnamese_Reranker` (~0.57B) kept, the champion dense model
+# `Qwen/Qwen3-Embedding-4B` (~4.0B) alone breaks the cap. This config benchmarks
+# `AITeamVN/Vietnamese_Embedding` (~0.57B, BGE-M3 fine-tune) as its replacement:
+#   reader 1.7B + embedding 0.57B + reranker 0.57B = ~2.84B <= 4B.
+#
+# Same-family bonus: the reranker is a bge-reranker-v2-m3 fine-tune, so a BGE-M3
+# dense leg reduces the first-stage train/inference mismatch flagged in
+# docs/sedar_retrieval/A6_RERANKER_FINETUNE_RESULT.md.
+#
+# This is a paired A/B harness, NOT a promotion. The frozen champion stays
+# `Qwen/Qwen3-Embedding-4B` (dense source) until a paired comparison on
+# clean-460 under the frozen reader clears configs/retrieval/gates.yaml.
+version: sedar-retrieval-v3
+stage: R3
+status: benchmark_only
+model_card: https://huggingface.co/AITeamVN/Vietnamese_Embedding
+
+dense:
+  enabled: true
+  model: AITeamVN/Vietnamese_Embedding
+  # Resolve the exact snapshot on the GPU server, then pin the hash here before
+  # any non-dry-run build (build_dense_index.py refuses a blank revision).
+  model_revision: RESOLVE_ON_SERVER
+  source_name: vn_embedding
+  input_format: plain          # BGE-M3 encodes raw text; no query/passage prefix
+  max_seq_length: 2048         # model-card recommendation; aligns with reranker
+  embedding_dim: 1024          # BGE-M3 dense dimension
+  dtype: bf16
+  normalize: true
+  top_n: 150
+
+fusion:
+  method: rrf
+  rrf_k: 60
+  union_cap: 250
+
+comparison:
+  baseline_model: Qwen/Qwen3-Embedding-4B
+  same_corpus: true
+  same_bm25: true
+  same_reader_checkpoint: true
+  same_evidence_budget: true

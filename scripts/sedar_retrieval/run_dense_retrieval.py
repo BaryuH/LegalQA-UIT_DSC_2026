@@ -91,8 +91,8 @@ def _write_predictions(
     *,
     source_name: str = "dense",
 ) -> None:
-    if source_name not in {"dense", "legal"}:
-        raise ValueError("source_name must be 'dense' or 'legal'")
+    if source_name not in {"dense", "legal", "vn_embedding"}:
+        raise ValueError("source_name must be 'dense', 'legal', or 'vn_embedding'")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
         for query, hits in zip(queries, hits_by_query, strict=True):
@@ -145,7 +145,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--source-name",
-        choices=("dense", "legal"),
+        choices=("dense", "legal", "vn_embedding"),
         default="dense",
         help="Logical source name in the output artifact.",
     )

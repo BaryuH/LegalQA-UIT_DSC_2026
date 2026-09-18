@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from legal_rag.sedar_retrieval.retrieval.dense import (
+    DEFAULT_VN_EMBEDDING_MODEL,
     DenseIndexError,
     dense_cache_fingerprint,
     format_instruct_query,
@@ -14,6 +15,7 @@ from legal_rag.sedar_retrieval.retrieval.dense import (
     normalize_embedding_matrix,
     search_dense_index,
     validate_embedding_matrix,
+    validate_source_model_pair,
 )
 
 
@@ -55,6 +57,51 @@ def test_e5_format_uses_query_and_passage_prefixes() -> None:
         )
         == "passage: Điều kiện hưởng trợ cấp được quy định như sau."
     )
+
+
+def test_plain_format_is_identity_for_bge_m3_family() -> None:
+    question = "Điều kiện hưởng trợ cấp là gì?"
+    passage = "Điều kiện hưởng trợ cấp được quy định như sau."
+    assert format_query_text(question, input_format="plain") == question
+    assert format_passage_text(passage, input_format="plain") == passage
+
+
+def test_plain_format_still_rejects_blank_text() -> None:
+    with pytest.raises(ValueError, match="must not be blank"):
+        format_query_text("   ", input_format="plain")
+    with pytest.raises(ValueError, match="must not be blank"):
+        format_passage_text("   ", input_format="plain")
+
+
+def test_vn_embedding_source_requires_model_and_plain_format() -> None:
+    validate_source_model_pair(
+        "vn_embedding",
+        DEFAULT_VN_EMBEDDING_MODEL,
+        input_format="plain",
+    )
+    with pytest.raises(ValueError, match="requires model"):
+        validate_source_model_pair(
+            "vn_embedding",
+            "Qwen/Qwen3-Embedding-4B",
+            input_format="plain",
+        )
+    with pytest.raises(ValueError, match="requires input_format"):
+        validate_source_model_pair(
+            "vn_embedding",
+            DEFAULT_VN_EMBEDDING_MODEL,
+            input_format="e5",
+        )
+
+
+def test_dense_source_guard_still_pins_qwen() -> None:
+    # The champion `dense` source must not accept the replacement model, so the
+    # paired control stays unambiguous until promotion.
+    with pytest.raises(ValueError, match="requires model"):
+        validate_source_model_pair(
+            "dense",
+            DEFAULT_VN_EMBEDDING_MODEL,
+            input_format="qwen_instruction",
+        )
 
 
 def test_dense_cache_fingerprint_changes_with_input_format() -> None:
