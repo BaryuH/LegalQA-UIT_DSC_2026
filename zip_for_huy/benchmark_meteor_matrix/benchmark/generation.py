@@ -58,6 +58,7 @@ class ModelConfig:
     device: str = "cuda"
     dtype: str = "auto"  # auto -> bf16 if supported else fp16
     load_in_4bit: bool = False
+    load_in_8bit: bool = False
     trust_remote_code: bool = True
     attn_implementation: str | None = None
     use_chat_template: bool = True
@@ -86,7 +87,9 @@ class HFCandidateGenerator:
         from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: PLC0415
 
         cfg = self.config
-        if cfg.dtype == "auto":
+        if cfg.load_in_8bit:
+            dtype = torch.float16
+        elif cfg.dtype == "auto":
             dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         else:
             dtype = getattr(torch, cfg.dtype)
@@ -105,7 +108,12 @@ class HFCandidateGenerator:
         }
         if cfg.attn_implementation:
             kwargs["attn_implementation"] = cfg.attn_implementation
-        if cfg.load_in_4bit:
+        if cfg.load_in_8bit:
+            from transformers import BitsAndBytesConfig  # noqa: PLC0415
+
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+            kwargs["device_map"] = {"": cfg.device}
+        elif cfg.load_in_4bit:
             from transformers import BitsAndBytesConfig  # noqa: PLC0415
 
             kwargs["quantization_config"] = BitsAndBytesConfig(
@@ -116,7 +124,7 @@ class HFCandidateGenerator:
             )
             kwargs["device_map"] = {"": cfg.device}
         model = AutoModelForCausalLM.from_pretrained(cfg.model_name, **kwargs)
-        if not cfg.load_in_4bit:
+        if not (cfg.load_in_4bit or cfg.load_in_8bit):
             model = model.to(cfg.device)
         model.eval()
         self._model = model

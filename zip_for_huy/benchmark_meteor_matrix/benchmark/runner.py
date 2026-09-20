@@ -84,6 +84,7 @@ class BenchmarkConfig:
                 device=m.get("device", "cuda"),
                 dtype=m.get("dtype", "auto"),
                 load_in_4bit=m.get("load_in_4bit", False),
+                load_in_8bit=m.get("load_in_8bit", False),
                 trust_remote_code=m.get("trust_remote_code", True),
                 attn_implementation=m.get("attn_implementation"),
                 use_chat_template=m.get("use_chat_template", True),
@@ -167,17 +168,49 @@ class BenchmarkRunner:
     # ---- candidate generation ------------------------------------------- #
     def _candidates(self, dataset: Dataset, template: str) -> tuple[list[CandidateSet], str | None]:
         cache = _resolve(self.config.cache_path)
+        cached_by_id: dict[str, CandidateSet] = {}
         if cache and cache.exists():
-            return read_candidate_cache(cache), None
+            for c in read_candidate_cache(cache):
+                cached_by_id[c.case_id] = c
+            if all(case.id in cached_by_id for case in dataset.cases):
+                return [cached_by_id[case.id] for case in dataset.cases], None
+
         generator = HFCandidateGenerator(self.config.model)
         generator.load()
-        sets: list[CandidateSet] = []
-        for case in dataset.cases:
-            prompt = build_prompt(template, case)
-            sets.append(generator.generate(case.id, prompt, self.config.sampling))
+
+        cache_handle = None
         if cache:
-            write_candidate_cache(cache, sets)
-        return sets, generator.resolved_dtype
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache_handle = cache.open("a", encoding="utf-8")
+
+        try:
+            from tqdm import tqdm
+            iterator = tqdm(dataset.cases, desc="Generating candidates")
+        except ImportError:
+            iterator = dataset.cases
+
+        for case in iterator:
+            if case.id in cached_by_id:
+                continue
+            prompt = build_prompt(template, case)
+            cset = generator.generate(case.id, prompt, self.config.sampling)
+            cached_by_id[case.id] = cset
+            if cache_handle:
+                cache_handle.write(json.dumps(cset.as_dict(), ensure_ascii=False) + "\n")
+                cache_handle.flush()
+
+        if cache_handle:
+            cache_handle.close()
+
+        resolved_dtype = generator.resolved_dtype
+        del generator
+        import gc
+        import torch
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        return [cached_by_id[case.id] for case in dataset.cases if case.id in cached_by_id], resolved_dtype
 
     # ---- selection over one candidate pool ------------------------------ #
     def _select_all(
@@ -246,8 +279,14 @@ class BenchmarkRunner:
         random_exp: list[float] = []
         grounding_mode = "disabled_no_evidence"
 
+        try:
+            from tqdm import tqdm
+            eval_iterator = tqdm(enumerate(dataset.cases), total=len(dataset.cases), desc="Evaluating MBR strategies")
+        except ImportError:
+            eval_iterator = enumerate(dataset.cases)
+
         with per_case_path.open("w", encoding="utf-8") as handle:
-            for offset, case in enumerate(dataset.cases):
+            for offset, case in eval_iterator:
                 cset = by_id.get(case.id)
                 if cset is None or not cset.candidates:
                     continue

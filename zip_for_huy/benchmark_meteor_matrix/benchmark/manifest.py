@@ -91,6 +91,7 @@ def build_manifest(
             "device": model.device,
             "dtype": model.dtype,
             "load_in_4bit": model.load_in_4bit,
+            "load_in_8bit": model.load_in_8bit,
         },
         sampling=sampling.as_dict(),
         utilities=utility_names,
