@@ -21,10 +21,47 @@
 
 ---
 
-## 2. Thiết lập Thước đo Chuẩn 500 Dev Slice
+## 2. Thiết lập Thước đo Chuẩn Đánh giá (Standing Benchmark Yardstick)
 
-- **Bộ dữ liệu chuẩn:** 500 câu hỏi trích xuất từ held-out dev slice của `data/train.json` (`processed/train_dev500.json`).
-- **Bằng chứng chuẩn:** Sử dụng BM25 thô kết hợp `AITeamVN/Vietnamese_Reranker` (`processed/train_dev500_rerank_evidence.jsonl`).
-- **Vai trò:**
-  - Tập 500 mẫu này là thước đo cố định (ground truth benchmark) cho toàn bộ dự án.
-  - Mọi cải tiến tiếp theo về Retrieval (Dense, Hybrid, Reranker) hoặc Generator/Prompting/Fine-tuning sẽ được so sánh paired bootstrap với baseline được thiết lập tại đây.
+- **Bộ dữ liệu chuẩn:**
+  - `processed/train_dev200.json` (200 câu) & `processed/train_dev200_rerank_evidence.jsonl`: Đang chạy trên GPU làm thước đo thường quy nhanh (độ phân giải paired METEOR $\approx 0.009$ ở power 80%, tốn thời gian sinh ít hơn 2.5 lần).
+  - `processed/train_dev500.json` (500 câu) & `processed/train_dev500_rerank_evidence.jsonl`: Đã chuẩn bị sẵn bằng chứng rerank cho các mốc đánh giá lớn hơn khi cần độ phân giải cao hơn.
+- **Bằng chứng chuẩn:** BM25 thô kết hợp `AITeamVN/Vietnamese_Reranker`.
+- **Vai trò:** Thước đo cố định cho toàn bộ dự án. Mọi cải tiến tiếp theo về Retrieval (Dense, Hybrid, Reranker) hoặc Generator (Prompting, Fine-tuning SFT) sẽ so sánh paired bootstrap trực tiếp với baseline này.
+- **Cam kết:** Tuyệt đối không đụng vào MBR / Utility Selection nữa. Bộ chọn production cố định là `longest_grounded` / `mbr_prune_refusal`.
+
+---
+
+## 3. Phân tích & Kiểm chứng Code Chấm Chuẩn BTC (`Scoring-Program-Task-LegalQA.zip`)
+
+**Thời điểm kiểm chứng:** 2026-09-20  
+**File nguồn:** `zip_for_huy/Scoring-Program-Task-LegalQA.zip` (chứa `scoring.py`, `rouge_score/`, `metadata.yaml`).
+
+### Chi tiết kỹ thuật từ mã nguồn chấm thi:
+1. **Tokenizer:**
+   - **HOÀN TOÀN KHÔNG DÙNG PyVi**: Dòng `from pyvi import ViTokenizer` và `ViTokenizer.tokenize(str(string_sent))` đã bị comment out trong `scoring.py`. Hàm `build_in_tokenizer(string_sent)` trả về trực tiếp xâu gốc `return string_sent`.
+   - **METEOR Tokenizer:** Dùng trực tiếp Python whitespace split: `str(y_pred[k]).split()`.
+   - **ROUGE-L Tokenizer:** Dùng Google `rouge_score.rouge_scorer.RougeScorer(['rougeL'], use_stemmer=False)` với `DefaultTokenizer` mặc định.
+
+2. **Cấu trúc NLTK METEOR:**
+   - Lời gọi: `meteor_score([y_true[k].split()], y_pred[k].split())`.
+   - Vì tiếng Việt không có mục trong WordNet tiếng Anh và PorterStemmer không ảnh hưởng từ vựng tiếng Việt, điểm số là unigram token alignment chính xác có phạt phân mảnh chuỗi liên tục (fragmentation penalty).
+
+3. **Quy cách file nộp bài (Submission Format):**
+   - File JSON nộp lên CodaLab/CodaBench phải có dạng:
+     ```json
+     {
+       "case_id_1": {
+         "answer": "Nội dung câu trả lời..."
+       },
+       "case_id_2": {
+         "answer": "Nội dung câu trả lời..."
+       }
+     }
+     ```
+   - **Ràng buộc cứng:** `len(ids_preds) == len(ids_truth)`. Số lượng câu trả lời phải khớp chính xác 100% với tập đề thi; thiếu hoặc thừa key sẽ văng ngoại lệ `Samples in predict not match with reference` và nhận điểm 0.
+
+4. **Kiểm thử đối chiếu (Sanity Check):**
+   - Đã chạy script kiểm chứng độc lập so sánh kết quả của `eval_qa` trong `scoring.py` của BTC với module `src/legal_rag/evaluation/source_scorer.py` của repo.
+   - **Kết quả:** Trùng khớp tuyệt đối $100\%$ đến 16 chữ số thập phân (`Exact match for meteor? True`, `Exact match for rouge? True`). Hệ thống đánh giá nội bộ của repo hoàn toàn đồng bộ với ban tổ chức.
+
