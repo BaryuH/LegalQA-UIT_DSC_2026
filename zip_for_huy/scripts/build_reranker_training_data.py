@@ -52,7 +52,54 @@ from typing import Any
 from legal_rag.questions import load_inference_questions
 from legal_rag.sedar_retrieval.ranking.vietnamese_reranker import load_rerank_units
 
+import math
+import re
+from collections import Counter
+
 RERANKER_DATA_SCHEMA_VERSION = "sedar-reranker-train-data-v1"
+
+
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip().casefold())
+
+
+def _char_ngrams(text: str, n: int = 3) -> Counter[str]:
+    padded = f"^{text}$"
+    return Counter(padded[i : i + n] for i in range(max(0, len(padded) - n + 1)))
+
+
+def _token_jaccard(a: str, b: str) -> float:
+    set_a = set(a.casefold().split())
+    set_b = set(b.casefold().split())
+    if not set_a and not set_b:
+        return 0.0
+    return len(set_a & set_b) / max(1, len(set_a | set_b))
+
+
+def _compute_tfidf_vectors(questions: dict[str, str], n: int = 3) -> dict[str, dict[str, float]]:
+    df: Counter[str] = Counter()
+    grams_by_id = {}
+    for qid, text in questions.items():
+        grams = _char_ngrams(text, n)
+        grams_by_id[qid] = grams
+        for g in grams:
+            df[g] += 1
+    total_docs = len(questions)
+    idf = {g: math.log((total_docs + 1) / (count + 1)) + 1.0 for g, count in df.items()}
+    vectors = {}
+    for qid, grams in grams_by_id.items():
+        vec = {g: (1.0 + math.log(cnt)) * idf[g] for g, cnt in grams.items()}
+        norm = math.sqrt(sum(v * v for v in vec.values()))
+        vectors[qid] = {g: v / norm for g, v in vec.items()} if norm else {}
+    return vectors
+
+
+def _cosine_similarity(vec_a: dict[str, float], vec_b: dict[str, float]) -> float:
+    if not vec_a or not vec_b:
+        return 0.0
+    if len(vec_a) > len(vec_b):
+        vec_a, vec_b = vec_b, vec_a
+    return sum(val * vec_b.get(k, 0.0) for k, val in vec_a.items())
 
 
 def _require_file(path: Path, flag: str) -> Path:
@@ -428,18 +475,71 @@ def main() -> int:
     excluded_scores: list[float] = []
     excluded_similarities: list[float] = []
 
+    excluded_query_ids: set[str] = set()
+    nontraining_questions: dict[str, str] = {}
+    data_dir = args.questions.parent
+    for split_file in ("warmup.json", "public-official.json", "private-official.json"):
+        sp_path = data_dir / split_file
+        if sp_path.is_file():
+            try:
+                sp_json = json.loads(sp_path.read_text(encoding="utf-8"))
+                for k, v in sp_json.items():
+                    qid_s = str(k)
+                    excluded_query_ids.add(qid_s)
+                    q_text = _normalize_text(str(v.get("question") or ""))
+                    if q_text:
+                        nontraining_questions[qid_s] = q_text
+            except Exception:
+                pass
+    dev_path = args.questions.parent.parent / "processed" / "train_dev200.json"
+    if dev_path.is_file():
+        try:
+            dev_json = json.loads(dev_path.read_text(encoding="utf-8"))
+            for k, v in dev_json.items():
+                qid_s = str(k)
+                excluded_query_ids.add(qid_s)
+                q_text = _normalize_text(str(v.get("question") or "") if isinstance(v, dict) else str(v))
+                if q_text:
+                    nontraining_questions[qid_s] = q_text
+        except Exception:
+            pass
+
+    # Compute exact TF-IDF vectors for all questions (non-training + training)
+    all_q_texts: dict[str, str] = dict(nontraining_questions)
+    for qid in labels:
+        if qid not in excluded_query_ids:
+            q_str = questions.get(qid)
+            if q_str:
+                all_q_texts[qid] = _normalize_text(q_str)
+    tfidf_vectors = _compute_tfidf_vectors(all_q_texts, n=3)
+
     with pairs_path.open("w", encoding="utf-8") as handle:
         for query_id in sorted(labels):
-            counters["queries_seen"] += 1
+            if query_id in excluded_query_ids:
+                continue
             question = questions.get(query_id)
             rows = candidates.get(query_id)
             if question is None or not rows:
                 continue
 
-            gold_ids = {gid for gid in labels[query_id] if gid in units}
+            # Gate 1: Check TF-IDF 3-gram cosine similarity against non-training questions (cosine >= 0.90)
+            q_vec = tfidf_vectors.get(query_id, {})
+            if any(_cosine_similarity(q_vec, tfidf_vectors.get(nt_id, {})) >= 0.90 for nt_id in nontraining_questions):
+                continue
+
+            counters["queries_seen"] += 1
+
+            # Gate 2: Positive passage quality filter (exclude trivial passages < 50 chars)
+            gold_ids = {
+                gid for gid in labels[query_id]
+                if gid in units and len(units[gid].reader_text.strip()) >= 50
+            }
             if not gold_ids:
                 counters["queries_without_positive_in_view"] += 1
                 continue
+
+            gold_texts = {_normalize_text(units[gid].reader_text) for gid in gold_ids}
+            seen_neg_texts: set[str] = set()
 
             # Containment leakage: a gold article's own children (and a gold
             # child's parent) are the same law text at another granularity. They
@@ -472,11 +572,18 @@ def main() -> int:
                     continue
                 if unit_id not in units:
                     continue
-                if unit_id in gold_ids:
+                cand_text = units[unit_id].reader_text
+                cand_norm = _normalize_text(cand_text)
+                if unit_id in gold_ids or cand_norm in gold_texts:
                     counters["excluded_gold"] += 1
+                    continue
+                if cand_norm in seen_neg_texts:
                     continue
                 if unit_id in forbidden:
                     counters["excluded_same_article"] += 1
+                    continue
+                if any(_token_jaccard(units[gid].reader_text, cand_text) > 0.85 for gid in gold_ids):
+                    counters["excluded_suspected_false_negative"] += 1
                     continue
                 if norm > args.false_negative_above:
                     if args.false_negative_mode == "positive_cosine":
@@ -499,6 +606,7 @@ def main() -> int:
                     counters["excluded_too_easy"] += 1
                     continue
                 band.append(unit_id)
+                seen_neg_texts.add(cand_norm)
                 counters["band_candidates"] += 1
                 band_scores.append(norm)
 

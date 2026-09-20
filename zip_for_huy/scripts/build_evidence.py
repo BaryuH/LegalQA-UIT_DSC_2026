@@ -110,6 +110,12 @@ def parse_args() -> argparse.Namespace:
         help="Semantic reranker: 'aiteamvn' uses AITeamVN/Vietnamese_Reranker.",
     )
     parser.add_argument(
+        "--reranker-adapter",
+        type=Path,
+        default=None,
+        help="Optional path to finetuned LoRA reranker adapter checkpoint directory.",
+    )
+    parser.add_argument(
         "--max-length",
         type=int,
         default=2304,
@@ -276,17 +282,69 @@ def main() -> int:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     cross_encoder = None
     if args.reranker == "aiteamvn":
-        from sentence_transformers import CrossEncoder
+        if args.reranker_adapter is not None:
+            adapter_path = Path(args.reranker_adapter).resolve()
+            print(
+                f"[build_evidence] Loading finetuned Vietnamese_Reranker adapter from {adapter_path} "
+                f"on {device} (max_length={args.max_length})..."
+            )
 
-        print(
-            f"[build_evidence] Loading AITeamVN/Vietnamese_Reranker on {device} "
-            f"(max_length={args.max_length})..."
-        )
-        cross_encoder = CrossEncoder(
-            "AITeamVN/Vietnamese_Reranker",
-            device=device,
-            max_length=args.max_length,
-        )
+            class FinetunedRerankerWrapper:
+                def __init__(self, adapter_dir: Path, dev: str, max_len: int) -> None:
+                    import torch
+                    from peft import PeftModel
+                    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+                    self.device = dev
+                    self.max_length = max_len
+                    self.tokenizer = AutoTokenizer.from_pretrained(str(adapter_dir))
+                    base_model = AutoModelForSequenceClassification.from_pretrained(
+                        "AITeamVN/Vietnamese_Reranker",
+                        revision="f536976248403314225d7fdfdbc87f0e9516a54e",
+                        torch_dtype=torch.bfloat16,
+                    ).to(dev)
+                    self.model = PeftModel.from_pretrained(base_model, str(adapter_dir)).to(dev)
+                    self.model.eval()
+
+                def predict(
+                    self,
+                    pairs: list[tuple[str, str]],
+                    batch_size: int = 32,
+                    show_progress_bar: bool = False,
+                ) -> list[float]:
+                    import torch
+
+                    scores: list[float] = []
+                    for i in range(0, len(pairs), batch_size):
+                        batch = pairs[i : i + batch_size]
+                        queries = [q for q, p in batch]
+                        passages = [p for q, p in batch]
+                        encoded = self.tokenizer(
+                            queries,
+                            passages,
+                            padding=True,
+                            truncation="only_second",
+                            max_length=self.max_length,
+                            return_tensors="pt",
+                        ).to(self.device)
+                        with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+                            logits = self.model(**encoded, return_dict=True).logits.view(-1)
+                            scores.extend([float(v) for v in logits.float().cpu()])
+                    return scores
+
+            cross_encoder = FinetunedRerankerWrapper(adapter_path, device, args.max_length)
+        else:
+            from sentence_transformers import CrossEncoder
+
+            print(
+                f"[build_evidence] Loading base AITeamVN/Vietnamese_Reranker on {device} "
+                f"(max_length={args.max_length})..."
+            )
+            cross_encoder = CrossEncoder(
+                "AITeamVN/Vietnamese_Reranker",
+                device=device,
+                max_length=args.max_length,
+            )
     reranker = None
     if (
         args.reranker == "none"

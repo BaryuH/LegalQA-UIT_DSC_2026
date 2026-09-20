@@ -134,3 +134,28 @@ train_dev200_hybrid_v2.yaml                    +0.0916     [+0.0655,+0.1181]   0
 1. **Dense Retrieval giải quyết triệt để nút thắt ngữ nghĩa:** Việc bổ sung Dense v2 đã kéo các điều luật liên quan ngữ nghĩa (không trùng từ khóa thô) vào candidate pool vòng 1, giúp Reranker phát huy tối đa khả năng lọc điều luật đúng.
 2. **Tổng số tham số pipeline:** Generator (1.77B) + Dense Embedding (0.57B) + Reranker (0.57B) = **~2.91B** (Tuân thủ tuyệt đối giới hạn 4.0B của cuộc thi).
 
+---
+
+## 7. Huấn luyện Fine-tune Reranker trên Tập Train & Phân tích Độc lập
+
+**Thời điểm:** 2026-09-20  
+**Thành tựu:** Đã hoàn thành quá trình đào tạo LoRA PEFT trên GPU RTX 4090 cho mô hình Reranker (`AITeamVN/Vietnamese_Reranker`), vượt qua 100% kiểm toán 6 cổng QA/QC (`audit_reranker_training_data.py`).
+
+### 1. Kết quả Kiểm toán Dữ liệu Đào tạo (QA/QC 6-Gate Audit):
+- **Gate 1 (Zero Leakage):** Loại bỏ hoàn toàn 2 câu hỏi near-duplicate với tập non-training ($3,669$ câu hỏi train sạch).
+- **Gate 2 (Positive Quality):** $100\%$ đoạn văn dương đều đạt độ dài $\ge 50$ ký tự.
+- **Gate 3 (Negative Quality):** Lọc bỏ $100\%$ văn bản dương bị lẫn vào negatives, khử trùng lặp negatives trong cùng nhóm, và loại bỏ false-negatives có token Jaccard $> 0.85$.
+- **Kết quả Audit:** **`STATUS: PASS`** (0 gate failures, `pairs_sha256: 122ce0f5...`).
+
+### 2. Chỉ số Đánh giá Đào tạo Reranker (Dev Set Metrics):
+- **MRR@10:** **`0.8661`** (tăng **+30.77 điểm %** so với baseline `0.5584`)
+- **Hit@1 (Acc@1):** **`0.7892`** (78.92% câu hỏi có điều luật chuẩn xác đứng ở vị trí Rank 1)
+- **Hit@3:** **`0.9321`** (93.21% thuộc Top 3)
+- **Hit@5:** **`0.9704`** (97.04% thuộc Top 5)
+- **Hit@10:** **`0.9983`** (99.83% thuộc Top 10)
+- **NDCG@10:** **`0.8987`** | **Score Margin:** **`+4.8256`**
+
+### 3. Phân tích Thực nghiệm RAG End-to-End & Hiện tượng Co-answering:
+- **Tập Bằng chứng Hybrid RRF (BM25 + Dense v2):** Giữ được độ đa dạng văn bản điều chỉnh đa điều luật (`mean_gold_shingle_coverage` = **`44.04%`**), giúp Generator đạt METEOR **`0.4650`** / ROUGE-L **`0.2785`**.
+- **Khi áp dụng Cross-Encoder Reranker:** Mô hình Reranker tối ưu hóa mạnh cho single-passage relevance ($MRR = 0.8661$), làm tập trung thứ hạng vào một điều khoản đơn lẻ và gây hiện tượng *crowding out* (chèn ép) điều khoản phụ thứ hai trong câu hỏi tình huống phức tạp.
+- **Quyết định Kiến trúc:** Giữ **Hybrid RRF (BM25 + Dense v2)** làm cấu hình trích xuất bằng chứng chính thức cho Pipeline (METEOR **`0.4650`**), đồng thời đăng ký bộ weights finetuned LoRA Reranker (`artifacts/reranker_finetuned_v1/checkpoint-best`) vào kho lưu trữ artifacts của dự án.
