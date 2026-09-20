@@ -20,6 +20,7 @@ from legal_rag.sedar_retrieval.cuda_policy import CudaDeferredError, probe_cuda
 DEFAULT_DENSE_MODEL = "Qwen/Qwen3-Embedding-4B"
 DEFAULT_LEGAL_MODEL = "bqbbao6/vietnamese-legal-embedding"
 DEFAULT_VN_EMBEDDING_MODEL = "AITeamVN/Vietnamese_Embedding"
+DEFAULT_VN_EMBEDDING_V2_MODEL = "AITeamVN/Vietnamese_Embedding_v2"
 DEFAULT_QUERY_INSTRUCTION = (
     "Retrieve Vietnamese legal provisions that directly support the answer. "
     "Prioritize applicable rules, conditions, exceptions, definitions and "
@@ -47,6 +48,7 @@ def validate_source_model_pair(
         "dense": (DEFAULT_DENSE_MODEL, "qwen_instruction"),
         "legal": (DEFAULT_LEGAL_MODEL, "e5"),
         "vn_embedding": (DEFAULT_VN_EMBEDDING_MODEL, "plain"),
+        "vn_embedding_v2": (DEFAULT_VN_EMBEDDING_V2_MODEL, "plain"),
     }
     if source_name not in expected:
         raise ValueError(f"Unsupported dense source name: {source_name!r}")
@@ -537,6 +539,7 @@ __all__ = [
     "DEFAULT_E5_PASSAGE_PREFIX",
     "DEFAULT_E5_QUERY_PREFIX",
     "DEFAULT_VN_EMBEDDING_MODEL",
+    "DEFAULT_VN_EMBEDDING_V2_MODEL",
     "DEFAULT_INPUT_FORMAT",
     "DEFAULT_QUERY_INSTRUCTION",
     "DENSE_INPUT_FORMATS",

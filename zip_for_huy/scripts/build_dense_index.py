@@ -1,0 +1,532 @@
+#!/usr/bin/env python3
+"""Build a dense legal index for SEDAR Retrieval TASK 07."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import time
+from pathlib import Path
+from typing import Any
+
+from legal_rag.sedar_retrieval.gates import git_commit_sha, new_run_id
+from legal_rag.sedar_retrieval.retrieval.bm25_passages import (
+    corpus_fingerprint,
+)
+from legal_rag.sedar_retrieval.retrieval.dense import (
+    DEFAULT_DENSE_MODEL,
+    DEFAULT_E5_PASSAGE_PREFIX,
+    DEFAULT_E5_QUERY_PREFIX,
+    DEFAULT_INPUT_FORMAT,
+    DEFAULT_QUERY_INSTRUCTION,
+    DENSE_CACHE_SCHEMA_VERSION,
+    DENSE_INDEX_SCHEMA_VERSION,
+    DENSE_INDEX_TYPE,
+    DENSE_INPUT_FORMATS,
+    DenseIndexError,
+    SentenceTransformerEncoder,
+    build_dense_index_scaffold,
+    dense_cache_fingerprint,
+    dense_manifest_to_dict,
+    format_passage_text,
+    format_query_text,
+    length_bucket_order,
+    normalize_embedding_matrix,
+    require_dense_encode,
+    search_dense_index,
+    validate_embedding_matrix,
+)
+from legal_rag.sedar_retrieval.retrieval.passage_adapter import load_passages_jsonl
+
+
+def _optional_runtime_imports() -> tuple[Any, Any]:
+    try:
+        import faiss
+        import numpy as np
+    except ImportError as exc:  # pragma: no cover - environment dependent
+        raise SystemExit(
+            "TASK 07 requires numpy and FAISS; install faiss-cpu on the server."
+        ) from exc
+    return faiss, np
+
+
+def _write_metadata(path: Path, passages: tuple[Any, ...]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        for ordinal, passage in enumerate(passages):
+            handle.write(
+                json.dumps(
+                    {
+                        "ordinal": ordinal,
+                        "passage_id": passage.passage_id,
+                        "document_id": passage.document_id,
+                        "article_id": passage.article_id,
+                        "clause_id": passage.clause_id,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+
+
+def _write_manifest(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _gpu_peak_memory_gb() -> float | None:
+    try:
+        import torch
+    except ImportError:  # pragma: no cover - guarded by the encoder
+        return None
+    if not torch.cuda.is_available():
+        return None
+    return float(torch.cuda.max_memory_allocated() / 1024**3)
+
+
+def _prepare_output_dir(path: Path, *, force: bool) -> None:
+    if path.exists() and not path.is_dir():
+        raise SystemExit(f"Output path is not a directory: {path}")
+    if path.exists() and any(path.iterdir()) and not force:
+        raise SystemExit(
+            f"Output directory is non-empty: {path}; use a new run directory "
+            "or pass --force explicitly."
+        )
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _scaffold_manifest(
+    *,
+    run_id: str,
+    model: str,
+    dtype: str,
+    normalized: bool,
+    corpus_hash: str,
+    passage_count: int,
+    input_format: str,
+    query_prefix: str | None,
+    passage_prefix: str | None,
+) -> dict[str, Any]:
+    manifest = build_dense_index_scaffold(
+        model=model,
+        index_type=DENSE_INDEX_TYPE,
+        normalized=normalized,
+        dtype=dtype,
+    )
+    payload = dense_manifest_to_dict(manifest)
+    payload.update(
+        {
+            "schema_version": DENSE_INDEX_SCHEMA_VERSION,
+            "run_id": run_id,
+            "git_commit": git_commit_sha(),
+            "corpus_hash": corpus_hash,
+            "passage_count": passage_count,
+            "input_format": input_format,
+            "query_prefix": query_prefix,
+            "passage_prefix": passage_prefix,
+            "query_instruction": (
+                DEFAULT_QUERY_INSTRUCTION
+                if input_format == "qwen_instruction"
+                else None
+            ),
+            "alignment_ok": False,
+            "nan_inf_count": 0,
+        }
+    )
+    return payload
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--passages", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--model", default=DEFAULT_DENSE_MODEL)
+    parser.add_argument("--model-revision", default=None)
+    parser.add_argument(
+        "--model-path",
+        type=Path,
+        default=None,
+        help=(
+            "Optional local snapshot directory to load the weights from. "
+            "--model stays the logical model name, so the manifest and the "
+            "index cache fingerprint are unchanged; only the loader path "
+            "differs. Use this on an offline host where resolving the repo id "
+            "through the Hugging Face cache fails."
+        ),
+    )
+    parser.add_argument(
+        "--input-format",
+        choices=DENSE_INPUT_FORMATS,
+        default=DEFAULT_INPUT_FORMAT,
+        help="Query/corpus text format expected by the embedding model.",
+    )
+    parser.add_argument(
+        "--query-prefix",
+        default=None,
+        help="E5 query prefix; defaults to 'query: ' in e5 mode.",
+    )
+    parser.add_argument(
+        "--passage-prefix",
+        default=None,
+        help="E5 passage prefix; defaults to 'passage: ' in e5 mode.",
+    )
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--dtype",
+        choices=("bf16", "fp16", "fp32"),
+        default="bf16",
+    )
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--shard-size", type=int, default=4096)
+    parser.add_argument(
+        "--embedding-storage",
+        choices=("auto", "memmap", "sharded"),
+        default="auto",
+        help="Use mmap, regular .npy shards, or mmap with automatic fallback.",
+    )
+    parser.add_argument("--max-seq-length", type=int, default=8192)
+    parser.add_argument("--smoke-query", default="Điều 76")
+    parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument("--local-files-only", action="store_true")
+    parser.add_argument("--disable-normalization", action="store_true")
+    parser.add_argument("--disable-length-bucketing", action="store_true")
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Write a DEFERRED_GPU status manifest without loading the model.",
+    )
+    args = parser.parse_args()
+
+    if args.batch_size <= 0 or args.shard_size <= 0 or args.top_k <= 0:
+        raise SystemExit("--batch-size, --shard-size, and --top-k must be positive")
+    if args.max_seq_length <= 0:
+        raise SystemExit("--max-seq-length must be positive")
+    if not args.dry_run and not str(args.model_revision or "").strip():
+        raise SystemExit(
+            "A pinned --model-revision is required for a non-dry-run dense index."
+        )
+    if args.input_format == "e5":
+        query_prefix = (
+            args.query_prefix
+            if args.query_prefix is not None
+            else DEFAULT_E5_QUERY_PREFIX
+        )
+        passage_prefix = (
+            args.passage_prefix
+            if args.passage_prefix is not None
+            else DEFAULT_E5_PASSAGE_PREFIX
+        )
+    else:
+        if args.query_prefix is not None or args.passage_prefix is not None:
+            raise SystemExit(
+                "--query-prefix/--passage-prefix require --input-format e5"
+            )
+        query_prefix = None
+        passage_prefix = None
+
+    _prepare_output_dir(args.output_dir, force=args.force)
+    run_id = new_run_id("dense_legal_index")
+    passages = load_passages_jsonl(str(args.passages))
+    if not passages:
+        raise SystemExit("Cannot build a dense index from zero passages")
+    passage_ids = tuple(passage.passage_id for passage in passages)
+    if len(set(passage_ids)) != len(passage_ids):
+        raise SystemExit("Cannot build a dense index with duplicate passage IDs")
+    corpus_hash = corpus_fingerprint(passages)
+    normalized = not args.disable_normalization
+    cache_key = dense_cache_fingerprint(
+        corpus_hash=corpus_hash,
+        model=args.model,
+        model_revision=str(args.model_revision or "UNPINNED"),
+        dtype=args.dtype,
+        normalized=normalized,
+        max_seq_length=args.max_seq_length,
+        input_format=args.input_format,
+        query_prefix=query_prefix,
+        passage_prefix=passage_prefix,
+    )
+
+    if args.dry_run:
+        payload = _scaffold_manifest(
+            run_id=run_id,
+            model=args.model,
+            dtype=args.dtype,
+            normalized=normalized,
+            corpus_hash=corpus_hash,
+            passage_count=len(passages),
+            input_format=args.input_format,
+            query_prefix=query_prefix,
+            passage_prefix=passage_prefix,
+        )
+        _write_manifest(args.output_dir / "manifest.json", payload)
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0
+
+    require_dense_encode()
+    faiss, np = _optional_runtime_imports()
+    if args.model_path is not None:
+        if not args.model_path.is_dir():
+            raise SystemExit(f"--model-path is not a directory: {args.model_path}")
+        load_target = str(args.model_path)
+        # A local directory is loaded straight from disk; passing a revision
+        # alongside it would send SentenceTransformers back through the hub.
+        load_revision = None
+        print(
+            json.dumps(
+                {
+                    "model_load_source": "local_path",
+                    "model_logical_name": args.model,
+                    "model_path": load_target,
+                    "model_revision_recorded": args.model_revision,
+                },
+                ensure_ascii=False,
+            )
+        )
+    else:
+        load_target = args.model
+        load_revision = args.model_revision
+
+    encoder = SentenceTransformerEncoder(
+        model=load_target,
+        device=args.device,
+        dtype=args.dtype,
+        revision=load_revision,
+        max_seq_length=args.max_seq_length,
+        local_files_only=args.local_files_only,
+    )
+
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+    except ImportError:  # pragma: no cover - guarded by the encoder
+        pass
+
+    texts = [
+        format_passage_text(
+            passage.retrieval_text,
+            input_format=args.input_format,
+            passage_prefix=passage_prefix or DEFAULT_E5_PASSAGE_PREFIX,
+        )
+        for passage in passages
+    ]
+    order = (
+        tuple(range(len(texts)))
+        if args.disable_length_bucketing
+        else length_bucket_order(texts)
+    )
+    embeddings: Any = None
+    embedding_dim: int | None = None
+    embedding_path = args.output_dir / "embeddings.npy"
+    shard_dir = args.output_dir / "embedding_shards"
+    shard_paths: list[Path] = []
+    storage_mode = "sharded" if args.embedding_storage == "sharded" else "memmap"
+    storage_fallback_reason: str | None = None
+    encode_started = time.perf_counter()
+    shard_count = 0
+
+    for shard_start in range(0, len(order), args.shard_size):
+        shard_count += 1
+        shard = order[shard_start : shard_start + args.shard_size]
+        shard_vectors: list[Any] = []
+        for batch_start in range(0, len(shard), args.batch_size):
+            batch_indices = shard[batch_start : batch_start + args.batch_size]
+            encoded = encoder.encode(
+                [texts[index] for index in batch_indices],
+                batch_size=args.batch_size,
+            )
+            if normalized:
+                encoded = normalize_embedding_matrix(encoded)
+            else:
+                encoded = validate_embedding_matrix(encoded)
+            if embedding_dim is None:
+                embedding_dim = int(encoded.shape[1])
+                if storage_mode == "memmap":
+                    try:
+                        embeddings = np.lib.format.open_memmap(
+                            embedding_path,
+                            mode="w+",
+                            dtype="float32",
+                            shape=(len(passages), embedding_dim),
+                        )
+                    except OSError as exc:
+                        if args.embedding_storage == "memmap":
+                            raise DenseIndexError(
+                                "Embedding memmap is unsupported on this "
+                                "filesystem; use --embedding-storage sharded."
+                            ) from exc
+                        storage_mode = "sharded"
+                        storage_fallback_reason = str(exc)
+                        embedding_path.unlink(missing_ok=True)
+            elif int(encoded.shape[1]) != embedding_dim:
+                raise DenseIndexError(
+                    f"Model returned inconsistent embedding dimension: "
+                    f"{encoded.shape[1]} vs {embedding_dim}"
+                )
+            if storage_mode == "memmap":
+                assert embeddings is not None
+                embeddings[np.asarray(batch_indices, dtype=np.int64)] = encoded
+            else:
+                shard_vectors.append(encoded)
+        if storage_mode == "memmap":
+            assert embeddings is not None
+            embeddings.flush()
+        else:
+            shard_dir.mkdir(parents=True, exist_ok=True)
+            shard_path = shard_dir / f"embeddings-{shard_count:05d}.npy"
+            shard_matrix = np.concatenate(shard_vectors, axis=0)
+            np.save(shard_path, shard_matrix, allow_pickle=False)
+            shard_paths.append(shard_path)
+
+    if storage_mode == "memmap":
+        assert embeddings is not None
+    elif not shard_paths:
+        raise DenseIndexError("No embedding shards were written")
+    assert embedding_dim is not None
+    encode_seconds = max(time.perf_counter() - encode_started, 1e-9)
+
+    index = faiss.IndexFlatIP(embedding_dim)
+    if storage_mode == "memmap":
+        for start in range(0, len(passages), args.batch_size):
+            index.add(
+                np.asarray(
+                    embeddings[start : start + args.batch_size],
+                    dtype="float32",
+                    order="C",
+                )
+            )
+        index_passage_indices = tuple(range(len(passages)))
+        embedding_cache_path = embedding_path
+    else:
+        for shard_path in shard_paths:
+            shard_matrix = validate_embedding_matrix(
+                np.load(shard_path, allow_pickle=False),
+                expected_dim=embedding_dim,
+            )
+            index.add(np.asarray(shard_matrix, dtype="float32", order="C"))
+        index_passage_indices = order
+        embedding_cache_path = shard_dir
+    index_path = args.output_dir / "index.faiss"
+    faiss.write_index(index, str(index_path))
+
+    metadata_path = args.output_dir / "passage_metadata.jsonl"
+    index_passages = tuple(passages[index] for index in index_passage_indices)
+    _write_metadata(metadata_path, index_passages)
+    index_passage_ids = tuple(passage.passage_id for passage in index_passages)
+    alignment_ok = index.ntotal == len(index_passage_ids)
+    if not alignment_ok:
+        raise DenseIndexError(
+            "FAISS/metadata alignment mismatch: "
+            f"{index.ntotal} vs {len(index_passage_ids)}"
+        )
+
+    smoke_vector = encoder.encode(
+        [
+            format_query_text(
+                args.smoke_query,
+                input_format=args.input_format,
+                instruction=DEFAULT_QUERY_INSTRUCTION,
+                query_prefix=query_prefix or DEFAULT_E5_QUERY_PREFIX,
+            )
+        ],
+        batch_size=1,
+    )
+    if normalized:
+        smoke_vector = normalize_embedding_matrix(smoke_vector)
+    before_reload = search_dense_index(
+        index,
+        index_passage_ids,
+        smoke_vector,
+        top_k=args.top_k,
+    )[0]
+    reloaded = faiss.read_index(str(index_path))
+    after_reload = search_dense_index(
+        reloaded,
+        index_passage_ids,
+        smoke_vector,
+        top_k=args.top_k,
+    )[0]
+    before_ids = tuple(hit.passage_id for hit in before_reload)
+    after_ids = tuple(hit.passage_id for hit in after_reload)
+    reload_overlap = 1.0 if before_ids == after_ids else 0.0
+    index_size_bytes = index_path.stat().st_size
+    cache_manifest_path = args.output_dir / "embedding_cache_manifest.json"
+    cache_manifest = {
+        "schema_version": DENSE_CACHE_SCHEMA_VERSION,
+        "cache_key": cache_key,
+        "corpus_hash": corpus_hash,
+        "model": args.model,
+        "model_revision": args.model_revision,
+        "dtype": args.dtype,
+        "normalized": normalized,
+        "max_seq_length": args.max_seq_length,
+        "input_format": args.input_format,
+        "query_prefix": query_prefix,
+        "passage_prefix": passage_prefix,
+        "passage_count": len(passages),
+        "embedding_dim": embedding_dim,
+        "vector_dtype": "float32",
+        "embeddings_path": str(embedding_cache_path),
+        "storage_mode": storage_mode,
+        "shard_paths": [str(path) for path in shard_paths],
+        "passage_metadata_path": str(metadata_path),
+    }
+    _write_manifest(cache_manifest_path, cache_manifest)
+    payload = {
+        "schema_version": DENSE_INDEX_SCHEMA_VERSION,
+        "run_id": run_id,
+        "git_commit": git_commit_sha(),
+        "model": args.model,
+        "model_revision": args.model_revision,
+        "query_instruction": (
+            DEFAULT_QUERY_INSTRUCTION
+            if args.input_format == "qwen_instruction"
+            else None
+        ),
+        "input_format": args.input_format,
+        "query_prefix": query_prefix,
+        "passage_prefix": passage_prefix,
+        "max_seq_length": args.max_seq_length,
+        "cache_key": cache_key,
+        "embedding_dim": embedding_dim,
+        "dtype": args.dtype,
+        "normalized": normalized,
+        "corpus_hash": corpus_hash,
+        "passage_count": len(passages),
+        "index_type": DENSE_INDEX_TYPE,
+        "status": "PASS" if reload_overlap == 1.0 else "FAIL",
+        "detail": "Dense index built and reload determinism verified.",
+        "index_path": str(index_path),
+        "embedding_cache_path": str(embedding_cache_path),
+        "embedding_cache_manifest_path": str(cache_manifest_path),
+        "embedding_storage": storage_mode,
+        "embedding_storage_requested": args.embedding_storage,
+        "embedding_storage_fallback_reason": storage_fallback_reason,
+        "passage_metadata_path": str(metadata_path),
+        "alignment_ok": alignment_ok,
+        "nan_inf_count": 0,
+        "reload_topk_overlap": reload_overlap,
+        "smoke_query": args.smoke_query,
+        "smoke_hit_count": len(before_reload),
+        "smoke_hit_ids": list(before_ids),
+        "batch_size": args.batch_size,
+        "shard_size": args.shard_size,
+        "shard_count": shard_count,
+        "length_bucketed": not args.disable_length_bucketing,
+        "encode_seconds": encode_seconds,
+        "encode_passages_per_second": len(passages) / encode_seconds,
+        "index_size_bytes": index_size_bytes,
+        "peak_vram_gb": _gpu_peak_memory_gb(),
+    }
+    _write_manifest(args.output_dir / "manifest.json", payload)
+    print(json.dumps(payload, ensure_ascii=False))
+    return 0 if reload_overlap == 1.0 else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
