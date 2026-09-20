@@ -75,6 +75,21 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _strip_reasoning(text: str) -> str:
+    """Drop a Qwen3 ``<think>...</think>`` trace, keep only the final answer.
+
+    Required when thinking mode is on: reasoning must never enter the answer,
+    cache, or submission (AGENTS.md invariant 8 — no chain-of-thought).
+    """
+
+    if "</think>" in text:
+        text = text.rsplit("</think>", 1)[-1]
+    elif "<think>" in text:
+        # open tag with no close (truncated): everything after it is reasoning
+        text = text.split("<think>", 1)[0]
+    return text.strip()
+
+
 class HFCandidateGenerator:
     """Loads a causal LM once and produces candidate pools per prompt."""
 
@@ -189,9 +204,9 @@ class HFCandidateGenerator:
         results: list[list[str]] = []
         for i in range(batch_size):
             item_cands = [
-                tok.decode(
-                    output[i * n + k, prompt_len:], skip_special_tokens=True
-                ).strip()
+                _strip_reasoning(
+                    tok.decode(output[i * n + k, prompt_len:], skip_special_tokens=True)
+                )
                 for k in range(n)
             ]
             results.append(item_cands)

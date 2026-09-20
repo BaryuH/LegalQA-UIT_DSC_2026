@@ -11,24 +11,24 @@ data:
 prompt_template: configs/prompts/rag_v1.txt
 
 model:
-  model_name: Qwen/Qwen3-8B        # or a local finetuned reader checkpoint
+  model_name: alphaedge-ai/Qwen3.5-2B-vie-32768   # <=4B cap with emb+reranker
   device: cuda
   dtype: auto                     # bf16 on A100, fp16 on 4090
   load_in_4bit: false
-  load_in_8bit: true              # 8-bit quantization
+  load_in_8bit: false             # unquantized bf16 is faster on an exclusive GPU
+  attn_implementation: sdpa
   use_chat_template: true
   system_prompt: null
   chat_template_kwargs:
-    enable_thinking: false        # Qwen3 no-thinking (fast, deterministic prose)
-  # attn_implementation: flash_attention_2   # optional, if installed
+    enable_thinking: true         # <think> trace is stripped in generation.py
 
 sampling:
-  num_candidates: 8               # pool size N (1 greedy + N-1 sampled)
+  num_candidates: 4               # MBR dropped; longest_grounded needs only a few
   include_greedy: true
   temperature: 0.7
   top_p: 0.95
   epsilon_cutoff: 0.02            # Freitag 2023 epsilon sampling; 0 disables
-  max_new_tokens: 768
+  max_new_tokens: 1536            # thinking budget + answer
   repetition_penalty: 1.0
   no_repeat_ngram_size: 0
   seed: 0
