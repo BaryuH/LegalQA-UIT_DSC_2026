@@ -32,18 +32,5 @@ sampling:
   no_repeat_ngram_size: 0
   seed: 0
 
-utilities:
-  primary_lexical: meteor                    # matrix used by mbr / mbr_pruned / mbr_weighted
-  enable_ensemble: true                      # blend metrics to fight reward hacking
-  ensemble:
-    - {kind: lexical, metric: meteor, weight: 1.0}
-    - {kind: lexical, metric: rouge_l, weight: 0.5}
-    - {kind: embedding, weight: 1.0}
-  enable_embedding: true                     # mbr_embedding + cbmbr
-  enable_reranker_prior: true                # QE-weighted MBR
-  embedding_model: AITeamVN/Vietnamese_Embedding
-  reranker_model: AITeamVN/Vietnamese_Reranker
-  cbmbr_clusters: 3
-
 generation:
   cache_path: benchmark_meteor_matrix/outputs/mbr_meteor_matrix_train_dev_v1/candidates.jsonl

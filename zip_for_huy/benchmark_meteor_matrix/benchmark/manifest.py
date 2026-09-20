@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import grounding, metrics, utilities
+from . import grounding, metrics
 from .generation import ModelConfig, SamplingConfig
 
 
@@ -99,8 +99,8 @@ def build_manifest(
         resolved_dtype=resolved_dtype,
         versions={
             "metrics": metrics.METRIC_VERSION,
-            "utilities": utilities.UTILITY_VERSION,
             "grounding": grounding.GATE_VERSION,
+            "selector": "longest_grounded-v1",
             "python": platform.python_version(),
         },
         git_commit=_git_commit(),

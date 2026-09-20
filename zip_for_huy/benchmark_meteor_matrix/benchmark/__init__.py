@@ -1,16 +1,17 @@
-"""MBR / METEOR-matrix answer-selection benchmark for Vietnamese Legal RAG-QA.
+"""Answer-selection benchmark for Vietnamese Legal RAG-QA.
 
-Public surface:
-- ``metrics``    deterministic METEOR/ROUGE-L (utility + gold scoring)
-- ``utilities``  MBR utilities: lexical, embedding, ensemble, QE prior
-- ``selection``  strategies: MBR, pruned MBR, weighted MBR, aggregation, CBMBR
-- ``generation`` single-GPU HF candidate sampler (epsilon sampling)
-- ``runner``     end-to-end benchmark orchestration
-- ``distill``    MBR self-distillation dataset builder
+The MBR / pairwise-METEOR-matrix line was evaluated and dropped (never beat
+``longest``, length_residual <= 0). What ships:
+- ``metrics``            deterministic METEOR/ROUGE-L gold scoring
+- ``grounding``          grounding + refusal gate
+- ``selection``          production selector + reference baselines
+- ``production_selector`` self-contained ``select_final_answer`` for the pipeline
+- ``generation``         single-GPU HF candidate sampler
+- ``runner``             end-to-end benchmark orchestration
 """
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = ["__version__"]

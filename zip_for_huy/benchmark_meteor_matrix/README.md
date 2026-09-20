@@ -1,109 +1,91 @@
 # benchmark_meteor_matrix
 
-Answer-selection benchmark for the Vietnamese Legal RAG-QA task, built around the
-**pairwise METEOR matrix** idea: sample several candidate answers, score every
-candidate against every other candidate with METEOR, and pick the one with the
-highest total. That rule is exactly **Minimum Bayes Risk (MBR) consensus
-decoding** with METEOR as the utility. This folder turns the idea into a
-runnable, config-driven benchmark on a single GPU (4090 or A100-24GB) and
-implements the 2022→2026 research line on top of it.
+Answer-selection benchmark for the Vietnamese Legal RAG-QA task.
 
-## Why this works (offline pre-study)
+## Status: MBR dropped, production selector locked in
 
-On 500 real `warmup.json` gold answers with the repo METEOR, over simulated
-candidate pools:
+The benchmark started from the pairwise-METEOR-matrix idea (Minimum Bayes Risk
+consensus decoding). It was evaluated end-to-end on a grounded, length-fixed dev
+slice (Qwen3-8B, AITeamVN reranker evidence, detailed prompt) and **dropped**:
 
-- **Direction matters.** `M[i][j] = METEOR(ref=i, hyp=j)`; the MBR estimate of
-  candidate `j` is the **column** mean. Column-MBR closes ~97% of the oracle gap;
-  the row direction is *worse than random* (it collapses to picking short
-  answers). Encoded in `selection.column_mean`.
-- **The payoff is robustness to hallucination.** Without contamination, "pick the
-  longest" ties MBR. With a fraction ρ of confident-but-wrong candidates,
-  `longest` collapses (0.80→0.27) while column-MBR holds ~0.82 up to ρ=0.4 and
-  only breaks once the wrong cluster becomes the majority (ρ≈0.5).
-- **Cheap utility is enough.** The repo exact-token METEOR selects as well as
-  official NLTK METEOR (0.891 vs 0.889), so the matrix uses the fast in-repo
-  metric.
-- **Naive O(N) aggregation is *not* free.** Reference aggregation degrades under
-  contamination (0.82→0.62 at ρ=0.5) because it averages contaminants into the
-  pseudo-reference. Efficiency must come *after* a grounding prune, or via
-  contamination-robust centroid clustering (CBMBR).
+- Selection headroom is tiny: oracle 0.4772 vs random 0.4126 (~0.065).
+- **Every strategy has length_residual <= 0** — none picks better *content* than
+  its length predicts. MBR ties `longest` (ns, p~0.27) and never beats it.
+- The real levers were **retrieval (reranker, +0.22 oracle)** and **generation
+  length/completeness**, not the selection algorithm.
 
-These numbers motivated the design; the benchmark reproduces them with a real
-generator instead of simulated pools.
+So the O(N^2) matrix, MBR variants, embedding/ensemble/reranker utilities, CBMBR,
+and MBR self-distillation were removed. What ships is a cheap O(N) selector.
 
-## Development roadmap (2022 → 2026), and where each branch lives
+## Production selector
 
-| Branch | Idea | Code |
-| --- | --- | --- |
-| 0. Base MBR | METEOR matrix, argmax column sum | `selection.mbr` |
-| 1. Better utility | neural/semantic utility beats lexical metric (Freitag 2022) | `utilities.EmbeddingUtility`, `selection.mbr` on its matrix |
-| 2. Ensemble utility | blend metrics to fight reward hacking (WMT24) | `utilities.EnsembleUtility` |
-| 3. Break O(N²) | reference aggregation / centroid CBMBR | `utilities.*.aggregate`, `selection.aggregate`, `selection.cbmbr` |
-| 4. QE-MBR | weight pseudo-refs by a quality estimate; grounding prune | `utilities.RerankerPrior`, `selection.mbr_weighted`, `selection.mbr_pruned`, `grounding` |
-| 5. Self-distillation | run MBR offline on train, fine-tune to greedy it (Finkelstein & Freitag 2024) | `distill.build_distill_dataset` |
+`benchmark/production_selector.py::select_final_answer(candidates, evidence)`:
+1. drop refusals and candidates asserting legal ids/dates absent from evidence;
+2. return the longest survivor (METEOR is recall-weighted → length maximises
+   coverage of the gold answer);
+3. explicit fallback to global longest if the gate empties (never silent).
 
-Selected references: Eikema & Aziz 2022 (sampling-based MBR); Freitag et al. 2022
-(neural-metric MBR, TACL); Freitag et al. 2023 (epsilon sampling); Bertsch et al.
-2023 (MBR = reranking = self-consistency); Cheng & Vlachos 2023 (confidence
-pruning); Vamvas & Sennrich 2024 (reference aggregation, `zurichnlp/mbr`);
-Deguchi et al. 2024 (CBMBR / MBRS, EMNLP demo); Finkelstein & Freitag 2024 (MBR &
-QE finetuning, arXiv:2309.10966); Tomani et al. 2024 (quality-aware self-estimation,
-arXiv:2310.06707).
+Self-contained (only `grounding` + `metrics`) so the main RAG pipeline can import
+it directly.
 
 ## Layout
 
 ```
 benchmark/
-  repo.py         bridge to legal_rag (official METEOR/ROUGE-L)
-  metrics.py      fast exact METEOR (O(P+R)) + gold scoring (+ NLTK cross-check)
-  utilities.py    MBR utilities: lexical, embedding, ensemble, QE prior
-  selection.py    strategies: mbr, mbr_row, mbr_pruned, mbr_weighted, aggregate, cbmbr, baselines
-  grounding.py    hallucination prune (unsupported legal id / date vs evidence)
-  generation.py   single-GPU HF candidate sampler (epsilon sampling)
-  data.py         split loader (gold isolated to eval) + prompt builder
-  manifest.py     fingerprints + versions
-  runner.py       end-to-end orchestration
-  distill.py      MBR self-distillation dataset builder
-config/           default.yaml (benchmark), distill.yaml (branch 5)
-scripts/          run_benchmark.py, build_distill_dataset.py
+  repo.py              bridge to legal_rag (official METEOR/ROUGE-L)
+  metrics.py           deterministic METEOR/ROUGE-L gold scoring (+ NLTK cross-check)
+  grounding.py         grounding + refusal gate
+  selection.py         production selector + reference baselines
+  production_selector.py  select_final_answer for the main pipeline
+  generation.py        single-GPU HF candidate sampler (8-bit, epsilon sampling)
+  data.py              split loader (gold isolated to eval) + prompt builder
+  manifest.py          fingerprints + versions
+  runner.py            end-to-end orchestration
+config/                default.yaml, train_dev200.yaml (recommended), train_dev500.yaml
+scripts/               run_benchmark.py, bootstrap_significance.py, length_controlled_analysis.py
 ```
 
 ## Running
 
-From `zip_for_huy/` on the GPU box:
+From `zip_for_huy/` on the GPU box (Qwen3-8B fits a 4090/A100-24GB in 8-bit):
 
 ```bash
-pip install nltk            # optional: official METEOR cross-check
-# transformers / accelerate / sentence-transformers / bitsandbytes already in requirements.txt
+pip install nltk   # optional official METEOR cross-check
 
 python benchmark_meteor_matrix/scripts/run_benchmark.py \
-    --config benchmark_meteor_matrix/config/default.yaml
+    --config benchmark_meteor_matrix/config/train_dev200.yaml
 ```
 
-Outputs land in `outputs/<run_name>/`: `per_case.jsonl` (candidates, all
-selections, per-strategy gold scores), `summary.json` (per-strategy METEOR /
-ROUGE-L and fraction of oracle gap closed), `manifest.json` (model, sampling,
-utility/metric versions, dataset fingerprint, git commit), and
-`candidates.jsonl` (reusable candidate cache).
+Outputs in `outputs/<run_name>/`:
+- `final_answers.jsonl` — the answer the pipeline ships (production selector);
+- `per_case.jsonl` — candidates, selections, per-strategy gold scores;
+- `summary.json` — per-strategy METEOR/ROUGE-L, oracle/random, health, lengths;
+- `manifest.json` — model, sampling, dataset fingerprint, versions, git commit;
+- `candidates.jsonl` — resumable candidate cache.
 
-Branch 5 dataset:
+Prerequisites (built by the retrieval pipeline): a dev slice
+`processed/train_dev200.json` and reranked evidence
+`processed/train_dev200_rerank_evidence.jsonl` (`{id, evidence}`).
+
+## Analysis helpers
 
 ```bash
-python benchmark_meteor_matrix/scripts/build_distill_dataset.py \
-    --config benchmark_meteor_matrix/config/distill.yaml
+# real baseline is 'longest', not greedy 'first'
+python benchmark_meteor_matrix/scripts/bootstrap_significance.py \
+    --run-dir outputs/<run> --baseline longest --iters 10000
+
+# isolate content selection from the length confound
+python benchmark_meteor_matrix/scripts/length_controlled_analysis.py \
+    --run-dir outputs/<run>
 ```
+
+`summary.json` is the standing yardstick for the C+B work (retrieval reranker,
+evidence packing, prompt/length): measure each change as a paired METEOR delta.
 
 ## Contract notes
 
-- `data/` is read-only; gold is loaded into `Case.gold` and read **only** by the
-  evaluator, never by prompt/generation/utility/selection.
-- Closed-book vs grounded pruning is recorded as `grounding_mode` in the manifest
-  (no silent fallback).
-- Self-distillation `select_mode: self` never reads gold; `oracle` reads gold to
-  pick the target and is an approved training task, flagged per record.
-- 4090 vs A100 differ only in `dtype: auto` (fp16 vs bf16); use `load_in_4bit`
-  for 14B checkpoints on 24 GB.
-- Not yet executed on GPU here — this commit is the implementation; run it on the
-  4090/A100 instance to produce real numbers.
-```
+- `data/` is read-only; gold is loaded into `Case.gold` and read only by the
+  scorer, never by prompt/generation/selection.
+- Closed-book vs grounded is recorded as `grounding_mode` (no silent fallback).
+- 4090 vs A100 differ only in `dtype: auto` (fp16 vs bf16); `load_in_8bit` fits
+  Qwen3-8B on 24 GB.

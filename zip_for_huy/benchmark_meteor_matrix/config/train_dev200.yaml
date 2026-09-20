@@ -38,18 +38,5 @@ sampling:
   no_repeat_ngram_size: 0
   seed: 0
 
-utilities:
-  primary_lexical: meteor
-  enable_ensemble: true
-  ensemble:
-    - {kind: lexical, metric: meteor, weight: 1.0}
-    - {kind: lexical, metric: rouge_l, weight: 0.5}
-    - {kind: embedding, weight: 1.0}
-  enable_embedding: true
-  enable_reranker_prior: true
-  embedding_model: AITeamVN/Vietnamese_Embedding
-  reranker_model: AITeamVN/Vietnamese_Reranker
-  cbmbr_clusters: 3
-
 generation:
   cache_path: benchmark_meteor_matrix/outputs/mbr_meteor_matrix_dev200_v1/candidates.jsonl

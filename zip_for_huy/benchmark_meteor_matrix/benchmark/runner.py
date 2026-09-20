@@ -1,16 +1,14 @@
-"""End-to-end benchmark: generate -> matrix -> select -> score -> artifacts.
+"""End-to-end benchmark: generate -> select -> score -> artifacts.
 
-Pipeline per case:
-    1. build prompt (question + optional evidence);
-    2. generate a candidate pool (1 greedy + N-1 sampled);
-    3. build the pairwise utility matrix/matrices (the proposed METEOR matrix);
-    4. run every selection strategy;
-    5. score each selected candidate against gold (eval-only) and record
-       oracle / worst / random-expectation for gap analysis.
-
-Aggregated per-strategy METEOR/ROUGE-L (and the fraction of the oracle gap each
-strategy closes) is written next to a full manifest.  Gold is touched only in
-step 5.
+The MBR / pairwise-METEOR-matrix line was evaluated and dropped. The pipeline
+now generates a candidate pool, applies the production selector
+(longest-among-grounded + refusal prune), scores against gold, and records a
+few reference baselines for context. Per run it writes:
+- ``final_answers.jsonl`` — the answer the pipeline ships (production selector);
+- ``per_case.jsonl`` — per-case candidates, selections, gold scores;
+- ``summary.json`` — per-strategy METEOR/ROUGE-L, oracle/random, health;
+- ``manifest.json`` — model, sampling, dataset fingerprint, versions, git.
+Gold is read only by the scorer.
 """
 
 from __future__ import annotations
@@ -31,22 +29,11 @@ from .generation import (
     ModelConfig,
     SamplingConfig,
     read_candidate_cache,
-    write_candidate_cache,
 )
 from .manifest import build_manifest, write_manifest
 from .repo import src_root
-from .utilities import (
-    EmbeddingUtility,
-    EnsembleUtility,
-    LexicalUtility,
-    RerankerPrior,
-)
 
 BASE_DIR = src_root().parent  # zip_for_huy/
-
-# Refusal phrases the RAG prompt asks for when evidence is insufficient; used as a
-# diagnostic to expose ungrounded (closed-book) runs, not to filter answers.
-REFUSAL_MARKERS = ("chưa đủ căn cứ", "không đủ căn cứ", "không có căn cứ")
 
 
 @dataclass
@@ -60,15 +47,6 @@ class BenchmarkConfig:
     evidence_path: str | None = None
     limit: int | None = None
     cache_path: str | None = None
-    primary_lexical: str = "meteor"
-    enable_ensemble: bool = False
-    ensemble_spec: list[dict] = field(default_factory=list)
-    enable_embedding: bool = False
-    enable_reranker_prior: bool = False
-    embedding_model: str = "AITeamVN/Vietnamese_Embedding"
-    reranker_model: str = "AITeamVN/Vietnamese_Reranker"
-    cbmbr_clusters: int = 3
-    lean: bool = False  # skip all MBR machinery; production selector + baselines only
     raw: dict[str, Any] = field(default_factory=dict)
 
     @staticmethod
@@ -76,7 +54,6 @@ class BenchmarkConfig:
         raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
         m = raw["model"]
         s = raw.get("sampling", {})
-        u = raw.get("utilities", {})
         return BenchmarkConfig(
             run_name=raw["run_name"],
             output_dir=raw.get("output_dir", "benchmark_meteor_matrix/outputs"),
@@ -111,15 +88,6 @@ class BenchmarkConfig:
                 seed=s.get("seed", 0),
             ),
             cache_path=raw.get("generation", {}).get("cache_path"),
-            primary_lexical=u.get("primary_lexical", "meteor"),
-            enable_ensemble=u.get("enable_ensemble", False),
-            ensemble_spec=u.get("ensemble", []),
-            enable_embedding=u.get("enable_embedding", False),
-            enable_reranker_prior=u.get("enable_reranker_prior", False),
-            embedding_model=u.get("embedding_model", "AITeamVN/Vietnamese_Embedding"),
-            reranker_model=u.get("reranker_model", "AITeamVN/Vietnamese_Reranker"),
-            cbmbr_clusters=u.get("cbmbr_clusters", 3),
-            lean=raw.get("lean", False),
             raw=raw,
         )
 
@@ -138,40 +106,8 @@ def _gold_scores(gold: str, candidates: list[str]) -> np.ndarray:
 class BenchmarkRunner:
     def __init__(self, config: BenchmarkConfig) -> None:
         self.config = config
-        self._embedding: EmbeddingUtility | None = None
-        self._reranker: RerankerPrior | None = None
 
-    # ---- utility construction ------------------------------------------- #
-    def _build_ensemble(self) -> EnsembleUtility | None:
-        if not self.config.enable_ensemble:
-            return None
-        members = []
-        for spec in self.config.ensemble_spec:
-            weight = float(spec.get("weight", 1.0))
-            kind = spec["kind"]
-            if kind == "lexical":
-                members.append((LexicalUtility(spec.get("metric", "meteor")), weight))
-            elif kind == "embedding":
-                members.append((self._get_embedding(), weight))
-            else:
-                raise ValueError(f"unknown ensemble member kind: {kind!r}")
-        return EnsembleUtility(members)
-
-    def _get_embedding(self) -> EmbeddingUtility:
-        if self._embedding is None:
-            self._embedding = EmbeddingUtility(
-                self.config.embedding_model, device=self.config.model.device
-            )
-        return self._embedding
-
-    def _get_reranker(self) -> RerankerPrior:
-        if self._reranker is None:
-            self._reranker = RerankerPrior(
-                self.config.reranker_model, device=self.config.model.device
-            )
-        return self._reranker
-
-    # ---- candidate generation ------------------------------------------- #
+    # ---- candidate generation (resumable cache) ------------------------- #
     def _candidates(self, dataset: Dataset, template: str) -> tuple[list[CandidateSet], str | None]:
         cache = _resolve(self.config.cache_path)
         cached_by_id: dict[str, CandidateSet] = {}
@@ -211,6 +147,7 @@ class BenchmarkRunner:
         resolved_dtype = generator.resolved_dtype
         del generator
         import gc
+
         import torch
         gc.collect()
         if torch.cuda.is_available():
@@ -218,69 +155,19 @@ class BenchmarkRunner:
 
         return [cached_by_id[case.id] for case in dataset.cases if case.id in cached_by_id], resolved_dtype
 
-    # ---- selection over one candidate pool ------------------------------ #
+    # ---- selection ------------------------------------------------------- #
     def _select_all(
-        self, question: str, cands: list[str], evidence: str | None, seed: int
+        self, cands: list[str], evidence: str | None, seed: int
     ) -> tuple[dict[str, selection.Selection], str]:
-        out: dict[str, selection.Selection] = {}
         keep, _reasons, mode = grounding.keep_mask(cands, evidence)
         refusal_keep = [not grounding.is_refusal(c) for c in cands]
         both_keep = [k and r for k, r in zip(keep, refusal_keep)]
-
-        if self.config.lean:
-            # MBR is dropped; only the production selector + cheap baselines run.
-            out["first"] = selection.baseline_first(cands)
-            out["longest"] = selection.baseline_longest(cands)
-            out["random"] = selection.baseline_random(cands, seed)
-            out["longest_grounded"] = selection.longest_grounded(cands, both_keep)
-            return out, mode
-
-        lexical = LexicalUtility(self.config.primary_lexical)
-        matrix = lexical.pairwise(cands)
-
-        out["first"] = selection.baseline_first(cands)
-        out["longest"] = selection.baseline_longest(cands)
-        out["random"] = selection.baseline_random(cands, seed)
-        out["mbr"] = selection.mbr(matrix)
-        out["mbr_row"] = selection.mbr_row(matrix)
-        out["aggregate_lexical"] = selection.aggregate(
-            lexical.aggregate(cands), "aggregate_lexical"
-        )
-
-        out["mbr_pruned"] = selection.mbr_pruned(matrix, keep, "mbr_pruned")
-        # Refusals form a short-answer consensus cluster plain MBR is drawn into;
-        # prune them (and ungrounded ids/dates in _both) before MBR.
-        out["mbr_prune_refusal"] = selection.mbr_pruned(
-            matrix, refusal_keep, "mbr_prune_refusal"
-        )
-        out["mbr_prune_both"] = selection.mbr_pruned(matrix, both_keep, "mbr_prune_both")
-        # Chosen cheap production selector (ties the field at O(N), no matrix).
-        out["longest_grounded"] = selection.longest_grounded(cands, both_keep)
-
-        ensemble = self._build_ensemble()
-        if ensemble is not None:
-            out["mbr_ensemble"] = selection.Selection(
-                "mbr_ensemble",
-                int(np.argmax(selection.column_mean(ensemble.pairwise(cands)))),
-                tuple(selection.column_mean(ensemble.pairwise(cands))),
-            )
-
-        if self.config.enable_embedding:
-            vectors = self._get_embedding().encode(cands)
-            emb_matrix = vectors @ vectors.T
-            np.fill_diagonal(emb_matrix, 0.0)
-            out["mbr_embedding"] = selection.Selection(
-                "mbr_embedding",
-                int(np.argmax(selection.column_mean(emb_matrix))),
-                tuple(selection.column_mean(emb_matrix)),
-            )
-            out["cbmbr"] = selection.cbmbr(vectors, self.config.cbmbr_clusters, seed)
-
-        if self.config.enable_reranker_prior:
-            prior = self._get_reranker().prior(question, cands)
-            out["mbr_weighted"] = selection.mbr_weighted(matrix, prior)
-
-        return out, mode
+        return {
+            "first": selection.baseline_first(cands),
+            "longest": selection.baseline_longest(cands),
+            "random": selection.baseline_random(cands, seed),
+            "longest_grounded": selection.longest_grounded(cands, both_keep),
+        }, mode
 
     # ---- orchestration --------------------------------------------------- #
     def run(self) -> Path:
@@ -310,7 +197,9 @@ class BenchmarkRunner:
 
         try:
             from tqdm import tqdm
-            eval_iterator = tqdm(enumerate(dataset.cases), total=len(dataset.cases), desc="Evaluating MBR strategies")
+            eval_iterator = tqdm(
+                enumerate(dataset.cases), total=len(dataset.cases), desc="Evaluating selection"
+            )
         except ImportError:
             eval_iterator = enumerate(dataset.cases)
 
@@ -324,7 +213,7 @@ class BenchmarkRunner:
                     continue
                 cands = list(cset.candidates)
                 selections, grounding_mode = self._select_all(
-                    case.question, cands, case.evidence, seed=cfg.sampling.seed + offset
+                    cands, case.evidence, seed=cfg.sampling.seed + offset
                 )
                 gold_vec = _gold_scores(case.gold, cands)
                 oracle_list.append(float(gold_vec.max()))
@@ -348,8 +237,7 @@ class BenchmarkRunner:
                         pred_text = cands[sel.index]
                         score = metrics.score_against_gold(case.gold, pred_text)
                         note = sel.note
-                    lowered = pred_text.lower()
-                    is_refusal = any(marker in lowered for marker in REFUSAL_MARKERS)
+                    is_refusal = grounding.is_refusal(pred_text)
                     strategy_meteor.setdefault(name, []).append(score.meteor)
                     strategy_rouge.setdefault(name, []).append(score.rouge_l)
                     strategy_len.setdefault(name, []).append(len(metrics.tokenize(pred_text)))
@@ -387,20 +275,13 @@ class BenchmarkRunner:
             json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
-        utility_names = [f"lexical:{cfg.primary_lexical}"]
-        if cfg.enable_ensemble:
-            utility_names.append("ensemble")
-        if cfg.enable_embedding:
-            utility_names.append(f"embedding:{cfg.embedding_model}")
-        if cfg.enable_reranker_prior:
-            utility_names.append(f"reranker_prior:{cfg.reranker_model}")
         manifest = build_manifest(
             dataset_name=dataset.name,
             dataset_fingerprint=dataset.fingerprint(),
             case_count=len(dataset.cases),
             model=cfg.model,
             sampling=cfg.sampling,
-            utility_names=utility_names,
+            utility_names=["longest_grounded (production selector)"],
             grounding_mode=grounding_mode,
             resolved_dtype=resolved_dtype,
             raw_config=cfg.raw,
@@ -435,13 +316,11 @@ class BenchmarkRunner:
                 "pred_mean_tokens": round(float(np.mean(strategy_len[name])), 1),
                 "refusal_rate": round(float(np.mean(refusals)), 4),
             }
-        ranked = dict(
-            sorted(rows.items(), key=lambda kv: kv[1]["meteor"], reverse=True)
-        )
+        ranked = dict(sorted(rows.items(), key=lambda kv: kv[1]["meteor"], reverse=True))
         gold_mean = round(float(np.mean(gold_len_list)), 1) if gold_len_list else 0.0
         cand_mean = round(float(np.mean(cand_len_list)), 1) if cand_len_list else 0.0
-        # Loud health check: oracle << grounded champion (~0.55) or high refusal
-        # means the pool is ungrounded and the ranking is a length artifact.
+        # Loud health check: oracle far below a grounded system (~0.55) means the
+        # pool is ungrounded and the ranking is a length artifact.
         health = "ok"
         if oracle < 0.15:
             health = "SUSPECT_ungrounded_oracle_too_low"

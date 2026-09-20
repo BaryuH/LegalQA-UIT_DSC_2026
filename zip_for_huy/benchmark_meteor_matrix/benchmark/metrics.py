@@ -1,21 +1,14 @@
-"""Deterministic text metrics used both as MBR utilities and as gold scorers.
+"""Deterministic text metrics for gold scoring.
 
-Design rules:
-- The pairwise METEOR matrix is the heart of the benchmark, so it must be fast.
-  ``fast_meteor`` reproduces ``legal_rag.evaluation.meteor.compute_meteor`` bit
-  for bit (validated: max abs diff 0.0 over real answer pairs) but runs in
-  O(P + R) instead of O(P * R).
-- Gold scoring reuses the repo adapters (``compute_meteor``/``compute_rouge_l``)
-  and, when available, the official-style NLTK METEOR as a cross-check.
-- METEOR is asymmetric.  Every function fixes the argument order as
-  ``(reference, hypothesis)`` exactly like the official scorer
-  ``meteor_score([reference], hypothesis)``.
+Reuses the repo adapters (``compute_meteor`` / ``compute_rouge_l``) so the
+benchmark never introduces a second scoring convention, plus an optional
+official-style NLTK METEOR cross-check. METEOR is asymmetric: every function
+fixes the argument order as ``(reference, hypothesis)`` exactly like the
+official scorer ``meteor_score([reference], hypothesis)``.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
-from collections.abc import Sequence
 from dataclasses import dataclass
 
 from .repo import compute_meteor, compute_rouge_l, normalize_text
@@ -29,40 +22,6 @@ def tokenize(text: str) -> Tokens:
     """Repo tokenization policy (NFC, punctuation kept, legal codes preserved)."""
 
     return normalize_text(text).tokens
-
-
-def fast_meteor(reference: Sequence[str], prediction: Sequence[str]) -> float:
-    """Exact-token METEOR, identical semantics to ``compute_meteor``, O(P + R).
-
-    ``reference`` and ``prediction`` are token sequences; direction matches the
-    official scorer (reference first).
-    """
-
-    if not prediction or not reference:
-        return 0.0
-    positions: dict[str, deque[int]] = defaultdict(deque)
-    for index, token in enumerate(reference):
-        positions[token].append(index)  # ascending indices == repo's first-unused scan
-    matched: list[int] = []
-    for token in prediction:
-        bucket = positions.get(token)
-        if bucket:
-            matched.append(bucket.popleft())
-    matches = len(matched)
-    if not matches:
-        return 0.0
-    precision = matches / len(prediction)
-    recall = matches / len(reference)
-    denominator = recall + 9.0 * precision
-    f_mean = (10.0 * precision * recall / denominator) if denominator else 0.0
-    chunks = 0
-    previous: int | None = None
-    for index in matched:
-        if previous is None or index != previous + 1:
-            chunks += 1
-        previous = index
-    fragmentation = 0.5 * (chunks / matches) ** 3 if chunks > 1 else 0.0
-    return f_mean * (1.0 - fragmentation)
 
 
 def meteor_exact(reference: str, prediction: str) -> float:
@@ -141,7 +100,6 @@ __all__ = [
     "METRIC_VERSION",
     "GoldScore",
     "Tokens",
-    "fast_meteor",
     "meteor_exact",
     "rouge_l",
     "score_against_gold",
