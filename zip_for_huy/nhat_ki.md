@@ -37,12 +37,41 @@ Tất cả các mô hình neural được sử dụng trong toàn bộ pipeline 
 
 ---
 
-## 3. Lộ trình Triển khai Tiếp theo (Step-by-Step)
+## 3. Kết quả Điểm chuẩn Chính thức (Official 2.91B Baseline Yardstick)
 
-1. **Bước 1 (Kiểm thử nhanh Smoke Test):**
-   - Chạy `smoke.yaml` (3 câu dev, model `alphaedge-ai/Qwen3.5-2B-vie-32768`, no-thinking, 768 tokens) để xác nhận luồng giải mã hoạt động trơn tru.
-2. **Bước 2 (Chạy Baseline 200 câu Hợp Cap):**
-   - Chạy `train_dev200.yaml` để thiết lập mốc điểm chuẩn METEOR / ROUGE-L chính thức của mô hình 2.91B hợp lệ.
-3. **Bước 3 (Nâng cấp Retrieval - Track C):**
-   - Build index dense v2 với `AITeamVN/Vietnamese_Embedding_v2` (`configs/r3_aiteamvn_vietnamese_embedding_v2.yaml`).
-   - Thử nghiệm Hybrid Search (BM25 + Dense v2) và tối ưu độ sâu của Reranker để nâng tỷ lệ phủ điều luật trong evidence pack.
+**Thời điểm chạy:** 2026-09-20  
+**Cấu hình:** `benchmark_meteor_matrix/config/train_dev200.yaml` (`run_name: dev200_qwen35_2b_v1`)  
+**Môi trường phần cứng:** RTX 4090, unquantized `bfloat16`, SDPA attention.  
+**Thời gian thực thi:** **17 phút 54 giây** cho 200 câu ($N=4$ candidates, trung bình 5.37 giây/câu).  
+
+### 1. Bảng số liệu điểm chuẩn chính thức (Official Baseline Numbers):
+| Chiến lược (Strategy) | METEOR | ROUGE-L | Gap closed vs Oracle | Token TB | Tỷ lệ từ chối (Refusal) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Oracle ceiling** | **0.4328** | — | 100% | 605.5 | — |
+| `longest` | 0.3868 | 0.2117 | 19.51% | 694.8 | 2.5% |
+| **`longest_grounded` (Production)** | **0.3812** | **0.2124** | **9.83%** | **670.6** | **1.5%** |
+| `random` | 0.3791 | 0.2178 | 6.17% | 606.1 | 2.0% |
+| `first` (Greedy baseline) | 0.3753 | 0.2191 | -0.56% | 610.5 | 2.5% |
+
+### 2. Kiểm toán Độ chính xác & Kiểm soát Hallucination (`precision_audit.py`):
+- Mô hình `alphaedge-ai/Qwen3.5-2B-vie-32768` (no-thinking) kiểm soát hallucination tốt vượt trội:
+  - Tỷ lệ từ chối (Refusal): chỉ còn **1.5%** (3/200 câu).
+  - Tỷ lệ vi phạm điều luật ngoài bằng chứng (Unsupported Legal ID): giảm từ **68% xuống 31%** (giảm hơn 54% lỗi bịa số hiệu điều luật).
+  - Tỷ lệ vi phạm ngày tháng: giảm từ **13% xuống 4.5%**.
+  - Độ phủ bám sát bằng chứng (Mean Answer Grounding): **15.82%**.
+
+### 3. Kiểm toán Nút thắt Bằng chứng (`evidence_answerability.py`):
+- **Nhóm Evidence đạt độ phủ cao ($\ge 0.5$): Oracle METEOR đạt tới `0.6428`** (+0.2359 so với nhóm thấp).
+- **Nhóm Evidence độ phủ thấp ($< 0.5$): Oracle METEOR chỉ đạt `0.4069`**.
+- **Tỷ lệ các ca bị nghẽn do Retrieval (retrieval-limited rate): `89.0%`**.
+- Phán quyết hệ thống:
+  > **`verdict: "retrieval-limited: raise coverage (track C)"`**
+
+---
+
+## 4. Kế hoạch Hành động Tiếp theo: Nâng cấp Toàn diện Retrieval (Track C)
+
+1. **Mục tiêu cốt lõi:** Nâng tỷ lệ bao phủ điều luật (hiện tại 89% ca thiếu) để kéo trần Oracle từ **0.4328 lên > 0.60**, từ đó điểm `longest_grounded` tự động tăng vọt từ 0.38 lên > 0.50.
+2. **Nhiệm vụ 1:** Xây dựng chỉ mục Dense Index v2 với `AITeamVN/Vietnamese_Embedding_v2` (`configs/r3_aiteamvn_vietnamese_embedding_v2.yaml`).
+3. **Nhiệm vụ 2:** Triển khai Hybrid Retrieval (Convex/RRF Fusion: BM25 + Dense v2) để tăng độ nhạy tìm kiếm ngữ nghĩa đối với các câu hỏi tình huống đời thường.
+4. **Nhiệm vụ 3:** Mở rộng độ sâu Reranking (top 50 -> rerank -> lấy top 6 blocks) và tối ưu hóa Evidence Packing để nhồi đúng văn bản luật vào ngữ cảnh của Generator.
