@@ -23,7 +23,7 @@ from typing import Any
 import numpy as np
 import yaml
 
-from . import grounding, metrics, selection
+from . import grounding, metrics, production_selector, selection
 from .data import Dataset, build_prompt, load_dataset, load_prompt_template
 from .generation import (
     CandidateSet,
@@ -307,7 +307,10 @@ class BenchmarkRunner:
         except ImportError:
             eval_iterator = enumerate(dataset.cases)
 
-        with per_case_path.open("w", encoding="utf-8") as handle:
+        final_path = out_dir / "final_answers.jsonl"
+        with per_case_path.open("w", encoding="utf-8") as handle, final_path.open(
+            "w", encoding="utf-8"
+        ) as final_handle:
             for offset, case in eval_iterator:
                 cset = by_id.get(case.id)
                 if cset is None or not cset.candidates:
@@ -351,6 +354,16 @@ class BenchmarkRunner:
                         **score.as_dict(),
                     }
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+                # Chosen production selector output (the answer the pipeline ships).
+                final = production_selector.select_final_answer(cands, case.evidence)
+                final_handle.write(
+                    json.dumps(
+                        {"id": case.id, "answer": final.answer, **final.as_dict()},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
 
         summary = self._summarize(
             strategy_meteor,
