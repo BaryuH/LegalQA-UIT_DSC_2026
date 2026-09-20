@@ -443,3 +443,121 @@ def pack_evidence(
 
 
 pack_retrieved_evidence = pack_evidence
+
+
+def score_citation_match(
+    query: str,
+    chunk: LegalChunk,
+    document: LegalDocument | None = None,
+) -> float:
+    """Calculate explicit legal citation match score between query and chunk.
+
+    Extracts citation mentions from query using parse_citations (article, clause,
+    document_number, document_name, year) and computes composite match score:
+    - Document number match: +3.5 (in doc context) or +2.0 (in text)
+    - Document name match: +2.5 (+1.0 if year also matches)
+    - Article match: +3.0 (exact section label) or +2.5 (in heading) or +1.5 (in text)
+    - Clause match: +1.0 (if article matched and clause in text)
+    Returns 0.0 if query contains no citations.
+    """
+    from .sedar_retrieval.query.citation_parser import parse_citations
+
+    citations = parse_citations(query)
+    if not citations:
+        return 0.0
+
+    doc_name = document.name if document is not None else ""
+    doc_context = f"{doc_name} {chunk.source_path}".casefold()
+    full_text = f"{doc_context} {chunk.section_label or ''} {chunk.retrieval_text}".casefold()
+    section = (chunk.section_label or "").casefold()
+
+    total_score = 0.0
+    matched_articles: set[str] = set()
+    matched_doc_numbers: set[str] = set()
+    matched_doc_names: set[str] = set()
+
+    for c in citations:
+        # 1. Document number match (highest precision)
+        if c.document_number and c.document_number.casefold() not in matched_doc_numbers:
+            num = c.document_number.casefold()
+            if num in doc_context:
+                total_score += 3.5
+                matched_doc_numbers.add(num)
+            elif num in full_text:
+                total_score += 2.0
+                matched_doc_numbers.add(num)
+
+        # 2. Document name match
+        if c.document_name and c.document_name.casefold() not in matched_doc_names:
+            name = c.document_name.casefold()
+            if name in doc_context:
+                total_score += 2.5
+                matched_doc_names.add(name)
+                if c.year and c.year in doc_context:
+                    total_score += 1.0
+            elif name in full_text:
+                total_score += 1.5
+                matched_doc_names.add(name)
+                if c.year and c.year in full_text:
+                    total_score += 0.5
+
+        # 3. Article match
+        if c.article and c.article.casefold() not in matched_articles:
+            art_pat = re.compile(rf"\bđiều\s+{re.escape(c.article.casefold())}\b")
+            if section and art_pat.search(section):
+                total_score += 3.0
+                matched_articles.add(c.article.casefold())
+            elif art_pat.search(full_text[:300]):
+                total_score += 2.5
+                matched_articles.add(c.article.casefold())
+            elif art_pat.search(full_text):
+                total_score += 1.5
+                matched_articles.add(c.article.casefold())
+
+            # 4. Clause match
+            if c.clause:
+                clause_pat = re.compile(rf"\bkhoản\s+{re.escape(c.clause.casefold())}\b")
+                if clause_pat.search(full_text):
+                    total_score += 1.0
+
+    return total_score
+
+
+def rerank_hits_with_citations(
+    hits: Sequence[RetrievalHit],
+    chunks: Mapping[str, LegalChunk],
+    query: str,
+    *,
+    documents: Mapping[str, LegalDocument] | None = None,
+    citation_weight: float = 1.0,
+) -> tuple[RetrievalHit, ...]:
+    """Reorder ranked hits by combining base retrieval score with citation match bonus.
+
+    For queries containing explicit legal citations, relevant chunks matching the
+    cited document or article receive a score bonus, prioritizing controlling statutes
+    into the evidence pack. Queries without citations preserve exact original hit order.
+    """
+    from .sedar_retrieval.query.citation_parser import parse_citations
+
+    citations = parse_citations(query)
+    if not citations or citation_weight <= 0.0:
+        return tuple(hits)
+
+    scored_hits: list[tuple[float, RetrievalHit]] = []
+    for hit in hits:
+        chunk = chunks.get(hit.chunk_id)
+        if chunk is None:
+            base = hit.rerank_score if hit.rerank_score is not None else hit.bm25_score
+            scored_hits.append((base, hit))
+            continue
+        doc = documents.get(chunk.document_id) if documents is not None else None
+        cit_score = score_citation_match(query, chunk, doc)
+        base = hit.rerank_score if hit.rerank_score is not None else hit.bm25_score
+        combined = base + citation_weight * cit_score
+        scored_hits.append((combined, hit))
+
+    scored_hits.sort(key=lambda item: (item[0], -item[1].rank), reverse=True)
+    return tuple(
+        hit.model_copy(update={"rank": rank, "rerank_score": float(combined)})
+        for rank, (combined, hit) in enumerate(scored_hits, start=1)
+    )

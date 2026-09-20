@@ -44,6 +44,8 @@ from .evidence import (
     normalize_chunk_text,
     pack_evidence,
     pack_retrieved_evidence,
+    rerank_hits_with_citations,
+    score_citation_match,
 )
 from .generation import (
     AnswerPostprocessResult,
@@ -298,5 +300,7 @@ __all__ = [
     "normalize_chunk_text",
     "pack_evidence",
     "pack_retrieved_evidence",
+    "rerank_hits_with_citations",
+    "score_citation_match",
     "__version__",
 ]

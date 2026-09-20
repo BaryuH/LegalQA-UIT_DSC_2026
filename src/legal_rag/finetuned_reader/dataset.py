@@ -13,7 +13,11 @@ from typing import Any
 
 from ..artifacts import fingerprint_json
 from ..config import ProjectConfig
-from ..evidence import deduplicate_retrieved_chunks, pack_evidence
+from ..evidence import (
+    deduplicate_retrieved_chunks,
+    pack_evidence,
+    rerank_hits_with_citations,
+)
 from ..generation.prompts import PromptBuilder
 from ..pipeline import BM25Preparation, prepare_bm25_index_from_config
 from ..questions import load_questions
@@ -81,11 +85,15 @@ class FrozenB2EvidenceRetriever:
         reranker: Reranker,
         *,
         bm25_backend: BM25Backend = "cpu",
+        citation_boost: bool = True,
+        citation_weight: float = 1.0,
     ) -> None:
         self.preparation = preparation
         self.freeze = freeze
         self.reranker = reranker
         self.bm25_backend = bm25_backend
+        self.citation_boost = citation_boost
+        self.citation_weight = citation_weight
         self.query_cache: BM25QueryCache | None = None
         self.cuda_query_cache: BM25CudaQueryCache | None = None
         self._chunks = {chunk.chunk_id: chunk for chunk in preparation.chunks}
@@ -170,7 +178,16 @@ class FrozenB2EvidenceRetriever:
             raw_hits,
             candidate_texts=candidate_texts,
         )
-        deduplicated = deduplicate_retrieved_chunks(reranked.hits, self._chunks)
+        ordered_hits = reranked.hits
+        if self.citation_boost:
+            ordered_hits = rerank_hits_with_citations(
+                ordered_hits,
+                self._chunks,
+                query,
+                documents=self.preparation.documents,
+                citation_weight=self.citation_weight,
+            )
+        deduplicated = deduplicate_retrieved_chunks(ordered_hits, self._chunks)
         selected = deduplicated.kept_hits[: self.freeze.evidence_top_k]
         packed = pack_evidence(
             selected,

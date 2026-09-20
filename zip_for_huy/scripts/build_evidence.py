@@ -29,6 +29,7 @@ from legal_rag.config import load_config  # noqa: E402
 from legal_rag.evidence import (  # noqa: E402
     deduplicate_retrieved_chunks,
     pack_evidence,
+    rerank_hits_with_citations,
 )
 from legal_rag.pipeline import prepare_bm25_index_from_config  # noqa: E402
 from legal_rag.retrieval.bm25 import retrieve_bm25  # noqa: E402
@@ -105,6 +106,18 @@ def parse_args() -> argparse.Namespace:
         choices=("none", "aiteamvn"),
         default="none",
         help="Semantic reranker: 'aiteamvn' uses AITeamVN/Vietnamese_Reranker.",
+    )
+    parser.add_argument(
+        "--citation-boost",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Apply explicit legal citation matching boost (Phần 2b) to reranked hits (default: True).",
+    )
+    parser.add_argument(
+        "--citation-weight",
+        type=float,
+        default=1.0,
+        help="Weight multiplier for citation match bonus (default: 1.0).",
     )
     return parser.parse_args()
 
@@ -284,6 +297,15 @@ def main() -> int:
                 )
                 if isinstance(rerank_res, RerankResult) and rerank_res.used:
                     ordered_hits = rerank_res.hits
+
+            if args.citation_boost:
+                ordered_hits = rerank_hits_with_citations(
+                    ordered_hits,
+                    chunks,
+                    question_text,
+                    documents=documents,
+                    citation_weight=args.citation_weight,
+                )
 
             dedup = deduplicate_retrieved_chunks(ordered_hits, chunks)
             selected_hits = dedup.kept_hits[:evidence_top_k]
