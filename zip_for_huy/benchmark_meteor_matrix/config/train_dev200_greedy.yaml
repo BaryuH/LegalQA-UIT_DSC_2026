@@ -29,7 +29,7 @@ model:
 sampling:
   num_candidates: 1
   include_greedy: true          # the single candidate is the deterministic answer
-  max_new_tokens: 1536
+  max_new_tokens: 2048
   seed: 0
 
 generation:

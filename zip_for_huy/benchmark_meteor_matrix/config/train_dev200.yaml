@@ -34,7 +34,7 @@ sampling:
   temperature: 0.7
   top_p: 0.95
   epsilon_cutoff: 0.02
-  max_new_tokens: 1536          # thinking budget + answer; stripped trace not counted in answer
+  max_new_tokens: 2048          # thinking budget + answer; stripped trace not counted in answer
   repetition_penalty: 1.0
   no_repeat_ngram_size: 0
   seed: 0
