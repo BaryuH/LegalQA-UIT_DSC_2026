@@ -24,6 +24,28 @@ _DATE_RE = re.compile(r"\b\d{1,2}/\d{1,2}/\d{4}\b")
 
 GATE_VERSION = "benchmark-grounding-v1"
 
+# Phrases the RAG prompt emits when evidence is insufficient; a refusal is a
+# short non-answer that must be pruned before any answer selection.
+REFUSAL_MARKERS = ("chưa đủ căn cứ", "không đủ căn cứ", "không có căn cứ")
+
+
+def is_refusal(candidate: str) -> bool:
+    lowered = candidate.lower()
+    return any(marker in lowered for marker in REFUSAL_MARKERS)
+
+
+def substantive_keep_mask(
+    candidates: "Sequence[str]", evidence: str | None
+) -> tuple[list[bool], str]:
+    """Combined gate: grounded (supported legal ids/dates) AND not a refusal.
+
+    Returns (keep_mask, mode) where mode records whether grounding ran.
+    """
+
+    grounded, _reasons, mode = keep_mask(candidates, evidence)
+    keep = [g and not is_refusal(c) for g, c in zip(grounded, candidates)]
+    return keep, mode
+
 
 @dataclass(frozen=True, slots=True)
 class GateDecision:
@@ -67,4 +89,12 @@ def keep_mask(
     return mask, reasons, "grounded"
 
 
-__all__ = ["GATE_VERSION", "GateDecision", "evaluate_candidate", "keep_mask"]
+__all__ = [
+    "GATE_VERSION",
+    "REFUSAL_MARKERS",
+    "GateDecision",
+    "evaluate_candidate",
+    "is_refusal",
+    "keep_mask",
+    "substantive_keep_mask",
+]

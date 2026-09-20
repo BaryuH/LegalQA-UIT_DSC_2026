@@ -247,6 +247,8 @@ class BenchmarkRunner:
         )
         both_keep = [k and r for k, r in zip(keep, refusal_keep)]
         out["mbr_prune_both"] = selection.mbr_pruned(matrix, both_keep, "mbr_prune_both")
+        # Chosen cheap production selector (ties the field at O(N), no matrix).
+        out["longest_grounded"] = selection.longest_grounded(cands, both_keep)
 
         ensemble = self._build_ensemble()
         if ensemble is not None:

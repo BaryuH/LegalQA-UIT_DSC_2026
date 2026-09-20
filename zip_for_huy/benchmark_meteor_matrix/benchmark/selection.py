@@ -164,6 +164,29 @@ def baseline_random(candidates: Sequence[str], seed: int) -> Selection:
     return Selection("random", idx, tuple([0.0] * len(candidates)))
 
 
+def longest_grounded(
+    candidates: Sequence[str],
+    keep_mask: Sequence[bool],
+    name: str = "longest_grounded",
+) -> Selection:
+    """Chosen production selector: longest candidate among gated survivors.
+
+    Empirically ties the MBR field (ns vs ``longest``, len_resid ~ 0) at O(N)
+    cost with no pairwise matrix. ``keep_mask`` should already combine the
+    grounding gate and refusal filter. If the gate empties the pool, fall back
+    to the global longest and flag it explicitly (never a silent fallback).
+    """
+
+    from . import metrics
+
+    keep = np.asarray(keep_mask, dtype=bool)
+    lengths = np.array([len(metrics.tokenize(c)) for c in candidates], dtype=np.float64)
+    if keep.sum() == 0:
+        return Selection(name, _argmax(lengths), tuple(lengths), "all_rejected_fallback_longest")
+    masked = np.where(keep, lengths, -np.inf)
+    return Selection(name, _argmax(masked), tuple(lengths))
+
+
 __all__ = [
     "Selection",
     "aggregate",
@@ -171,6 +194,7 @@ __all__ = [
     "baseline_longest",
     "baseline_random",
     "cbmbr",
+    "longest_grounded",
     "column_mean",
     "mbr",
     "mbr_pruned",
