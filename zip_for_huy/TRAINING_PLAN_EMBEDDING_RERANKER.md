@@ -55,9 +55,9 @@ record peak allocated/reserved VRAM before the canonical run.
 
 | GPU | Embedding | Reranker |
 |---|---|---|
-| RTX 4090 24 GB | LoRA r16, BF16, batch 1, accum 32, 4 negatives, length 2048 | LoRA r16, BF16, batch 1, accum 16, 10 negatives/group, length 2304 |
+| RTX 4090 24 GB / A100 24 GB (shared) | LoRA r16, BF16, batch 1, accum 32, 4 negatives, length 2048 | LoRA r16, BF16, batch 1, accum 16, 10 negatives/group, length 2304 |
 | A100 40 GB | LoRA r16, BF16, batch 2, accum 16, 8 negatives | LoRA r16, BF16, batch 2, accum 8 |
-| A100 80 GB | full BF16, batch 4, accum 8, 10 negatives | full BF16, batch 4, accum 4 |
+| A100 80 GB (exclusive) | full BF16, batch 4, accum 8, 10 negatives | full BF16, batch 4, accum 4 |
 
 All profiles enable gradient checkpointing and TF32 matmul. Canonical run must
 stay below 93% device memory. If smoke exceeds this, lower micro-batch first;

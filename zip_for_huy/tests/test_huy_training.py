@@ -34,11 +34,17 @@ def _write_pairs(tmp_path):
 
 def test_profiles_fit_declared_effective_batches() -> None:
     embedding = get_profile("rtx4090_24gb", "embedding")
+    embedding_shared = get_profile("a100_24gb", "embedding")
     reranker = get_profile("a100_80gb", "reranker")
+    reranker_shared = get_profile("a100_24gb", "reranker")
     assert embedding.tune_mode == "lora"
     assert embedding.effective_batch_size == 32
+    assert embedding_shared.tune_mode == "lora"
+    assert embedding_shared.effective_batch_size == 32
     assert reranker.tune_mode == "full"
     assert reranker.max_length == 2304
+    assert reranker_shared.tune_mode == "lora"
+    assert reranker_shared.max_length == 2304
 
 
 def test_loader_rejects_non_train_split(tmp_path) -> None:

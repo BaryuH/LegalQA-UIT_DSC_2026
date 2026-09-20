@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-HardwareName = Literal["rtx4090_24gb", "a100_40gb", "a100_80gb"]
+HardwareName = Literal["rtx4090_24gb", "a100_24gb", "a100_40gb", "a100_80gb"]
 TaskName = Literal["embedding", "reranker"]
 TuneMode = Literal["lora", "full"]
 
@@ -67,6 +67,20 @@ _PROFILES: dict[tuple[HardwareName, TaskName], HardwareProfile] = {
         lora_rank=16,
         lora_alpha=32,
     ),
+    ("a100_24gb", "embedding"): HardwareProfile(
+        name="a100_24gb",
+        task="embedding",
+        tune_mode="lora",
+        micro_batch_size=1,
+        gradient_accumulation_steps=32,
+        max_length=2048,
+        max_query_tokens=256,
+        max_negatives=4,
+        learning_rate=2e-5,
+        epochs=1,
+        lora_rank=16,
+        lora_alpha=32,
+    ),
     ("a100_40gb", "embedding"): HardwareProfile(
         name="a100_40gb",
         task="embedding",
@@ -97,6 +111,20 @@ _PROFILES: dict[tuple[HardwareName, TaskName], HardwareProfile] = {
     ),
     ("rtx4090_24gb", "reranker"): HardwareProfile(
         name="rtx4090_24gb",
+        task="reranker",
+        tune_mode="lora",
+        micro_batch_size=1,
+        gradient_accumulation_steps=16,
+        max_length=2304,
+        max_query_tokens=256,
+        max_negatives=10,
+        learning_rate=2e-5,
+        epochs=2,
+        lora_rank=16,
+        lora_alpha=32,
+    ),
+    ("a100_24gb", "reranker"): HardwareProfile(
+        name="a100_24gb",
         task="reranker",
         tune_mode="lora",
         micro_batch_size=1,

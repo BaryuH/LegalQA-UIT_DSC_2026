@@ -91,7 +91,7 @@ def main() -> int:
     parser.add_argument("--model-revision", required=True)
     parser.add_argument(
         "--hardware-profile",
-        choices=("rtx4090_24gb", "a100_40gb", "a100_80gb"),
+        choices=("rtx4090_24gb", "a100_24gb", "a100_40gb", "a100_80gb"),
         required=True,
     )
     parser.add_argument("--source-split", default="train")
