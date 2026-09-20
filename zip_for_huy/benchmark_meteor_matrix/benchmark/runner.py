@@ -44,6 +44,10 @@ from .utilities import (
 
 BASE_DIR = src_root().parent  # zip_for_huy/
 
+# Refusal phrases the RAG prompt asks for when evidence is insufficient; used as a
+# diagnostic to expose ungrounded (closed-book) runs, not to filter answers.
+REFUSAL_MARKERS = ("chưa đủ căn cứ", "không đủ căn cứ", "không có căn cứ")
+
 
 @dataclass
 class BenchmarkConfig:
@@ -275,8 +279,12 @@ class BenchmarkRunner:
 
         strategy_meteor: dict[str, list[float]] = {}
         strategy_rouge: dict[str, list[float]] = {}
+        strategy_len: dict[str, list[int]] = {}
+        strategy_refusal: dict[str, list[bool]] = {}
         oracle_list: list[float] = []
         random_exp: list[float] = []
+        gold_len_list: list[int] = []
+        cand_len_list: list[float] = []
         grounding_mode = "disabled_no_evidence"
 
         try:
@@ -297,6 +305,9 @@ class BenchmarkRunner:
                 gold_vec = _gold_scores(case.gold, cands)
                 oracle_list.append(float(gold_vec.max()))
                 random_exp.append(float(gold_vec.mean()))
+                gold_len_list.append(len(metrics.tokenize(case.gold)))
+                cand_lens = [len(metrics.tokenize(c)) for c in cands]
+                cand_len_list.append(float(np.mean(cand_lens)))
 
                 row: dict[str, Any] = {
                     "id": case.id,
@@ -308,19 +319,36 @@ class BenchmarkRunner:
                     if sel.index < 0:
                         score = metrics.GoldScore(0.0, 0.0, None)
                         note = sel.note or "no_selection"
+                        pred_text = ""
                     else:
-                        score = metrics.score_against_gold(case.gold, cands[sel.index])
+                        pred_text = cands[sel.index]
+                        score = metrics.score_against_gold(case.gold, pred_text)
                         note = sel.note
+                    lowered = pred_text.lower()
+                    is_refusal = any(marker in lowered for marker in REFUSAL_MARKERS)
                     strategy_meteor.setdefault(name, []).append(score.meteor)
                     strategy_rouge.setdefault(name, []).append(score.rouge_l)
+                    strategy_len.setdefault(name, []).append(len(metrics.tokenize(pred_text)))
+                    strategy_refusal.setdefault(name, []).append(is_refusal)
                     row["selections"][name] = {
                         "index": sel.index,
                         "note": note,
+                        "refusal": is_refusal,
                         **score.as_dict(),
                     }
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-        summary = self._summarize(strategy_meteor, strategy_rouge, oracle_list, random_exp)
+        summary = self._summarize(
+            strategy_meteor,
+            strategy_rouge,
+            strategy_len,
+            strategy_refusal,
+            oracle_list,
+            random_exp,
+            gold_len_list,
+            cand_len_list,
+            grounding_mode,
+        )
         (out_dir / "summary.json").write_text(
             json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
         )
@@ -350,8 +378,13 @@ class BenchmarkRunner:
         self,
         strategy_meteor: dict[str, list[float]],
         strategy_rouge: dict[str, list[float]],
+        strategy_len: dict[str, list[int]],
+        strategy_refusal: dict[str, list[bool]],
         oracle_list: list[float],
         random_exp: list[float],
+        gold_len_list: list[int],
+        cand_len_list: list[float],
+        grounding_mode: str,
     ) -> dict[str, Any]:
         oracle = float(np.mean(oracle_list)) if oracle_list else 0.0
         random_baseline = float(np.mean(random_exp)) if random_exp else 0.0
@@ -360,17 +393,31 @@ class BenchmarkRunner:
             m = float(np.mean(meteors))
             denom = oracle - random_baseline
             gap = (m - random_baseline) / denom if denom > 1e-9 else float("nan")
+            refusals = strategy_refusal[name]
             rows[name] = {
                 "meteor": round(m, 6),
                 "rouge_l": round(float(np.mean(strategy_rouge[name])), 6),
                 "gap_closed_vs_oracle": round(gap, 4),
+                "pred_mean_tokens": round(float(np.mean(strategy_len[name])), 1),
+                "refusal_rate": round(float(np.mean(refusals)), 4),
             }
         ranked = dict(
             sorted(rows.items(), key=lambda kv: kv[1]["meteor"], reverse=True)
         )
+        gold_mean = round(float(np.mean(gold_len_list)), 1) if gold_len_list else 0.0
+        cand_mean = round(float(np.mean(cand_len_list)), 1) if cand_len_list else 0.0
+        # Loud health check: oracle << grounded champion (~0.55) or high refusal
+        # means the pool is ungrounded and the ranking is a length artifact.
+        health = "ok"
+        if oracle < 0.15:
+            health = "SUSPECT_ungrounded_oracle_too_low"
         return {
+            "grounding_mode": grounding_mode,
+            "health": health,
             "oracle_meteor": round(oracle, 6),
             "random_expectation_meteor": round(random_baseline, 6),
+            "gold_mean_tokens": gold_mean,
+            "candidate_mean_tokens": cand_mean,
             "strategies": ranked,
         }
 
