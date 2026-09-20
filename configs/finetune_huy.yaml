@@ -1,0 +1,46 @@
+version: huy-finetune-v1
+source_split: train
+private_policy: inference_only
+seed: 42
+
+embedding:
+  model: AITeamVN/Vietnamese_Embedding
+  revision: dea33aa1ab339f38d66ae0a40e6c40e0a9249568
+  input_format: plain
+  objective: contrastive_infonce
+  temperature: 0.05
+  dev_fraction: 0.10
+
+reranker:
+  model: AITeamVN/Vietnamese_Reranker
+  revision: f536976248403314225d7fdfdbc87f0e9516a54e
+  objective: weighted_bce
+  score_mode: raw_logit
+  dev_fraction: 0.10
+
+data:
+  pairs: artifacts/training/pairs.jsonl
+  required_audit: artifacts/training/audit.json
+  exact_overlap_exclusions: artifacts/training/exact_overlap_exclusions.jsonl
+  near_overlap_threshold: 0.90
+  negatives:
+    policy: semi_hard
+    count: 10
+    easy_below: 0.15
+    false_negative_similarity_above: 0.90
+
+qc:
+  require_cuda: true
+  require_bf16: true
+  require_pinned_revision: true
+  require_negative_audit_pass: true
+  require_query_disjoint_split: true
+  require_checkpoint_reload: true
+  max_vram_fraction: 0.93
+  reject_non_finite_loss: true
+  promotion:
+    recall_at_20_abs: 0.005
+    mrr_at_10_abs: 0.003
+    ndcg_at_10_abs: 0.003
+    meteor_non_regression: -0.003
+    rouge_l_non_regression: -0.003
