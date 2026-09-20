@@ -65,7 +65,9 @@ class ModelConfig:
     system_prompt: str | None = None
     # Passed to tokenizer.apply_chat_template; for Qwen3, {"enable_thinking": False}
     # disables the reasoning trace. Unknown keys are ignored by other templates.
-    chat_template_kwargs: dict = field(default_factory=lambda: {"enable_thinking": False})
+    chat_template_kwargs: dict = field(
+        default_factory=lambda: {"enable_thinking": False}
+    )
     extra: dict = field(default_factory=dict)
 
 
@@ -106,8 +108,7 @@ class HFCandidateGenerator:
             "trust_remote_code": cfg.trust_remote_code,
             "torch_dtype": dtype,
         }
-        if cfg.attn_implementation:
-            kwargs["attn_implementation"] = cfg.attn_implementation
+        kwargs["attn_implementation"] = cfg.attn_implementation or "sdpa"
         if cfg.load_in_8bit:
             from transformers import BitsAndBytesConfig  # noqa: PLC0415
 
@@ -123,9 +124,9 @@ class HFCandidateGenerator:
                 bnb_4bit_use_double_quant=True,
             )
             kwargs["device_map"] = {"": cfg.device}
+        else:
+            kwargs["device_map"] = {"": cfg.device}
         model = AutoModelForCausalLM.from_pretrained(cfg.model_name, **kwargs)
-        if not (cfg.load_in_4bit or cfg.load_in_8bit):
-            model = model.to(cfg.device)
         model.eval()
         self._model = model
         self._tokenizer = tokenizer
@@ -135,7 +136,9 @@ class HFCandidateGenerator:
         if self.config.use_chat_template and tok.chat_template:
             messages = []
             if self.config.system_prompt:
-                messages.append({"role": "system", "content": self.config.system_prompt})
+                messages.append(
+                    {"role": "system", "content": self.config.system_prompt}
+                )
             messages.append({"role": "user", "content": prompt})
             return tok.apply_chat_template(
                 messages,
@@ -145,11 +148,20 @@ class HFCandidateGenerator:
             )
         return prompt
 
-    def _generate(self, rendered: str, *, do_sample: bool, n: int, sampling: SamplingConfig) -> list[str]:
+    def _generate_batch(
+        self,
+        rendered_list: list[str],
+        *,
+        do_sample: bool,
+        n: int,
+        sampling: SamplingConfig,
+    ) -> list[list[str]]:
         import torch  # noqa: PLC0415
 
         tok = self._tokenizer
-        inputs = tok(rendered, return_tensors="pt").to(self.config.device)
+        inputs = tok(rendered_list, return_tensors="pt", padding=True).to(
+            self.config.device
+        )
         gen_kwargs: dict = {
             "max_new_tokens": sampling.max_new_tokens,
             "num_return_sequences": n,
@@ -171,35 +183,69 @@ class HFCandidateGenerator:
             gen_kwargs["no_repeat_ngram_size"] = sampling.no_repeat_ngram_size
         with torch.no_grad():
             output = self._model.generate(**inputs, **gen_kwargs)
-        new_tokens = output[:, inputs["input_ids"].shape[1] :]
-        return [tok.decode(seq, skip_special_tokens=True).strip() for seq in new_tokens]
 
-    def generate(self, case_id: str, prompt: str, sampling: SamplingConfig) -> CandidateSet:
+        prompt_len = inputs["input_ids"].shape[1]
+        batch_size = len(rendered_list)
+        results: list[list[str]] = []
+        for i in range(batch_size):
+            item_cands = [
+                tok.decode(
+                    output[i * n + k, prompt_len:], skip_special_tokens=True
+                ).strip()
+                for k in range(n)
+            ]
+            results.append(item_cands)
+        return results
+
+    def generate_batch(
+        self,
+        items: Sequence[tuple[str, str]],  # (case_id, prompt)
+        sampling: SamplingConfig,
+    ) -> list[CandidateSet]:
         if self._model is None:
             raise RuntimeError("call load() before generate()")
         import torch  # noqa: PLC0415
 
-        rendered = self._render(prompt)
-        candidates: list[str] = []
+        if not items:
+            return []
+
+        rendered_list = [self._render(prompt) for _, prompt in items]
+        batch_size = len(items)
+        all_candidates: list[list[str]] = [[] for _ in range(batch_size)]
         greedy_index: int | None = None
+
         if sampling.include_greedy:
             torch.manual_seed(sampling.seed)
-            greedy = self._generate(rendered, do_sample=False, n=1, sampling=sampling)
-            greedy_index = 0
-            candidates.extend(greedy)
-        n_sampled = sampling.num_candidates - len(candidates)
-        if n_sampled > 0:
-            # deterministic per-case seed keeps runs reproducible
-            torch.manual_seed(sampling.seed + (hash(case_id) & 0xFFFF))
-            candidates.extend(
-                self._generate(rendered, do_sample=True, n=n_sampled, sampling=sampling)
+            greedy_results = self._generate_batch(
+                rendered_list, do_sample=False, n=1, sampling=sampling
             )
-        return CandidateSet(
-            case_id=case_id,
-            prompt_sha256=_sha256(rendered),
-            candidates=tuple(candidates),
-            greedy_index=greedy_index,
-        )
+            greedy_index = 0
+            for i in range(batch_size):
+                all_candidates[i].extend(greedy_results[i])
+
+        n_sampled = sampling.num_candidates - (1 if sampling.include_greedy else 0)
+        if n_sampled > 0:
+            torch.manual_seed(sampling.seed)
+            sampled_results = self._generate_batch(
+                rendered_list, do_sample=True, n=n_sampled, sampling=sampling
+            )
+            for i in range(batch_size):
+                all_candidates[i].extend(sampled_results[i])
+
+        return [
+            CandidateSet(
+                case_id=items[i][0],
+                prompt_sha256=_sha256(rendered_list[i]),
+                candidates=tuple(all_candidates[i]),
+                greedy_index=greedy_index,
+            )
+            for i in range(batch_size)
+        ]
+
+    def generate(
+        self, case_id: str, prompt: str, sampling: SamplingConfig
+    ) -> CandidateSet:
+        return self.generate_batch([(case_id, prompt)], sampling)[0]
 
 
 def write_candidate_cache(path: str | Path, sets: Sequence[CandidateSet]) -> Path:

@@ -100,7 +100,9 @@ def _resolve(path: str | None) -> Path | None:
 
 
 def _gold_scores(gold: str, candidates: list[str]) -> np.ndarray:
-    return np.array([metrics.meteor_exact(gold, c) for c in candidates], dtype=np.float64)
+    return np.array(
+        [metrics.meteor_exact(gold, c) for c in candidates], dtype=np.float64
+    )
 
 
 class BenchmarkRunner:
@@ -108,7 +110,9 @@ class BenchmarkRunner:
         self.config = config
 
     # ---- candidate generation (resumable cache) ------------------------- #
-    def _candidates(self, dataset: Dataset, template: str) -> tuple[list[CandidateSet], str | None]:
+    def _candidates(
+        self, dataset: Dataset, template: str
+    ) -> tuple[list[CandidateSet], str | None]:
         cache = _resolve(self.config.cache_path)
         cached_by_id: dict[str, CandidateSet] = {}
         if cache and cache.exists():
@@ -125,21 +129,32 @@ class BenchmarkRunner:
             cache.parent.mkdir(parents=True, exist_ok=True)
             cache_handle = cache.open("a", encoding="utf-8")
 
+        to_generate = [case for case in dataset.cases if case.id not in cached_by_id]
+        batch_size = 4
         try:
             from tqdm import tqdm
-            iterator = tqdm(dataset.cases, desc="Generating candidates")
-        except ImportError:
-            iterator = dataset.cases
 
-        for case in iterator:
-            if case.id in cached_by_id:
-                continue
-            prompt = build_prompt(template, case)
-            cset = generator.generate(case.id, prompt, self.config.sampling)
-            cached_by_id[case.id] = cset
-            if cache_handle:
-                cache_handle.write(json.dumps(cset.as_dict(), ensure_ascii=False) + "\n")
-                cache_handle.flush()
+            pbar = tqdm(total=len(dataset.cases), desc="Generating candidates")
+            pbar.update(len(dataset.cases) - len(to_generate))
+        except ImportError:
+            pbar = None
+
+        for idx in range(0, len(to_generate), batch_size):
+            chunk = to_generate[idx : idx + batch_size]
+            items = [(case.id, build_prompt(template, case)) for case in chunk]
+            csets = generator.generate_batch(items, self.config.sampling)
+            for cset in csets:
+                cached_by_id[cset.case_id] = cset
+                if cache_handle:
+                    cache_handle.write(
+                        json.dumps(cset.as_dict(), ensure_ascii=False) + "\n"
+                    )
+                    cache_handle.flush()
+            if pbar:
+                pbar.update(len(chunk))
+
+        if pbar:
+            pbar.close()
 
         if cache_handle:
             cache_handle.close()
@@ -149,11 +164,14 @@ class BenchmarkRunner:
         import gc
 
         import torch
+
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        return [cached_by_id[case.id] for case in dataset.cases if case.id in cached_by_id], resolved_dtype
+        return [
+            cached_by_id[case.id] for case in dataset.cases if case.id in cached_by_id
+        ], resolved_dtype
 
     # ---- selection ------------------------------------------------------- #
     def _select_all(
@@ -197,16 +215,20 @@ class BenchmarkRunner:
 
         try:
             from tqdm import tqdm
+
             eval_iterator = tqdm(
-                enumerate(dataset.cases), total=len(dataset.cases), desc="Evaluating selection"
+                enumerate(dataset.cases),
+                total=len(dataset.cases),
+                desc="Evaluating selection",
             )
         except ImportError:
             eval_iterator = enumerate(dataset.cases)
 
         final_path = out_dir / "final_answers.jsonl"
-        with per_case_path.open("w", encoding="utf-8") as handle, final_path.open(
-            "w", encoding="utf-8"
-        ) as final_handle:
+        with (
+            per_case_path.open("w", encoding="utf-8") as handle,
+            final_path.open("w", encoding="utf-8") as final_handle,
+        ):
             for offset, case in eval_iterator:
                 cset = by_id.get(case.id)
                 if cset is None or not cset.candidates:
@@ -240,7 +262,9 @@ class BenchmarkRunner:
                     is_refusal = grounding.is_refusal(pred_text)
                     strategy_meteor.setdefault(name, []).append(score.meteor)
                     strategy_rouge.setdefault(name, []).append(score.rouge_l)
-                    strategy_len.setdefault(name, []).append(len(metrics.tokenize(pred_text)))
+                    strategy_len.setdefault(name, []).append(
+                        len(metrics.tokenize(pred_text))
+                    )
                     strategy_refusal.setdefault(name, []).append(is_refusal)
                     row["selections"][name] = {
                         "index": sel.index,
@@ -316,7 +340,9 @@ class BenchmarkRunner:
                 "pred_mean_tokens": round(float(np.mean(strategy_len[name])), 1),
                 "refusal_rate": round(float(np.mean(refusals)), 4),
             }
-        ranked = dict(sorted(rows.items(), key=lambda kv: kv[1]["meteor"], reverse=True))
+        ranked = dict(
+            sorted(rows.items(), key=lambda kv: kv[1]["meteor"], reverse=True)
+        )
         gold_mean = round(float(np.mean(gold_len_list)), 1) if gold_len_list else 0.0
         cand_mean = round(float(np.mean(cand_len_list)), 1) if cand_len_list else 0.0
         # Loud health check: oracle far below a grounded system (~0.55) means the

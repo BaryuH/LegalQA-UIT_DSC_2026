@@ -21,8 +21,8 @@ model:
   device: cuda
   dtype: auto
   load_in_4bit: false
-  load_in_8bit: true            # ~1.5-2x slower than fp16; set false (dtype auto,
-                                # ~16GB) when the GPU is exclusive for a big speedup
+  load_in_8bit: false
+  attn_implementation: sdpa
   use_chat_template: true
   system_prompt: null
   chat_template_kwargs:
