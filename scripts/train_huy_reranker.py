@@ -39,22 +39,47 @@ def _score_group(
     torch: Any,
     max_length: int,
     max_query_tokens: int,
+    eval_batch_size: int = 16,
 ) -> list[float]:
     query = _clip_query(tokenizer, pair.query, max_query_tokens)
     passages = [pair.positive, *pair.negatives]
     scores: list[float] = []
-    for passage in passages:
+    for i in range(0, len(passages), eval_batch_size):
+        chunk = passages[i : i + eval_batch_size]
+        queries = [query] * len(chunk)
         encoded = tokenizer(
-            query,
-            passage,
+            queries,
+            chunk,
+            padding=True,
             truncation="only_second",
             max_length=max_length,
             return_tensors="pt",
         )
         encoded = {key: value.to("cuda") for key, value in encoded.items()}
-        score = model(**encoded, return_dict=True).logits.view(-1)[0]
-        scores.append(float(score.float().cpu()))
+        logits = model(**encoded, return_dict=True).logits.view(-1)
+        scores.extend([float(v) for v in logits.float().cpu()])
     return scores
+
+
+def _ranking_metrics(positive_score: float, negative_scores: list[float]) -> dict[str, float]:
+    rank = 1 + sum(1 for s in negative_scores if s >= positive_score)
+    mrr = 1.0 / rank
+    hit1 = 1.0 if rank == 1 else 0.0
+    hit3 = 1.0 if rank <= 3 else 0.0
+    hit5 = 1.0 if rank <= 5 else 0.0
+    hit10 = 1.0 if rank <= 10 else 0.0
+    ndcg10 = (1.0 / math.log2(rank + 1)) if rank <= 10 else 0.0
+    best_neg = max(negative_scores) if negative_scores else positive_score
+    margin = positive_score - best_neg
+    return {
+        "mrr": mrr,
+        "hit1": hit1,
+        "hit3": hit3,
+        "hit5": hit5,
+        "hit10": hit10,
+        "ndcg10": ndcg10,
+        "margin": margin,
+    }
 
 
 def _evaluate(
@@ -65,9 +90,21 @@ def _evaluate(
     torch: Any,
     max_length: int,
     max_query_tokens: int,
+    eval_batch_size: int = 16,
+    loss_fn: Any | None = None,
 ) -> dict[str, float]:
     model.eval()
-    reciprocal_ranks: list[float] = []
+    metric_accum: dict[str, list[float]] = {
+        "mrr": [],
+        "hit1": [],
+        "hit3": [],
+        "hit5": [],
+        "hit10": [],
+        "ndcg10": [],
+        "margin": [],
+    }
+    dev_losses: list[float] = []
+
     with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
         for pair in pairs:
             scores = _score_group(
@@ -77,11 +114,27 @@ def _evaluate(
                 torch=torch,
                 max_length=max_length,
                 max_query_tokens=max_query_tokens,
+                eval_batch_size=eval_batch_size,
             )
-            reciprocal_ranks.append(reciprocal_rank(scores[0], scores[1:]))
-    model.train()
-    return {"dev_mrr": sum(reciprocal_ranks) / max(1, len(reciprocal_ranks))}
+            item_metrics = _ranking_metrics(scores[0], scores[1:])
+            for key, value in item_metrics.items():
+                metric_accum[key].append(value)
 
+            if loss_fn is not None:
+                labels = torch.tensor([1.0] + [0.0] * (len(scores) - 1), device="cuda")
+                pred_tensor = torch.tensor(scores, device="cuda")
+                loss = loss_fn(pred_tensor, labels)
+                dev_losses.append(float(loss.cpu()))
+
+    model.train()
+    n = max(1, len(pairs))
+    result = {
+        f"dev_{key}": round(sum(values) / n, 4)
+        for key, values in metric_accum.items()
+    }
+    if dev_losses:
+        result["dev_loss"] = round(sum(dev_losses) / len(dev_losses), 4)
+    return result
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -100,6 +153,30 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--eval-steps",
+        type=int,
+        default=0,
+        help="Evaluate on dev set every N optimizer updates (0 = only at end of epoch).",
+    )
+    parser.add_argument(
+        "--eval-batch-size",
+        type=int,
+        default=16,
+        help="Batch size for parallel passage scoring during evaluation (default: 16).",
+    )
+    parser.add_argument(
+        "--best-metric",
+        choices=("mrr", "hit1", "ndcg10", "loss"),
+        default="mrr",
+        help="Metric to track for saving checkpoint-best (default: mrr).",
+    )
+    parser.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=0,
+        help="Stop training if best-metric does not improve for N consecutive evaluations (0 disables).",
+    )
     args = parser.parse_args()
 
     profile = get_profile(args.hardware_profile, "reranker")
@@ -234,11 +311,63 @@ def main() -> int:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     best_dir = args.output_dir / "checkpoint-best"
-    history: list[dict[str, float | int]] = []
-    best_mrr = -1.0
+    history: list[dict[str, Any]] = []
+    best_metrics: dict[str, float] = {}
+    patience_counter = 0
     update = 0
     optimizer.zero_grad(set_to_none=True)
     model.train()
+
+    def _is_better(current: dict[str, float], best: dict[str, float]) -> bool:
+        if not best:
+            return True
+        if args.best_metric == "loss":
+            return current.get("dev_loss", float("inf")) < best.get("dev_loss", float("inf"))
+        metric_key = f"dev_{args.best_metric}"
+        return current.get(metric_key, -1.0) > best.get(metric_key, -1.0)
+
+    def run_eval(eval_tag: str) -> bool:
+        nonlocal best_metrics, patience_counter
+        eval_result = _evaluate(
+            model,
+            tokenizer,
+            dev_pairs,
+            torch=torch,
+            max_length=profile.max_length,
+            max_query_tokens=profile.max_query_tokens,
+            eval_batch_size=args.eval_batch_size,
+            loss_fn=loss_fn,
+        )
+        entry: dict[str, Any] = {
+            "eval_tag": eval_tag,
+            "epoch": epoch + 1,
+            "optimizer_updates": update,
+            "train_loss": running / max(1, batch_index + 1),
+            **eval_result,
+        }
+        history.append(entry)
+        log_line = f"[{eval_tag}] " + " | ".join(
+            f"{k}: {v:.4f}" if isinstance(v, float) else f"{k}: {v}"
+            for k, v in entry.items()
+        )
+        print(log_line)
+        if _is_better(eval_result, best_metrics):
+            best_metrics = eval_result
+            patience_counter = 0
+            model.save_pretrained(best_dir)
+            tokenizer.save_pretrained(best_dir)
+            (best_dir / "eval_metrics.json").write_text(
+                json.dumps(entry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
+            print(f"  >>> New best checkpoint saved! ({args.best_metric} = {eval_result.get(f'dev_{args.best_metric}')})")
+        else:
+            patience_counter += 1
+            if args.early_stopping_patience > 0 and patience_counter >= args.early_stopping_patience:
+                print(f"  >>> Early stopping triggered after {patience_counter} evals without improvement.")
+                return True
+        return False
+
+    early_stopped = False
     for epoch in range(profile.epochs):
         running = 0.0
         for batch_index, batch in enumerate(loader):
@@ -251,9 +380,7 @@ def main() -> int:
             scaled_loss.backward()
             running += float(loss.detach().cpu())
             last = batch_index + 1 == len(loader)
-            boundary = (
-                (batch_index + 1) % profile.gradient_accumulation_steps == 0
-            )
+            boundary = (batch_index + 1) % profile.gradient_accumulation_steps == 0
             if boundary or last:
                 torch.nn.utils.clip_grad_norm_(
                     (p for p in model.parameters() if p.requires_grad), 1.0
@@ -262,27 +389,16 @@ def main() -> int:
                 scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
                 update += 1
-        metrics = _evaluate(
-            model,
-            tokenizer,
-            dev_pairs,
-            torch=torch,
-            max_length=profile.max_length,
-            max_query_tokens=profile.max_query_tokens,
-        )
-        entry: dict[str, float | int] = {
-            "epoch": epoch + 1,
-            "optimizer_updates": update,
-            "train_loss": running / len(loader),
-            **metrics,
-        }
-        history.append(entry)
-        print(json.dumps(entry, ensure_ascii=False))
-        if metrics["dev_mrr"] > best_mrr:
-            best_mrr = metrics["dev_mrr"]
-            model.save_pretrained(best_dir)
-            tokenizer.save_pretrained(best_dir)
-
+                if args.eval_steps > 0 and update % args.eval_steps == 0:
+                    should_stop = run_eval(f"step_{update}")
+                    if should_stop:
+                        early_stopped = True
+                        break
+        if early_stopped:
+            break
+        should_stop = run_eval(f"epoch_{epoch + 1}")
+        if should_stop:
+            break
     manifest = {
         "schema_version": "huy.reranker_finetune.v1",
         "status": "PASS",
@@ -296,7 +412,12 @@ def main() -> int:
         "trainable_parameters": trainable_params,
         "train_query_count": len(train_pairs),
         "dev_query_count": len(dev_pairs),
-        "best_dev_mrr": best_mrr,
+        "best_metrics": best_metrics,
+        "best_dev_mrr": best_metrics.get("dev_mrr", -1.0),
+        "best_dev_hit1": best_metrics.get("dev_hit1", 0.0),
+        "best_dev_ndcg10": best_metrics.get("dev_ndcg10", 0.0),
+        "best_dev_margin_mean": best_metrics.get("dev_margin_mean", 0.0),
+        "best_dev_loss": best_metrics.get("dev_loss"),
         "peak_vram_bytes": int(torch.cuda.max_memory_allocated()),
         "checkpoint": str(best_dir),
         "history": history,
