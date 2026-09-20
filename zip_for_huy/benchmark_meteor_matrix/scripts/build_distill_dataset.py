@@ -40,6 +40,9 @@ def main() -> int:
             load_in_4bit=m.get("load_in_4bit", False),
             use_chat_template=m.get("use_chat_template", True),
             system_prompt=m.get("system_prompt"),
+            chat_template_kwargs=m.get(
+                "chat_template_kwargs", {"enable_thinking": False}
+            ),
         ),
         sampling=SamplingConfig(
             num_candidates=s.get("num_candidates", 8),

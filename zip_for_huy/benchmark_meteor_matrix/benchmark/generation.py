@@ -62,6 +62,9 @@ class ModelConfig:
     attn_implementation: str | None = None
     use_chat_template: bool = True
     system_prompt: str | None = None
+    # Passed to tokenizer.apply_chat_template; for Qwen3, {"enable_thinking": False}
+    # disables the reasoning trace. Unknown keys are ignored by other templates.
+    chat_template_kwargs: dict = field(default_factory=lambda: {"enable_thinking": False})
     extra: dict = field(default_factory=dict)
 
 
@@ -127,7 +130,10 @@ class HFCandidateGenerator:
                 messages.append({"role": "system", "content": self.config.system_prompt})
             messages.append({"role": "user", "content": prompt})
             return tok.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                **self.config.chat_template_kwargs,
             )
         return prompt
 

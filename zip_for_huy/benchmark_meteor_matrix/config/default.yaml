@@ -11,12 +11,14 @@ data:
 prompt_template: configs/prompts/rag_v1.txt
 
 model:
-  model_name: Qwen/Qwen2.5-7B-Instruct   # or a local finetuned reader checkpoint
+  model_name: Qwen/Qwen3-8B        # or a local finetuned reader checkpoint
   device: cuda
   dtype: auto                     # bf16 on A100, fp16 on 4090
   load_in_4bit: false             # set true to fit a 14B checkpoint on 24GB
   use_chat_template: true
   system_prompt: null
+  chat_template_kwargs:
+    enable_thinking: false        # Qwen3 no-thinking (fast, deterministic prose)
   # attn_implementation: flash_attention_2   # optional, if installed
 
 sampling:

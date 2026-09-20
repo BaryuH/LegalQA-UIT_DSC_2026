@@ -7,12 +7,14 @@ output_path: benchmark_meteor_matrix/outputs/distill/mbr_self_v1.jsonl
 limit: null
 
 model:
-  model_name: Qwen/Qwen2.5-7B-Instruct
+  model_name: Qwen/Qwen3-8B
   device: cuda
   dtype: auto
   load_in_4bit: false
   use_chat_template: true
   system_prompt: null
+  chat_template_kwargs:
+    enable_thinking: false        # Qwen3 no-thinking
 
 sampling:
   num_candidates: 8
