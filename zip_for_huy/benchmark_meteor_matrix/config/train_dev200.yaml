@@ -1,0 +1,55 @@
+# 200-case dev benchmark — recommended standing yardstick for C+B work.
+# 200 cases resolve a paired METEOR delta of ~0.009 at 80% power, enough for
+# typical reranker/prompt gains (>=0.02) at ~2.5x less generation cost than 500.
+# Also closes the MBR file: len_resid over ~1400 candidate observations.
+#
+# Prerequisites (built by the retrieval/pipeline instance):
+#   processed/train_dev200.json                  — 200-case dev slice from train.json
+#   processed/train_dev200_rerank_evidence.jsonl — AITeamVN reranker evidence {id, evidence}
+run_name: mbr_meteor_matrix_dev200_v1
+output_dir: benchmark_meteor_matrix/outputs
+
+data:
+  path: processed/train_dev200.json
+  evidence_path: processed/train_dev200_rerank_evidence.jsonl
+  limit: 200
+
+prompt_template: configs/prompts/rag_detailed_v1.txt
+
+model:
+  model_name: Qwen/Qwen3-8B
+  device: cuda
+  dtype: auto
+  load_in_4bit: false
+  load_in_8bit: true
+  use_chat_template: true
+  system_prompt: null
+  chat_template_kwargs:
+    enable_thinking: false
+
+sampling:
+  num_candidates: 8
+  include_greedy: true
+  temperature: 0.7
+  top_p: 0.95
+  epsilon_cutoff: 0.02
+  max_new_tokens: 768
+  repetition_penalty: 1.0
+  no_repeat_ngram_size: 0
+  seed: 0
+
+utilities:
+  primary_lexical: meteor
+  enable_ensemble: true
+  ensemble:
+    - {kind: lexical, metric: meteor, weight: 1.0}
+    - {kind: lexical, metric: rouge_l, weight: 0.5}
+    - {kind: embedding, weight: 1.0}
+  enable_embedding: true
+  enable_reranker_prior: true
+  embedding_model: AITeamVN/Vietnamese_Embedding
+  reranker_model: AITeamVN/Vietnamese_Reranker
+  cbmbr_clusters: 3
+
+generation:
+  cache_path: benchmark_meteor_matrix/outputs/mbr_meteor_matrix_dev200_v1/candidates.jsonl
