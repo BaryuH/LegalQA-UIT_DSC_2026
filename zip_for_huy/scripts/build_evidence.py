@@ -33,6 +33,7 @@ from legal_rag.evidence import (  # noqa: E402
 )
 from legal_rag.pipeline import prepare_bm25_index_from_config  # noqa: E402
 from legal_rag.retrieval.bm25 import retrieve_bm25  # noqa: E402
+from legal_rag.schemas import RetrievalHit  # noqa: E402
 from legal_rag.retrieval.reranker import (  # noqa: E402
     RerankResult,
     create_reranker,
@@ -148,6 +149,12 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="Dense weight in RRF fusion (default: 1.0, champion weighting).",
     )
+    parser.add_argument(
+        "--passages",
+        type=Path,
+        default=Path("/mnt/G/sedar-legalqa/artifacts/sedar_retrieval/views/parser_blankline_20260901/passages_r2a.jsonl"),
+        help="Path to canonical passages_r2a.jsonl for hybrid dense chunk mapping.",
+    )
     return parser.parse_args()
 
 
@@ -217,6 +224,16 @@ def main() -> int:
     )
     documents = prep.documents
     index = prep.index
+
+    if args.dense_index is not None and args.passages and args.passages.exists():
+        print(f"[build_evidence] Loading canonical passages from {args.passages} for dense chunk lookup...")
+        from legal_rag.sedar_retrieval.retrieval.passage_adapter import load_passages_jsonl, passage_to_legal_chunk
+        passages_list = load_passages_jsonl(str(args.passages))
+        chunks = dict(chunks)
+        for p in passages_list:
+            c = passage_to_legal_chunk(p, body_source="raw_text")
+            chunks[c.chunk_id] = c
+        print(f"[build_evidence] Loaded {len(passages_list)} canonical passages into chunk lookup.")
 
     # Default rough_top_n: if reranker is used, pull 125 candidates for reranking
     default_rough = 125 if args.reranker == "aiteamvn" else cfg.retrieval.rough_top_n
@@ -288,7 +305,7 @@ def main() -> int:
             else "fp16"
         )
         dense_encoder = SentenceTransformerEncoder(
-            args.dense_model, device=device, dtype=dtype_dense
+            model=args.dense_model, device=device, dtype=dtype_dense
         )
         print(f"[build_evidence] Encoding {len(query_pairs)} queries for dense retrieval...")
         query_texts = [text for _, text in query_pairs]
