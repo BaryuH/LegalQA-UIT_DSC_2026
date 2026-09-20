@@ -20,7 +20,7 @@ model:
   use_chat_template: true
   system_prompt: null
   chat_template_kwargs:
-    enable_thinking: true         # <think> trace is stripped in generation.py
+    enable_thinking: false
 
 sampling:
   num_candidates: 4               # MBR dropped; longest_grounded needs only a few
@@ -28,7 +28,7 @@ sampling:
   temperature: 0.7
   top_p: 0.95
   epsilon_cutoff: 0.02            # Freitag 2023 epsilon sampling; 0 disables
-  max_new_tokens: 2048            # thinking budget + answer
+  max_new_tokens: 768
   repetition_penalty: 1.0
   no_repeat_ngram_size: 0
   seed: 0

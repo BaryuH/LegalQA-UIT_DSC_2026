@@ -24,12 +24,12 @@ model:
   use_chat_template: true
   system_prompt: null
   chat_template_kwargs:
-    enable_thinking: true
+    enable_thinking: false
 
 sampling:
   num_candidates: 1
   include_greedy: true          # the single candidate is the deterministic answer
-  max_new_tokens: 2048
+  max_new_tokens: 768
   seed: 0
 
 generation:

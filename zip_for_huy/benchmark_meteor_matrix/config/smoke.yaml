@@ -22,7 +22,7 @@ model:
   use_chat_template: true
   system_prompt: null
   chat_template_kwargs:
-    enable_thinking: true
+    enable_thinking: false
 
 sampling:
   num_candidates: 2
@@ -30,7 +30,7 @@ sampling:
   temperature: 0.7
   top_p: 0.95
   epsilon_cutoff: 0.02
-  max_new_tokens: 2048
+  max_new_tokens: 768
   seed: 0
 
 generation:
