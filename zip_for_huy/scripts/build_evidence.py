@@ -5,11 +5,13 @@ Complies with AGENTS.md:
 - Question text and retrieved evidence ONLY (no gold answers enter retrieval).
 - Fully provenance-preserving through repo pack_evidence.
 - Supports deterministic held-out dev slicing from train.json.
+- Supports semantic cross-encoder reranking with AITeamVN/Vietnamese_Reranker.
 """
 
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import random
 import sys
@@ -90,13 +92,19 @@ def parse_args() -> argparse.Namespace:
         "--top-k",
         type=int,
         default=None,
-        help="Retrieval rough top_n override (default from config).",
+        help="Retrieval rough top_n override (default from config or 30).",
     )
     parser.add_argument(
         "--evidence-top-k",
         type=int,
         default=None,
         help="Evidence top_k override (default from config).",
+    )
+    parser.add_argument(
+        "--reranker",
+        choices=("none", "aiteamvn"),
+        default="none",
+        help="Semantic reranker: 'aiteamvn' uses AITeamVN/Vietnamese_Reranker.",
     )
     return parser.parse_args()
 
@@ -168,16 +176,32 @@ def main() -> int:
     documents = prep.documents
     index = prep.index
 
-    rough_top_n = args.top_k or cfg.retrieval.rough_top_n
+    # Default rough_top_n: if reranker is used, pull 30 candidates for reranking
+    default_rough = 30 if args.reranker == "aiteamvn" else cfg.retrieval.rough_top_n
+    rough_top_n = args.top_k or default_rough
     evidence_top_k = args.evidence_top_k or cfg.evidence.evidence_top_k
 
+    import torch
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    cross_encoder = None
+    if args.reranker == "aiteamvn":
+        from sentence_transformers import CrossEncoder
+
+        print(f"[build_evidence] Loading AITeamVN/Vietnamese_Reranker on {device}...")
+        cross_encoder = CrossEncoder(
+            "AITeamVN/Vietnamese_Reranker", device=device, max_length=1024
+        )
+
     reranker = None
-    if cfg.reranker.enabled and cfg.retrieval.strategy == "bm25_rerank":
+    if (
+        args.reranker == "none"
+        and cfg.reranker.enabled
+        and cfg.retrieval.strategy == "bm25_rerank"
+    ):
         model_name = cfg.reranker.model
         print(f"[build_evidence] Initializing reranker: {model_name}")
         reranker = create_reranker(cfg.reranker)
-
-    import torch
 
     from legal_rag.retrieval.bm25 import (
         build_bm25_cuda_query_cache,
@@ -229,7 +253,27 @@ def main() -> int:
                 continue
 
             ordered_hits = raw_hits
-            if reranker is not None:
+            if cross_encoder is not None:
+                valid_hits = [h for h in raw_hits if h.chunk_id in chunks]
+                passages = [chunks[h.chunk_id].retrieval_text for h in valid_hits]
+                if passages:
+                    scores = cross_encoder.predict(
+                        [(question_text, p) for p in passages],
+                        batch_size=32,
+                        show_progress_bar=False,
+                    )
+                    scored = sorted(
+                        zip(scores, valid_hits, strict=True),
+                        key=lambda item: float(item[0]),
+                        reverse=True,
+                    )
+                    ordered_hits = tuple(
+                        hit.model_copy(
+                            update={"rerank_score": float(score), "rank": rank}
+                        )
+                        for rank, (score, hit) in enumerate(scored, start=1)
+                    )
+            elif reranker is not None:
                 candidate_texts = {
                     hit.chunk_id: chunks[hit.chunk_id].retrieval_text
                     for hit in raw_hits
@@ -258,6 +302,12 @@ def main() -> int:
 
             row = {"id": qid, "evidence": evidence_text}
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    if cross_encoder is not None:
+        del cross_encoder
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     print(f"[build_evidence] Completed! Evidence written to {args.output_evidence}")
     return 0
