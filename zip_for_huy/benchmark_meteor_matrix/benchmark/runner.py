@@ -68,6 +68,7 @@ class BenchmarkConfig:
     embedding_model: str = "AITeamVN/Vietnamese_Embedding"
     reranker_model: str = "AITeamVN/Vietnamese_Reranker"
     cbmbr_clusters: int = 3
+    lean: bool = False  # skip all MBR machinery; production selector + baselines only
     raw: dict[str, Any] = field(default_factory=dict)
 
     @staticmethod
@@ -118,6 +119,7 @@ class BenchmarkConfig:
             embedding_model=u.get("embedding_model", "AITeamVN/Vietnamese_Embedding"),
             reranker_model=u.get("reranker_model", "AITeamVN/Vietnamese_Reranker"),
             cbmbr_clusters=u.get("cbmbr_clusters", 3),
+            lean=raw.get("lean", False),
             raw=raw,
         )
 
@@ -221,6 +223,18 @@ class BenchmarkRunner:
         self, question: str, cands: list[str], evidence: str | None, seed: int
     ) -> tuple[dict[str, selection.Selection], str]:
         out: dict[str, selection.Selection] = {}
+        keep, _reasons, mode = grounding.keep_mask(cands, evidence)
+        refusal_keep = [not grounding.is_refusal(c) for c in cands]
+        both_keep = [k and r for k, r in zip(keep, refusal_keep)]
+
+        if self.config.lean:
+            # MBR is dropped; only the production selector + cheap baselines run.
+            out["first"] = selection.baseline_first(cands)
+            out["longest"] = selection.baseline_longest(cands)
+            out["random"] = selection.baseline_random(cands, seed)
+            out["longest_grounded"] = selection.longest_grounded(cands, both_keep)
+            return out, mode
+
         lexical = LexicalUtility(self.config.primary_lexical)
         matrix = lexical.pairwise(cands)
 
@@ -233,19 +247,12 @@ class BenchmarkRunner:
             lexical.aggregate(cands), "aggregate_lexical"
         )
 
-        keep, _reasons, mode = grounding.keep_mask(cands, evidence)
         out["mbr_pruned"] = selection.mbr_pruned(matrix, keep, "mbr_pruned")
-
-        # Refusals ("chưa đủ căn cứ") form a short-answer consensus cluster that
-        # plain MBR is drawn into; pruning them before MBR isolates the
-        # substantive-answer mode. mbr_prune_both also drops ungrounded IDs/dates.
-        refusal_keep = [
-            not any(m in c.lower() for m in REFUSAL_MARKERS) for c in cands
-        ]
+        # Refusals form a short-answer consensus cluster plain MBR is drawn into;
+        # prune them (and ungrounded ids/dates in _both) before MBR.
         out["mbr_prune_refusal"] = selection.mbr_pruned(
             matrix, refusal_keep, "mbr_prune_refusal"
         )
-        both_keep = [k and r for k, r in zip(keep, refusal_keep)]
         out["mbr_prune_both"] = selection.mbr_pruned(matrix, both_keep, "mbr_prune_both")
         # Chosen cheap production selector (ties the field at O(N), no matrix).
         out["longest_grounded"] = selection.longest_grounded(cands, both_keep)
