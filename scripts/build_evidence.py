@@ -30,6 +30,7 @@ from legal_rag.evidence import (  # noqa: E402
     deduplicate_retrieved_chunks,
     pack_evidence,
     rerank_hits_with_citations,
+    select_dynamic_evidence_hits,
 )
 from legal_rag.pipeline import prepare_bm25_index_from_config  # noqa: E402
 from legal_rag.retrieval.bm25 import retrieve_bm25  # noqa: E402
@@ -125,6 +126,36 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=1.0,
         help="Weight multiplier for citation match bonus (default: 1.0).",
+    )
+    parser.add_argument(
+        "--dynamic-k",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use dynamic score-based evidence selection (min-k to max-k) instead of fixed top-k.",
+    )
+    parser.add_argument(
+        "--min-evidence-k",
+        type=int,
+        default=2,
+        help="Minimum number of evidence chunks to keep when dynamic-k is enabled (default: 2).",
+    )
+    parser.add_argument(
+        "--max-evidence-k",
+        type=int,
+        default=6,
+        help="Maximum number of evidence chunks to keep when dynamic-k is enabled (default: 6).",
+    )
+    parser.add_argument(
+        "--margin-top1",
+        type=float,
+        default=3.0,
+        help="Score margin relative to Top 1 rerank score (default: 3.0).",
+    )
+    parser.add_argument(
+        "--margin-top2",
+        type=float,
+        default=2.0,
+        help="Score margin relative to Top 2 rerank score (default: 2.0).",
     )
     parser.add_argument(
         "--dense-index",
@@ -433,7 +464,16 @@ def main() -> int:
                 )
 
             dedup = deduplicate_retrieved_chunks(ordered_hits, chunks)
-            selected_hits = dedup.kept_hits[:evidence_top_k]
+            if args.dynamic_k:
+                selected_hits = select_dynamic_evidence_hits(
+                    dedup.kept_hits,
+                    min_k=args.min_evidence_k,
+                    max_k=args.max_evidence_k,
+                    margin_top1=args.margin_top1,
+                    margin_top2=args.margin_top2,
+                )
+            else:
+                selected_hits = dedup.kept_hits[:evidence_top_k]
 
             try:
                 packed = pack_evidence(

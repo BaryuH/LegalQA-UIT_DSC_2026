@@ -561,3 +561,56 @@ def rerank_hits_with_citations(
         hit.model_copy(update={"rank": rank, "rerank_score": float(combined)})
         for rank, (combined, hit) in enumerate(scored_hits, start=1)
     )
+
+
+def select_dynamic_evidence_hits(
+    hits: Sequence[RetrievalHit],
+    *,
+    min_k: int = 2,
+    max_k: int = 6,
+    margin_top1: float = 3.0,
+    margin_top2: float = 2.0,
+) -> tuple[RetrievalHit, ...]:
+    """Dynamically select variable-size evidence hits based on rerank score margins.
+
+    Instead of a fixed top-k cutoff, keeps candidates up to max_k if they are
+    competitive with Top 1 (within margin_top1) or Top 2 (within margin_top2)
+    and have positive relevance logits. Guarantees at least min_k hits are kept.
+    """
+    if min_k <= 0:
+        raise ValueError("min_k must be positive")
+    if max_k < min_k:
+        raise ValueError("max_k must be >= min_k")
+    if len(hits) <= min_k:
+        return tuple(hits[:max_k])
+
+    scores: list[float] = [
+        float(h.rerank_score) if h.rerank_score is not None else float(h.bm25_score)
+        for h in hits
+    ]
+    s1 = scores[0]
+    s2 = scores[1] if len(scores) > 1 else s1
+    top2_is_competitive = (s1 - s2) <= margin_top1
+
+    selected: list[RetrievalHit] = []
+    for idx, hit in enumerate(hits):
+        rank = idx + 1
+        if rank > max_k:
+            break
+        if rank <= min_k:
+            selected.append(hit)
+            continue
+        sk = scores[idx]
+        diff_top1 = s1 - sk
+        diff_top2 = s2 - sk
+
+        is_relevant = sk >= 0.0
+        close_to_top1 = diff_top1 <= margin_top1
+        close_to_top2 = top2_is_competitive and (diff_top2 <= margin_top2)
+
+        if is_relevant and (close_to_top1 or close_to_top2):
+            selected.append(hit)
+        else:
+            break
+
+    return tuple(selected)

@@ -46,6 +46,7 @@ from .evidence import (
     pack_retrieved_evidence,
     rerank_hits_with_citations,
     score_citation_match,
+    select_dynamic_evidence_hits,
 )
 from .generation import (
     AnswerPostprocessResult,
@@ -302,5 +303,6 @@ __all__ = [
     "pack_retrieved_evidence",
     "rerank_hits_with_citations",
     "score_citation_match",
+    "select_dynamic_evidence_hits",
     "__version__",
 ]
