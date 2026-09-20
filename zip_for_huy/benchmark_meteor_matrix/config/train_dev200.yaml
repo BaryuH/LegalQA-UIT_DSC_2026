@@ -21,14 +21,15 @@ model:
   device: cuda
   dtype: auto
   load_in_4bit: false
-  load_in_8bit: true
+  load_in_8bit: true            # ~1.5-2x slower than fp16; set false (dtype auto,
+                                # ~16GB) when the GPU is exclusive for a big speedup
   use_chat_template: true
   system_prompt: null
   chat_template_kwargs:
     enable_thinking: false
 
 sampling:
-  num_candidates: 8
+  num_candidates: 4             # MBR is gone; longest_grounded needs only a few
   include_greedy: true
   temperature: 0.7
   top_p: 0.95

@@ -1,0 +1,35 @@
+# Greedy N=1 baseline: is multi-candidate sampling worth its cost at all?
+# Post-MBR, the selector is longest-among-grounded. If sweep shows longest_grounded
+# (N=4, train_dev200.yaml) is NOT significantly above 'first' here, ship greedy
+# N=1 in production: ~4-8x faster generation, no selection needed.
+#
+# ~fastest config: 1 generation/question, fp16 if GPU is exclusive.
+run_name: dev200_greedy_v1
+output_dir: benchmark_meteor_matrix/outputs
+
+data:
+  path: processed/train_dev200.json
+  evidence_path: processed/train_dev200_rerank_evidence.jsonl
+  limit: 200
+
+prompt_template: configs/prompts/rag_detailed_v1.txt
+
+model:
+  model_name: Qwen/Qwen3-8B
+  device: cuda
+  dtype: auto
+  load_in_4bit: false
+  load_in_8bit: true            # set false (fp16) when GPU is exclusive
+  use_chat_template: true
+  system_prompt: null
+  chat_template_kwargs:
+    enable_thinking: false
+
+sampling:
+  num_candidates: 1
+  include_greedy: true          # the single candidate is the deterministic answer
+  max_new_tokens: 768
+  seed: 0
+
+generation:
+  cache_path: benchmark_meteor_matrix/outputs/dev200_greedy_v1/candidates.jsonl
