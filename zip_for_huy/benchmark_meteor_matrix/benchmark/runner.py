@@ -234,7 +234,19 @@ class BenchmarkRunner:
         )
 
         keep, _reasons, mode = grounding.keep_mask(cands, evidence)
-        out["mbr_pruned"] = selection.mbr_pruned(matrix, keep)
+        out["mbr_pruned"] = selection.mbr_pruned(matrix, keep, "mbr_pruned")
+
+        # Refusals ("chưa đủ căn cứ") form a short-answer consensus cluster that
+        # plain MBR is drawn into; pruning them before MBR isolates the
+        # substantive-answer mode. mbr_prune_both also drops ungrounded IDs/dates.
+        refusal_keep = [
+            not any(m in c.lower() for m in REFUSAL_MARKERS) for c in cands
+        ]
+        out["mbr_prune_refusal"] = selection.mbr_pruned(
+            matrix, refusal_keep, "mbr_prune_refusal"
+        )
+        both_keep = [k and r for k, r in zip(keep, refusal_keep)]
+        out["mbr_prune_both"] = selection.mbr_pruned(matrix, both_keep, "mbr_prune_both")
 
         ensemble = self._build_ensemble()
         if ensemble is not None:

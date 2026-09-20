@@ -78,23 +78,25 @@ def mbr_weighted(matrix: np.ndarray, prior: np.ndarray) -> Selection:
     return Selection("mbr_weighted", _argmax(scores), tuple(scores))
 
 
-def mbr_pruned(matrix: np.ndarray, keep_mask: Sequence[bool]) -> Selection:
+def mbr_pruned(
+    matrix: np.ndarray, keep_mask: Sequence[bool], name: str = "mbr_pruned"
+) -> Selection:
     """Drop gated-out candidates, then run MBR over the survivors."""
 
     keep = np.asarray(keep_mask, dtype=bool)
     n = matrix.shape[0]
     if keep.sum() == 0:
         # No silent fallback: report that the gate rejected everything.
-        return Selection("mbr_pruned", -1, tuple(np.zeros(n)), "all_rejected")
+        return Selection(name, -1, tuple(np.zeros(n)), "all_rejected")
     if keep.sum() == 1:
         idx = int(np.argmax(keep))
-        return Selection("mbr_pruned", idx, tuple(keep.astype(float)), "single_survivor")
+        return Selection(name, idx, tuple(keep.astype(float)), "single_survivor")
     sub = matrix[np.ix_(keep, keep)]
     sub_scores = column_mean(sub)
     survivors = np.where(keep)[0]
     scores = np.full(n, -np.inf)
     scores[survivors] = sub_scores
-    return Selection("mbr_pruned", int(survivors[int(np.argmax(sub_scores))]), tuple(np.where(np.isfinite(scores), scores, 0.0)))
+    return Selection(name, int(survivors[int(np.argmax(sub_scores))]), tuple(np.where(np.isfinite(scores), scores, 0.0)))
 
 
 def aggregate(scores: np.ndarray, name: str = "aggregate") -> Selection:
