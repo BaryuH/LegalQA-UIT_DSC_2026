@@ -85,7 +85,7 @@ class FrozenB2EvidenceRetriever:
         reranker: Reranker,
         *,
         bm25_backend: BM25Backend = "cpu",
-        citation_boost: bool = True,
+        citation_boost: bool = False,
         citation_weight: float = 1.0,
     ) -> None:
         self.preparation = preparation

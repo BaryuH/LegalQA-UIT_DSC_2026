@@ -110,8 +110,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--citation-boost",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Apply explicit legal citation matching boost (Phần 2b) to reranked hits (default: True).",
+        default=False,
+        help="Apply explicit legal citation matching boost (Phần 2b) to reranked hits (default: False; regressed in dev200).",
     )
     parser.add_argument(
         "--citation-weight",

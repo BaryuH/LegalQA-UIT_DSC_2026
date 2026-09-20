@@ -69,9 +69,30 @@ Tất cả các mô hình neural được sử dụng trong toàn bộ pipeline 
 
 ---
 
-## 4. Kế hoạch Hành động Tiếp theo: Nâng cấp Toàn diện Retrieval (Track C)
+## 4. Kết quả Thử nghiệm Citation-Boost: Thất bại & Nguyên nhân (Regression Analysis)
 
-1. **Mục tiêu cốt lõi:** Nâng tỷ lệ bao phủ điều luật (hiện tại 89% ca thiếu) để kéo trần Oracle từ **0.4328 lên > 0.60**, từ đó điểm `longest_grounded` tự động tăng vọt từ 0.38 lên > 0.50.
-2. **Nhiệm vụ 1:** Xây dựng chỉ mục Dense Index v2 với `AITeamVN/Vietnamese_Embedding_v2` (`configs/r3_aiteamvn_vietnamese_embedding_v2.yaml`).
-3. **Nhiệm vụ 2:** Triển khai Hybrid Retrieval (Convex/RRF Fusion: BM25 + Dense v2) để tăng độ nhạy tìm kiếm ngữ nghĩa đối với các câu hỏi tình huống đời thường.
-4. **Nhiệm vụ 3:** Mở rộng độ sâu Reranking (top 50 -> rerank -> lấy top 6 blocks) và tối ưu hóa Evidence Packing để nhồi đúng văn bản luật vào ngữ cảnh của Generator.
+**Thời điểm:** 2026-09-20  
+**Mục tiêu thử nghiệm:** Dùng `parse_citations(query)` để tăng điểm (boost) cho các đoạn trích có chứa số hiệu/điều luật được nêu trong câu hỏi.
+
+### Bảng đối chứng thực nghiệm (v1 Baseline vs v2 Citation-Boost):
+| Chỉ số | v1 Baseline (BM25 + Rerank) | v2 Citation-Boost | Chênh lệch (Delta) | Đánh giá |
+| :--- | :---: | :---: | :---: | :---: |
+| `longest_grounded` (Production) | **0.3812** | 0.3734 | **−0.0078** | **Thụt lùi (Regression ❌)** |
+| Oracle ceiling | **0.4328** | 0.4246 | **−0.0082** | Giảm trần |
+| `mean_gold_legal_id_presence` | **6.37%** | 5.05% | **−1.32 pp** | Giảm độ phủ điều luật |
+| `retrieval_limited_rate` | **89.0%** | 93.0% | **+4.0 pp** | Tắc nghẽn nặng hơn |
+
+### Cơ chế thất bại & Bài học xương máu:
+1. **Bản chất câu hỏi thi:** Chỉ **0.5% câu hỏi (1/200)** có chứa số hiệu điều luật trong câu hỏi. 99.5% câu hỏi là câu hỏi tình huống đời thường.
+2. **Cơ chế chèn ép bằng chứng (Evidence Crowding Out):** Khi câu hỏi có số hiệu văn bản (ví dụ "Nghị định 153/2020/NĐ-CP"), việc cộng điểm cố định cho văn bản đó khiến các điều khoản không liên quan khác trong cùng nghị định được đẩy lên và **chèn ép mất đoạn văn trả lời thực sự** do Cross-Encoder tìm ra trong ngân sách đóng gói hạn hẹp (`evidence_top_k = 4`).
+3. **Hành động kỹ thuật:** **TẮT MẶC ĐỊNH NGAY LẬP TỨC (`citation_boost: false`)** trong `scripts/build_evidence.py` và `finetuned_reader/dataset.py`. Không giữ lại bất kỳ kỹ thuật nào gây thụt lùi điểm số.
+
+---
+
+## 5. Kế hoạch Hành động Tập trung Tuyệt đối: Hybrid Dense Retrieval (Track C)
+
+Thất bại của Citation-Boost đã chứng minh dứt khoát: **Nút thắt không nằm ở thứ tự Rerank, mà nằm ở nguồn ứng viên vòng 1 (First-Stage Retrieval) do BM25 đơn lẻ bị mù ngữ nghĩa (93% ca thiếu điều luật gốc).**
+
+1. **Nhiệm vụ 1 (Cốt lõi):** Xây dựng chỉ mục Dense Index v2 với `AITeamVN/Vietnamese_Embedding_v2` (`configs/r3_aiteamvn_vietnamese_embedding_v2.yaml`).
+2. **Nhiệm vụ 2:** Chạy Hybrid Retrieval (Convex/RRF Fusion: BM25 + Dense v2) với `top_n: 100` để kéo các điều luật đồng nghĩa / liên quan ngữ nghĩa vào candidate pool.
+3. **Nhiệm vụ 3:** Sau khi candidate pool vòng 1 đã bao phủ được điều luật đúng $\to$ Reranker mới phát huy tối đa sức mạnh để kéo Oracle lên $> 0.60$.
