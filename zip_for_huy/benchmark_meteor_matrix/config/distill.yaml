@@ -1,0 +1,28 @@
+# MBR self-distillation dataset builder config (branch 5).
+# Produces an SFT jsonl {id, question, evidence, target} from train.json.
+data_path: data/train.json        # approved training split
+evidence_path: null
+prompt_template: configs/prompts/sedar_sft_infer_v1.txt
+output_path: benchmark_meteor_matrix/outputs/distill/mbr_self_v1.jsonl
+limit: null
+
+model:
+  model_name: Qwen/Qwen2.5-7B-Instruct
+  device: cuda
+  dtype: auto
+  load_in_4bit: false
+  use_chat_template: true
+  system_prompt: null
+
+sampling:
+  num_candidates: 8
+  include_greedy: true
+  temperature: 0.7
+  top_p: 0.95
+  epsilon_cutoff: 0.02
+  max_new_tokens: 768
+  seed: 0
+
+utility_metric: meteor
+prune: true          # drop hallucinated candidates before MBR
+select_mode: self    # "self" = pure self-distillation (no gold); "oracle" = gold-guided (approved training task)
