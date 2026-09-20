@@ -1,0 +1,49 @@
+# MBR / METEOR-matrix answer-selection benchmark — grounded dev slice.
+# Single GPU (4090 or A100-24GB). Paths are relative to zip_for_huy/.
+run_name: mbr_meteor_matrix_train_dev_v1
+output_dir: benchmark_meteor_matrix/outputs
+
+data:
+  path: processed/train_dev1500.json          # held-out dev slice from train.json (eval gold)
+  evidence_path: processed/train_dev1500_evidence.jsonl  # retrieved legal evidence
+  limit: 50                                   # benchmark first 50 cases (extendable via cache)
+
+prompt_template: configs/prompts/rag_v1.txt
+
+model:
+  model_name: Qwen/Qwen3-8B
+  device: cuda
+  dtype: auto
+  load_in_4bit: false
+  load_in_8bit: true                         # 8-bit quantization
+  use_chat_template: true
+  system_prompt: null
+  chat_template_kwargs:
+    enable_thinking: false                   # Qwen3 no-thinking (fast, deterministic prose)
+
+sampling:
+  num_candidates: 8                          # pool size N (1 greedy + N-1 sampled)
+  include_greedy: true
+  temperature: 0.7
+  top_p: 0.95
+  epsilon_cutoff: 0.02                       # Freitag 2023 epsilon sampling
+  max_new_tokens: 768
+  repetition_penalty: 1.0
+  no_repeat_ngram_size: 0
+  seed: 0
+
+utilities:
+  primary_lexical: meteor                    # matrix used by mbr / mbr_pruned / mbr_weighted
+  enable_ensemble: true                      # blend metrics to fight reward hacking
+  ensemble:
+    - {kind: lexical, metric: meteor, weight: 1.0}
+    - {kind: lexical, metric: rouge_l, weight: 0.5}
+    - {kind: embedding, weight: 1.0}
+  enable_embedding: true                     # mbr_embedding + cbmbr
+  enable_reranker_prior: true                # QE-weighted MBR
+  embedding_model: AITeamVN/Vietnamese_Embedding
+  reranker_model: AITeamVN/Vietnamese_Reranker
+  cbmbr_clusters: 3
+
+generation:
+  cache_path: benchmark_meteor_matrix/outputs/mbr_meteor_matrix_train_dev_v1/candidates.jsonl

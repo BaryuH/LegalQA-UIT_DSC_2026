@@ -109,3 +109,7 @@ cursor-goal/
 # Historical local audit; not part of the implementation contract
 docs/integration-audit.md
 calibration_local/
+
+# Processed datasets and evidence
+processed/
+zip_for_huy/processed/

@@ -43,12 +43,13 @@ def _load_evidence(path: Path | None) -> dict[str, str]:
     if path is None:
         return {}
     evidence: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        row = json.loads(line)
-        evidence[str(row["id"])] = str(row.get("evidence", ""))
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            evidence[str(row["id"])] = str(row.get("evidence", ""))
     return evidence
 
 
@@ -93,7 +94,9 @@ def build_prompt(template: str, case: Case) -> str:
     dangling ``{evidence}`` placeholder.
     """
 
-    evidence = case.evidence or "(không có trích đoạn; trả lời theo hiểu biết pháp lý chung)"
+    evidence = (
+        case.evidence or "(không có trích đoạn; trả lời theo hiểu biết pháp lý chung)"
+    )
     return template.replace("{question}", case.question).replace("{evidence}", evidence)
 
 

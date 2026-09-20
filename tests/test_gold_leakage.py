@@ -318,10 +318,10 @@ def test_retrieval_query_receives_question_only(monkeypatch, tmp_path: Path) -> 
     observed_queries: list[str] = []
 
     def spy_retrieve(
-        index: BM25Index, query: str, *, top_k: int
+        index: BM25Index, query: str, *, top_k: int, **kwargs
     ) -> tuple[RetrievalHit, ...]:
         observed_queries.append(query)
-        return original_retrieve(index, query, top_k=top_k)
+        return original_retrieve(index, query, top_k=top_k, **kwargs)
 
     monkeypatch.setattr(pipeline_module, "retrieve_bm25", spy_retrieve)
     run_bm25_rag(
