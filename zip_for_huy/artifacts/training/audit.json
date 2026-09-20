@@ -1,0 +1,15 @@
+{
+  "schema_version": "sedar-reranker-train-data-v1",
+  "status": "PASS",
+  "source_split": "train",
+  "query_count": 32,
+  "negatives_per_query": 10,
+  "gate_failures": [],
+  "counters": {
+    "queries_seen": 32,
+    "queries_written": 32,
+    "candidates_examined": 352,
+    "accepted_negatives": 320,
+    "positive_pairs": 32
+  }
+}

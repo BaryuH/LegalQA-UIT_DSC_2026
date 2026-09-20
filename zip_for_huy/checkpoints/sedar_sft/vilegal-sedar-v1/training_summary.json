@@ -1,0 +1,446 @@
+{
+  "config_hash": "ad91d2b00a8d7cdeb155cb8c646f34528ed5ba77bfe8b98fc0fc28dfda6353e7",
+  "dataset_dir": "/mnt/G/LegalQA-UIT_DSC_2026/artifacts/sedar_sft/datasets/sedar-sft-v1",
+  "dataset_manifest_hash": "2644a506cd95f96702fdbb3ab9a68c6246693340f58971172107a8cdfeecc77f",
+  "device": "cuda",
+  "dtype": "torch.bfloat16",
+  "example_count": 6595,
+  "final_loss": 0.8248435258865356,
+  "loader": "causal_lm",
+  "loss_history": [
+    {
+      "epoch": 1,
+      "loss": 0.7042881846427917,
+      "optimizer_step": 10
+    },
+    {
+      "epoch": 1,
+      "loss": 0.3067985475063324,
+      "optimizer_step": 20
+    },
+    {
+      "epoch": 1,
+      "loss": 0.5747383832931519,
+      "optimizer_step": 30
+    },
+    {
+      "epoch": 1,
+      "loss": 0.5865687727928162,
+      "optimizer_step": 40
+    },
+    {
+      "epoch": 1,
+      "loss": 0.3604220747947693,
+      "optimizer_step": 50
+    },
+    {
+      "epoch": 1,
+      "loss": 0.8870096206665039,
+      "optimizer_step": 60
+    },
+    {
+      "epoch": 1,
+      "loss": 0.5791762471199036,
+      "optimizer_step": 70
+    },
+    {
+      "epoch": 1,
+      "loss": 0.41817256808280945,
+      "optimizer_step": 80
+    },
+    {
+      "epoch": 1,
+      "loss": 0.4277075529098511,
+      "optimizer_step": 90
+    },
+    {
+      "epoch": 1,
+      "loss": 0.7033756971359253,
+      "optimizer_step": 100
+    },
+    {
+      "epoch": 1,
+      "loss": 1.0305157899856567,
+      "optimizer_step": 110
+    },
+    {
+      "epoch": 1,
+      "loss": 0.7587132453918457,
+      "optimizer_step": 120
+    },
+    {
+      "epoch": 1,
+      "loss": 0.486975759267807,
+      "optimizer_step": 130
+    },
+    {
+      "epoch": 1,
+      "loss": 0.9096209406852722,
+      "optimizer_step": 140
+    },
+    {
+      "epoch": 1,
+      "loss": 0.5830860733985901,
+      "optimizer_step": 150
+    },
+    {
+      "epoch": 1,
+      "loss": 0.4883541166782379,
+      "optimizer_step": 160
+    },
+    {
+      "epoch": 1,
+      "loss": 0.6176725029945374,
+      "optimizer_step": 170
+    },
+    {
+      "epoch": 1,
+      "loss": 0.28346556425094604,
+      "optimizer_step": 180
+    },
+    {
+      "epoch": 1,
+      "loss": 1.2749872207641602,
+      "optimizer_step": 190
+    },
+    {
+      "epoch": 1,
+      "loss": 0.804803729057312,
+      "optimizer_step": 200
+    },
+    {
+      "epoch": 1,
+      "loss": 0.5145936012268066,
+      "optimizer_step": 210
+    },
+    {
+      "epoch": 1,
+      "loss": 0.6918136477470398,
+      "optimizer_step": 220
+    },
+    {
+      "epoch": 1,
+      "loss": 0.41526418924331665,
+      "optimizer_step": 230
+    },
+    {
+      "epoch": 1,
+      "loss": 0.5520529747009277,
+      "optimizer_step": 240
+    },
+    {
+      "epoch": 1,
+      "loss": 0.338524729013443,
+      "optimizer_step": 250
+    },
+    {
+      "epoch": 1,
+      "loss": 0.3761540949344635,
+      "optimizer_step": 260
+    },
+    {
+      "epoch": 1,
+      "loss": 0.6402500867843628,
+      "optimizer_step": 270
+    },
+    {
+      "epoch": 1,
+      "loss": 0.3930842876434326,
+      "optimizer_step": 280
+    },
+    {
+      "epoch": 1,
+      "loss": 1.3385053873062134,
+      "optimizer_step": 290
+    },
+    {
+      "epoch": 1,
+      "loss": 0.8001622557640076,
+      "optimizer_step": 300
+    },
+    {
+      "epoch": 1,
+      "loss": 0.4545610845088959,
+      "optimizer_step": 310
+    },
+    {
+      "epoch": 1,
+      "loss": 0.6688774824142456,
+      "optimizer_step": 320
+    },
+    {
+      "epoch": 1,
+      "loss": 0.40166550874710083,
+      "optimizer_step": 330
+    },
+    {
+      "epoch": 1,
+      "loss": 0.6300926208496094,
+      "optimizer_step": 340
+    },
+    {
+      "epoch": 1,
+      "loss": 0.054983172565698624,
+      "optimizer_step": 350
+    },
+    {
+      "epoch": 1,
+      "loss": 0.254883736371994,
+      "optimizer_step": 360
+    },
+    {
+      "epoch": 1,
+      "loss": 0.4733653962612152,
+      "optimizer_step": 370
+    },
+    {
+      "epoch": 1,
+      "loss": 0.49218419194221497,
+      "optimizer_step": 380
+    },
+    {
+      "epoch": 1,
+      "loss": 0.9382383227348328,
+      "optimizer_step": 390
+    },
+    {
+      "epoch": 1,
+      "loss": 0.40069061517715454,
+      "optimizer_step": 400
+    },
+    {
+      "epoch": 1,
+      "loss": 0.9787750840187073,
+      "optimizer_step": 410
+    },
+    {
+      "epoch": 2,
+      "loss": 0.6263186931610107,
+      "optimizer_step": 420
+    },
+    {
+      "epoch": 2,
+      "loss": 0.9168440699577332,
+      "optimizer_step": 430
+    },
+    {
+      "epoch": 2,
+      "loss": 0.8025373816490173,
+      "optimizer_step": 440
+    },
+    {
+      "epoch": 2,
+      "loss": 0.920452892780304,
+      "optimizer_step": 450
+    },
+    {
+      "epoch": 2,
+      "loss": 1.140991449356079,
+      "optimizer_step": 460
+    },
+    {
+      "epoch": 2,
+      "loss": 0.3154962658882141,
+      "optimizer_step": 470
+    },
+    {
+      "epoch": 2,
+      "loss": 0.7141786813735962,
+      "optimizer_step": 480
+    },
+    {
+      "epoch": 2,
+      "loss": 0.7899600863456726,
+      "optimizer_step": 490
+    },
+    {
+      "epoch": 2,
+      "loss": 0.4152309000492096,
+      "optimizer_step": 500
+    },
+    {
+      "epoch": 2,
+      "loss": 0.432433158159256,
+      "optimizer_step": 510
+    },
+    {
+      "epoch": 2,
+      "loss": 0.07182576507329941,
+      "optimizer_step": 520
+    },
+    {
+      "epoch": 2,
+      "loss": 0.3193439245223999,
+      "optimizer_step": 530
+    },
+    {
+      "epoch": 2,
+      "loss": 0.24762073159217834,
+      "optimizer_step": 540
+    },
+    {
+      "epoch": 2,
+      "loss": 0.47700029611587524,
+      "optimizer_step": 550
+    },
+    {
+      "epoch": 2,
+      "loss": 0.2016008347272873,
+      "optimizer_step": 560
+    },
+    {
+      "epoch": 2,
+      "loss": 0.6636004447937012,
+      "optimizer_step": 570
+    },
+    {
+      "epoch": 2,
+      "loss": 0.47112417221069336,
+      "optimizer_step": 580
+    },
+    {
+      "epoch": 2,
+      "loss": 1.1089688539505005,
+      "optimizer_step": 590
+    },
+    {
+      "epoch": 2,
+      "loss": 0.6068284511566162,
+      "optimizer_step": 600
+    },
+    {
+      "epoch": 2,
+      "loss": 0.293038547039032,
+      "optimizer_step": 610
+    },
+    {
+      "epoch": 2,
+      "loss": 0.7033581137657166,
+      "optimizer_step": 620
+    },
+    {
+      "epoch": 2,
+      "loss": 0.7689369916915894,
+      "optimizer_step": 630
+    },
+    {
+      "epoch": 2,
+      "loss": 0.6565449237823486,
+      "optimizer_step": 640
+    },
+    {
+      "epoch": 2,
+      "loss": 0.39375269412994385,
+      "optimizer_step": 650
+    },
+    {
+      "epoch": 2,
+      "loss": 0.4469068944454193,
+      "optimizer_step": 660
+    },
+    {
+      "epoch": 2,
+      "loss": 0.8649619221687317,
+      "optimizer_step": 670
+    },
+    {
+      "epoch": 2,
+      "loss": 1.1673558950424194,
+      "optimizer_step": 680
+    },
+    {
+      "epoch": 2,
+      "loss": 0.27951571345329285,
+      "optimizer_step": 690
+    },
+    {
+      "epoch": 2,
+      "loss": 0.6279928684234619,
+      "optimizer_step": 700
+    },
+    {
+      "epoch": 2,
+      "loss": 1.228018045425415,
+      "optimizer_step": 710
+    },
+    {
+      "epoch": 2,
+      "loss": 0.5196215510368347,
+      "optimizer_step": 720
+    },
+    {
+      "epoch": 2,
+      "loss": 1.040253758430481,
+      "optimizer_step": 730
+    },
+    {
+      "epoch": 2,
+      "loss": 0.32067930698394775,
+      "optimizer_step": 740
+    },
+    {
+      "epoch": 2,
+      "loss": 0.8555736541748047,
+      "optimizer_step": 750
+    },
+    {
+      "epoch": 2,
+      "loss": 0.5375280380249023,
+      "optimizer_step": 760
+    },
+    {
+      "epoch": 2,
+      "loss": 0.4415743947029114,
+      "optimizer_step": 770
+    },
+    {
+      "epoch": 2,
+      "loss": 0.493541955947876,
+      "optimizer_step": 780
+    },
+    {
+      "epoch": 2,
+      "loss": 0.38737788796424866,
+      "optimizer_step": 790
+    },
+    {
+      "epoch": 2,
+      "loss": 0.796394944190979,
+      "optimizer_step": 800
+    },
+    {
+      "epoch": 2,
+      "loss": 0.28255292773246765,
+      "optimizer_step": 810
+    },
+    {
+      "epoch": 2,
+      "loss": 1.0800238847732544,
+      "optimizer_step": 820
+    },
+    {
+      "epoch": 2,
+      "loss": 0.8248435258865356,
+      "optimizer_step": 826
+    }
+  ],
+  "optimizer_steps": 826,
+  "run_id": "vilegal-sedar-v1",
+  "stack": {
+    "blockers": [],
+    "cuda_available": true,
+    "device": "cuda",
+    "packages": {
+      "accelerate": true,
+      "peft": true,
+      "torch": true,
+      "transformers": true
+    },
+    "platform": "Linux-6.5.0-28-generic-x86_64-with-glibc2.35",
+    "torch_version": "2.6.0+cu124"
+  },
+  "status": "completed",
+  "token_budget_repacked_count": 3,
+  "total_parameters": 1033364480,
+  "trainable_parameters": 17432576
+}

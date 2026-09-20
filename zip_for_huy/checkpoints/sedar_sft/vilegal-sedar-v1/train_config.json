@@ -1,0 +1,155 @@
+{
+  "chunking": {
+    "max_chars": 1200,
+    "min_chars": 100,
+    "overlap_chars": 200,
+    "version": "legal-chunker-v1"
+  },
+  "config_hash": "ad91d2b00a8d7cdeb155cb8c646f34528ed5ba77bfe8b98fc0fc28dfda6353e7",
+  "data": {
+    "data_dir": "data",
+    "question_path": "data/train.json",
+    "selected_contexts_path": "data/selected-contexts.zip",
+    "split": "train",
+    "split_policy": "train_development"
+  },
+  "evaluation": {
+    "enabled": false,
+    "primary_metric": "meteor",
+    "reference_access": "none",
+    "secondary_metric": "rouge_l"
+  },
+  "evidence": {
+    "evidence_top_k": 4,
+    "max_chunks_per_document": 2,
+    "max_total_chars": 4000
+  },
+  "finetuned_reader": {
+    "checkpoint_manifest_path": "checkpoints/sedar_sft/<run_id>/checkpoint_manifest.json",
+    "checkpoint_path": "checkpoints/sedar_sft/<run_id>",
+    "dataset_build": {
+      "bm25_backend": "cuda",
+      "progress_every": 100
+    },
+    "dataset_version": "sedar-sft-v1",
+    "enabled": true,
+    "inference_prompt_path": "configs/prompts/sedar_sft_infer_v1.txt",
+    "lora": {
+      "adapter_type": "qlora",
+      "alpha": 32.0,
+      "bias": "none",
+      "dropout": 0.05,
+      "enabled": true,
+      "r": 16,
+      "target_modules": [
+        "down_proj",
+        "gate_proj",
+        "k_proj",
+        "o_proj",
+        "q_proj",
+        "up_proj",
+        "v_proj"
+      ]
+    },
+    "max_new_tokens": 512,
+    "model": {
+      "base_model": "/mnt/G/sedar-legalqa/models/vilegalqwen3-1.7b-base",
+      "context_length": 4096,
+      "dtype": "bfloat16",
+      "license": null,
+      "load_in_4bit": true,
+      "loader": "auto",
+      "local_files_only": true,
+      "revision": "258c56ed40529cced26fa7fcc3ecc0663e914c18",
+      "tokenizer": "/mnt/G/sedar-legalqa/models/vilegalqwen3-1.7b-base",
+      "trust_remote_code": false
+    },
+    "output": {
+      "checkpoint_root": "checkpoints/sedar_sft",
+      "dataset_root": "artifacts/sedar_sft/datasets"
+    },
+    "overlap_policy": "exclude_and_record",
+    "overlap_remediation_id": "ftr03-train-overlap-exclusion-v1",
+    "required": true,
+    "stop_sequences": [],
+    "train_prompt_path": "configs/prompts/sedar_sft_train_v1.txt",
+    "training": {
+      "epochs": 2,
+      "eval_batch_size": 1,
+      "gradient_accumulation_steps": 16,
+      "gradient_checkpointing": true,
+      "learning_rate": 0.0002,
+      "logging_steps": 10,
+      "max_grad_norm": 1.0,
+      "max_seq_length": 4096,
+      "packing": false,
+      "seed": 42,
+      "train_batch_size": 1,
+      "warmup_ratio": 0.03,
+      "weight_decay": 0.0
+    },
+    "type": "generative_sft_reader"
+  },
+  "generation": {
+    "api_key_env": "<redacted>",
+    "backoff_seconds": 0.5,
+    "base_url": null,
+    "max_completion_length": null,
+    "max_output_chars": 1200,
+    "model": "sedar_sft_backend",
+    "provider": "mock",
+    "retries": 0,
+    "temperature": 0.0,
+    "timeout_seconds": 30.0
+  },
+  "project": {
+    "name": "legal-rag",
+    "profile": "sedar_sft",
+    "python_version": "3.11"
+  },
+  "prompts": {
+    "direct_version": "direct-v1",
+    "rag_version": "rag-v1"
+  },
+  "reader": null,
+  "reranker": {
+    "batch_size": 8,
+    "device": "cuda",
+    "enabled": true,
+    "max_length": 512,
+    "model": "BAAI/bge-m3",
+    "model_revision": null,
+    "provider": "sentence_transformers",
+    "required": false
+  },
+  "retrieval": {
+    "b": 0.75,
+    "bm25_backend": "auto",
+    "k1": 1.5,
+    "rough_top_n": 12,
+    "strategy": "bm25_rerank"
+  },
+  "runtime": {
+    "artifacts_dir": "artifacts",
+    "cache_dir": "cache",
+    "fail_fast": true,
+    "outputs_dir": "outputs",
+    "seed": 42
+  },
+  "submission": {
+    "answer_field": "answer",
+    "deterministic_order": "dataset",
+    "enabled": false,
+    "encoding": "utf-8",
+    "ensure_ascii": false,
+    "forbid_extra_fields": true,
+    "format": "object_by_question_id",
+    "inner_filename": "submission.json",
+    "output_filename": "submission.zip",
+    "reject_duplicate_ids": true,
+    "reject_empty_answers": false,
+    "reject_extra_ids": true,
+    "reject_non_string_answers": true,
+    "require_full_coverage": true
+  }
+}

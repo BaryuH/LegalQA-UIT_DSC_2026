@@ -1,0 +1,48 @@
+{
+  "schema_version": "legalqa.parameter_manifest.v1",
+  "parameter_cap": 4000000000,
+  "counting_policy": "Count full model parameters; LoRA, quantization, GPTQ, AWQ and GGUF do not reduce the competition parameter count.",
+  "profiles": {
+    "cross_encoder_primary": {
+      "status": "verified_under_cap",
+      "components": [
+        {
+          "name": "vilegal-sedar-v1 base reader",
+          "kind": "causal_lm",
+          "parameters": 1720000000,
+          "count_status": "model_card_reported"
+        },
+        {
+          "name": "AITeamVN/Vietnamese_Embedding",
+          "kind": "embedding_model",
+          "parameters": 567754752,
+          "count_status": "exact_loaded_count",
+          "revision": "dea33aa1ab339f38d66ae0a40e6c40e0a9249568"
+        },
+        {
+          "name": "AITeamVN/Vietnamese_Reranker",
+          "kind": "cross_encoder_reranker",
+          "parameters": 567755777,
+          "count_status": "exact_loaded_count",
+          "revision": "f536976248403314225d7fdfdbc87f0e9516a54e"
+        }
+      ],
+      "retrieval_components": ["BM25 optional candidate leg", "AITeamVN/Vietnamese_Embedding", "AITeamVN/Vietnamese_Reranker"],
+      "neural_parameter_total_estimate": 2855510529,
+      "passes_cap_on_estimate": true,
+      "note": "Embedding and reranker exact parameter counts and immutable commit revisions verified from staged models on GPU server."
+    }
+  },
+  "included_sensitive_data": [
+    "data/train.json",
+    "data/warmup.json",
+    "data/public-official.json",
+    "data/private-official.json",
+    "data/selected-contexts.zip"
+  ],
+  "excluded_from_bundle": [
+    "retrieval indexes",
+    "external base-model weights",
+    "external AITeamVN model weights"
+  ]
+}

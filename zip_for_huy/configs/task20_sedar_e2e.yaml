@@ -1,0 +1,91 @@
+# TASK 20 — SEDAR retrieval + SEDAR-SFT reader
+#
+# STATUS: declarative record. No Python reads this file. `run_sedar_e2e.py` takes
+# every value below as a CLI flag, and its argparse defaults are deliberately the
+# HISTORICAL control (4 / 4000 / 2, cap 512, dedup off, no document name), not the
+# champion. Champion runs therefore MUST pass the flags in `champion.cli` below;
+# running the script without flags reproduces the pre-champion baseline.
+# Do not change the argparse defaults to "fix" this — they are the control arm for
+# every paired ablation on record (see PassageEvidenceConfig docstring).
+version: sedar-retrieval-v3
+task: TASK20
+
+reader:
+  checkpoint_dir: checkpoints/sedar_sft/vilegal-sedar-v1
+  checkpoint_manifest: checkpoints/sedar_sft/vilegal-sedar-v1/checkpoint_manifest.json
+  adapter_sha256: 6e3e294884fcac786a86df0c4a242d322a340547e71671262287e9894d3f2e63
+  inference_prompt_path: configs/prompts/sedar_sft_infer_v1.txt
+  train_prompt_path: configs/prompts/sedar_sft_train_v1.txt
+  prompt_version: sedar-sft-v1
+  device: cuda
+  load_in_4bit: null
+
+data:
+  questions_path: data/warmup.json
+  manifest_path: artifacts/sedar_sft/validation/clean_warmup_manifest.json
+  split: warmup
+
+# DEPLOYED champion, transcribed from the run that produced the scored
+# predictions: outputs/task20_pack_ablation/packwide_docname_cap768/config.json,
+# whose `config_hash` equals the `inference_config_hash` in
+# eval/task20_pack_ablation/val01_packwide_docname_cap768/metrics.json
+# (3da06469...). clean-460: METEOR 0.5458 / ROUGE-L 0.5640.
+#
+# CORRECTED 2026-09-07. This block previously said
+# `dedup_article_mode: article`, copied from the champion line in
+# memory-bank/activeContext.md. The deployed run has it **off**. The run
+# artifact wins over the note: its hash is what scored.
+champion:
+  evidence:
+    evidence_top_k: 6
+    max_total_chars: 6000
+    max_chunks_per_document: 3
+    dedup_article_mode: "off"
+    include_document_name: true
+    body_source: raw_text
+    candidate_window: 6      # == evidence_top_k, so backfill_enabled is false
+  retrieval:
+    variant: qwen_warmup_top500
+    # Not LTR. The 2026-09-04 decision dropped RRF 1.0/1.0 and ranked with
+    # Qwen alone; the deployed e2e run followed that, not the LambdaRank path
+    # still named in the TASK 21 champion description.
+    path: >-
+      /mnt/G/sedar-legalqa/artifacts/sedar_retrieval/runs/
+      continue_parser_blankline_20260903_120640/qwen_warmup_top500.jsonl
+    passages: >-
+      /mnt/G/sedar-legalqa/artifacts/sedar_retrieval/views/
+      parser_blankline_20260901/passages_r2a.jsonl
+  generation:
+    max_new_tokens: 768
+    # REJECTED, do not retry: no_repeat_ngram_size / repetition_penalty
+    # (-0.127 METEOR, citation drift). RETRIEVAL_FIX_PLAN.md §11.4.
+  cli: >-
+    --evidence-top-k 6 --max-total-chars 6000 --max-chunks-per-document 3
+    --include-document-name --max-new-tokens 768
+
+# Superseded baseline, kept because every paired CI on record is measured
+# against it. clean-460: METEOR 0.5010 / ROUGE-L 0.5563.
+control_pre_champion:
+  evidence:
+    evidence_top_k: 4
+    max_total_chars: 4000
+    max_chunks_per_document: 2
+    dedup_article_mode: "off"
+    include_document_name: false
+  generation:
+    max_new_tokens: 512
+
+# Kept for schema compatibility with older run records that read a flat
+# `evidence:` block. Mirrors `champion.evidence`; the CLI is authoritative.
+evidence:
+  evidence_top_k: 6
+  max_total_chars: 6000
+  max_chunks_per_document: 3
+
+variants:
+  dense_zero_shot:
+    retrieval_path: artifacts/sedar_retrieval/eval/dense_r2a_warmup500.jsonl
+  rrf_dense:
+    retrieval_path: artifacts/sedar_retrieval/eval/rrf_r2a_dense_warmup500.jsonl
+  ltr_full_all:
+    retrieval_path: artifacts/sedar_retrieval/eval/ltr_warmup500.jsonl

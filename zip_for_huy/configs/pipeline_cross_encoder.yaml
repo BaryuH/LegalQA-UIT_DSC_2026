@@ -1,0 +1,31 @@
+version: legalqa-cross-encoder-v1
+status: selected_candidate
+
+reader:
+  checkpoint: checkpoints/sedar_sft/vilegal-sedar-v1
+  base_model: ntphuc149/ViLegalQwen3-1.7B-Base
+  parameters: 1720000000
+  max_new_tokens: 768
+
+retrieval:
+  bm25:
+    enabled: true
+  dense:
+    enabled: true
+    model: AITeamVN/Vietnamese_Embedding
+    parameters: 600000000
+    revision: PIN_EXACT_REVISION_ON_SERVER
+  candidate_top_k: 100
+
+reranker:
+  enabled: true
+  model: AITeamVN/Vietnamese_Reranker
+  parameters: 600000000
+  revision: PIN_EXACT_REVISION_ON_SERVER
+  max_query_tokens: 256
+  max_passage_tokens: 2048
+
+parameter_budget:
+  cap: 4000000000
+  estimated_neural_total: 2920000000
+  quantization_changes_parameter_count: false

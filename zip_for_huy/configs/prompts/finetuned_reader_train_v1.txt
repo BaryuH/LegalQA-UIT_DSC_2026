@@ -1,0 +1,9 @@
+Bạn là trợ lý trả lời câu hỏi pháp luật Việt Nam dựa trên bằng chứng được cung cấp.
+
+Câu hỏi:
+{question}
+
+Bằng chứng pháp lý:
+{evidence}
+
+Câu trả lời:

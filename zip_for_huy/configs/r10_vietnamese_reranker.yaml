@@ -1,0 +1,140 @@
+# SEDAR Retrieval — R10: cross-encoder reranking with AITeamVN/Vietnamese_Reranker.
+#
+# Decision record and runbook: docs/sedar_retrieval/TASK24_VIETNAMESE_RERANKER.md
+# Evidence survey: docs/sedar_retrieval/INDEX_METHOD_EVIDENCE.md §2
+#
+# Why this model is chosen over the alternatives, in one place:
+#   - bge-reranker-v2-m3      MMARCO-VI NDCG@3 0.6087 / NDCG@10 0.6872
+#   - namdp-ptit/ViRanker     NDCG@3 0.6815 / NDCG@10 0.7302, passage cap 1024
+#   - itdainb/PhoRanker       NDCG@3 0.6625 / NDCG@10 0.7422, total cap 256
+#   - AITeamVN/Vietnamese_Reranker  passage cap 2048, and the only shortlisted
+#     model with a published Vietnamese *legal* number: Legal Zalo 2021
+#     Acc@1 0.7944 / MRR@10 0.8672 against its own retriever's 0.7274 / 0.8181.
+# PhoRanker's 256-token total window would truncate the majority of corpus v4
+# units (median 932 chars, p90 2,210), which is what rules it out despite the
+# strongest NDCG@10.
+
+version: sedar-retrieval-v3
+stage: R10
+status: deploy_ready_gpu_required
+depends_on:
+  - R0
+  - R8
+  - R9
+
+model:
+  name: AITeamVN/Vietnamese_Reranker
+  base_model: BAAI/bge-reranker-v2-m3
+  parameters: 0.6B
+  license: apache-2.0
+  # Pin this on the server after the first `huggingface-cli download`, and stage
+  # the snapshot locally. A revision passed alongside a local directory sends the
+  # loader back through hub resolution, which is how the Qwen snapshot blocked
+  # the dense rebuild.
+  revision: f536976248403314225d7fdfdbc87f0e9516a54e
+  local_snapshot: models/vietnamese_reranker
+  local_files_only: true
+
+runtime:
+  device: cuda
+  dtype: float16
+  batch_size: 16
+  # The model card's own budget: 256 + 2048 = 2304. The repo's generic
+  # cross-encoder default of 512 would truncate most units.
+  max_query_tokens: 256
+  max_passage_tokens: 2048
+  max_length: 2304
+  # Raw logits, not sigmoid. sentence-transformers applies a sigmoid to a
+  # single-label head, which saturates (0.000 / 0.997) and makes the whole
+  # top-100 tail tie exactly — a saturated score cannot carry a threshold, and
+  # the threshold is the point of this stage.
+  score_mode: raw_logit
+
+rerank:
+  # Candidate depth. The DRiLL@VLSP 2025 systems reranked 100; our own
+  # article@100 is 0.9562 against article@500 0.9745, so 100 keeps 98% of the
+  # reachable recall at a fifth of the cost. Ablate 200 once 100 is measured.
+  top_k: 100
+  # reader_text already opens with the article heading and carries no index-only
+  # decoration. breadcrumb_reader_text is an ablation arm: the 2,048-token
+  # passage budget can afford the hierarchy path, but adding it changes the
+  # evidence distribution the frozen reader was tuned on.
+  text_field: reader_text
+  # Corpus v4 indexes a long Điều through merged clause children and keeps the
+  # article as the scoring unit, so a child hit must score as its parent before
+  # any cutoff. max, not sum: summing rewards an article for having been split.
+  merge_children: true
+  aggregate: max
+
+cutoff:
+  # The largest measured effect in the DRiLL evidence is not a model: replacing
+  # a fixed top-k cut with a variable-size answer set moved F2 0.3636 -> 0.6714
+  # (+0.308); the LLM stage added 0.055 on top. Our gold answers cite 1.65
+  # distinct Điều on average with 38% citing two or more, so the right pack size
+  # varies per query.
+  #
+  # score_threshold stays null until it is calibrated on clean-460: run
+  # run_vietnamese_reranker.py once without it, read top_score_percentiles out
+  # of the report, then set it. A threshold copied from another corpus does not
+  # transfer, and null reproduces fixed-k behaviour exactly so nothing changes
+  # silently.
+  score_threshold: null
+  relative_margin: null
+  min_keep: 1
+  max_keep: 8
+  # Champion pack budget, carried over: 6 / 6000 / 3.
+  max_total_chars: 6000
+  max_per_document: 3
+  # Enforcement articles are 6.7% of articles but 21.4% of article characters.
+  # corpus v4 marks them packable=false: ranked for recall, never consuming
+  # pack budget.
+  respect_packable: true
+
+finetune:
+  # Published values from the DRiLL@VLSP 2025 top-3 system, which fine-tuned the
+  # same base architecture on ~60k Vietnamese legal articles and attributes
+  # +0.050 F2 to this step alone.
+  epochs: 2
+  batch_size: 16
+  learning_rate: 2.0e-5
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  loss: BCEWithLogits
+  dev_fraction: 0.1
+  split_unit: query_id
+  seed: 42
+
+  negatives:
+    # NOT hard negatives. On a 261k-document Vietnamese legal corpus, hard
+    # negatives at n=2 took reranker MRR@10 from 0.5584 to 0.2689 — halved —
+    # because 50.87% of them sat at cosine >= 0.9 with the positive, i.e. they
+    # were false negatives. Semi-hard at n=10 reached 0.7911.
+    policy: semi_hard
+    count: 10
+    false_negative_above: 0.75
+    easy_below: 0.15
+    max_rank: 200
+    min_band_share: 0.20
+    exclude_containment: true
+
+evaluation:
+  scope: clean_manifest
+  labels_role: evaluation_only
+  primary_metric: article_at_4
+  secondary_metrics: [article_at_10, mrr_at_10, meteor, rouge_l]
+  baseline:
+    # Frozen champion, clean-460, level-aware.
+    fusion: weighted_rrf
+    article_at_4: 0.7920
+    article_at_10: 0.8832
+    mrr_at_10: 0.6645
+    meteor: 0.5501
+    rouge_l: 0.5614
+  gates: configs/retrieval/gates.yaml
+  require_paired_bootstrap: true
+  notes: >
+    Measure the zero-shot checkpoint before fine-tuning, and measure the reranker
+    with score_threshold null before enabling the cutoff. Three changes at once
+    (new model, new cutoff, fine-tuned weights) cannot be attributed, and this
+    project has already been wrong three times by prioritising on frequency
+    rather than on measured effect.

@@ -1,0 +1,52 @@
+{
+  "adapter_hash": "6e3e294884fcac786a86df0c4a242d322a340547e71671262287e9894d3f2e63",
+  "adapter_path": "adapter",
+  "adapter_type": "qlora",
+  "attention_backend": "sdpa",
+  "base_model": "/mnt/G/sedar-legalqa/models/vilegalqwen3-1.7b-base",
+  "base_revision": "258c56ed40529cced26fa7fcc3ecc0663e914c18",
+  "best_checkpoint_criterion": "train_loss",
+  "compute_dtype": "bfloat16",
+  "cuda_driver_metadata": {
+    "bf16_supported": true,
+    "compute_capability": [
+      8,
+      9
+    ],
+    "cuda_version": "12.4",
+    "gpu_name": "NVIDIA GeForce RTX 4090",
+    "torch_version": "2.6.0+cu124"
+  },
+  "dataset_manifest_hash": "2644a506cd95f96702fdbb3ab9a68c6246693340f58971172107a8cdfeecc77f",
+  "dtype": "bfloat16",
+  "index_fingerprint": "c5f8ce49fb32686f1b3529f69bf22adf98904cf0a352e8d71b5829146e4baf5f",
+  "loader": "causal_lm",
+  "method": "sedar_sft",
+  "profile": "finetuned_reader",
+  "prompt_hash": "2f8a4597a82ecc77bd9eaba6c1adaa8ddab8bebb4fb8367012dc19b80644ec2e",
+  "quantization": {
+    "compute_dtype": "bfloat16",
+    "double_quant": true,
+    "load_in_4bit": true,
+    "quant_type": "nf4"
+  },
+  "retrieval_config_hash": "dfc61a0e88ac9fd4fcd0855089b75302ceaa41c27387a97aabca97d633ee8c68",
+  "seed": 42,
+  "target_modules": [
+    "down_proj",
+    "gate_proj",
+    "k_proj",
+    "o_proj",
+    "q_proj",
+    "up_proj",
+    "v_proj"
+  ],
+  "token_budget_repacked_count": 3,
+  "tokenizer": "/mnt/G/sedar-legalqa/models/vilegalqwen3-1.7b-base",
+  "tokenizer_path": "tokenizer",
+  "training_environment_profile": "linux_rtx4090_single_gpu",
+  "training_max_seq_length": 4096,
+  "training_resource_profile_hash": "87d2cffd315357bc6fa51725a1933100932d10ef01086649161569ddf5fd0ef0",
+  "trust_remote_code": false,
+  "type": "generative_sft_reader"
+}
