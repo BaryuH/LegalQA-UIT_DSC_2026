@@ -108,6 +108,12 @@ def parse_args() -> argparse.Namespace:
         help="Semantic reranker: 'aiteamvn' uses AITeamVN/Vietnamese_Reranker.",
     )
     parser.add_argument(
+        "--max-length",
+        type=int,
+        default=2304,
+        help="Max sequence length for CrossEncoder (default: 2304 = 256 query + 2048 passage).",
+    )
+    parser.add_argument(
         "--citation-boost",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -201,11 +207,15 @@ def main() -> int:
     if args.reranker == "aiteamvn":
         from sentence_transformers import CrossEncoder
 
-        print(f"[build_evidence] Loading AITeamVN/Vietnamese_Reranker on {device}...")
-        cross_encoder = CrossEncoder(
-            "AITeamVN/Vietnamese_Reranker", device=device, max_length=1024
+        print(
+            f"[build_evidence] Loading AITeamVN/Vietnamese_Reranker on {device} "
+            f"(max_length={args.max_length})..."
         )
-
+        cross_encoder = CrossEncoder(
+            "AITeamVN/Vietnamese_Reranker",
+            device=device,
+            max_length=args.max_length,
+        )
     reranker = None
     if (
         args.reranker == "none"
