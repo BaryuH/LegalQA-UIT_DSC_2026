@@ -93,7 +93,7 @@ def parse_args() -> argparse.Namespace:
         "--top-k",
         type=int,
         default=None,
-        help="Retrieval rough top_n override (default from config or 30).",
+        help="Retrieval rough top_n override (default: 125 candidates when reranker is active).",
     )
     parser.add_argument(
         "--evidence-top-k",
@@ -189,8 +189,8 @@ def main() -> int:
     documents = prep.documents
     index = prep.index
 
-    # Default rough_top_n: if reranker is used, pull 30 candidates for reranking
-    default_rough = 30 if args.reranker == "aiteamvn" else cfg.retrieval.rough_top_n
+    # Default rough_top_n: if reranker is used, pull 125 candidates for reranking
+    default_rough = 125 if args.reranker == "aiteamvn" else cfg.retrieval.rough_top_n
     rough_top_n = args.top_k or default_rough
     evidence_top_k = args.evidence_top_k or cfg.evidence.evidence_top_k
 

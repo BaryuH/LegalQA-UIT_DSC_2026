@@ -12,10 +12,10 @@ retrieval:
     enabled: true
   dense:
     enabled: true
-    model: AITeamVN/Vietnamese_Embedding
+    model: AITeamVN/Vietnamese_Embedding_v2
     parameters: 600000000
-    revision: PIN_EXACT_REVISION_ON_SERVER
-  candidate_top_k: 100
+    revision: 18b44161e041bf1d3a333ab5144b5b7b93f914d2
+  candidate_top_k: 125
 
 reranker:
   enabled: true
