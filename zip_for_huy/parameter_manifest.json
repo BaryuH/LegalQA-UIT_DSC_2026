@@ -31,6 +31,35 @@
       "neural_parameter_total_estimate": 2855510529,
       "passes_cap_on_estimate": true,
       "note": "Embedding and reranker exact parameter counts and immutable commit revisions verified from staged models on GPU server."
+    },
+    "qwen35_2b_thinking_v2": {
+      "status": "verified_under_cap",
+      "components": [
+        {
+          "name": "alphaedge-ai/Qwen3.5-2B-vie-32768",
+          "kind": "causal_lm",
+          "parameters": 1771791168,
+          "count_status": "safetensors_verified"
+        },
+        {
+          "name": "AITeamVN/Vietnamese_Embedding_v2",
+          "kind": "embedding_model",
+          "parameters": 567754752,
+          "count_status": "safetensors_verified",
+          "revision": "18b44161e041bf1d3a333ab5144b5b7b93f914d2"
+        },
+        {
+          "name": "AITeamVN/Vietnamese_Reranker",
+          "kind": "cross_encoder_reranker",
+          "parameters": 567755777,
+          "count_status": "exact_loaded_count",
+          "revision": "f536976248403314225d7fdfdbc87f0e9516a54e"
+        }
+      ],
+      "retrieval_components": ["BM25 optional candidate leg", "AITeamVN/Vietnamese_Embedding_v2", "AITeamVN/Vietnamese_Reranker"],
+      "neural_parameter_total_estimate": 2907301697,
+      "passes_cap_on_estimate": true,
+      "note": "Exact safetensors counts verified from Hugging Face API: 1.77B gen + 0.57B emb + 0.57B reranker = 2.91B <= 4.0B cap."
     }
   },
   "included_sensitive_data": [

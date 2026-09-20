@@ -72,6 +72,7 @@
 **Thời điểm:** 2026-09-20  
 **Cấu hình:** `benchmark_meteor_matrix/config/train_dev200.yaml`  
 - Model: `Qwen/Qwen3-8B` (unquantized `bfloat16`, SDPA attention).  
+  *(Ghi chú hợp lệ cuộc thi: Qwen3-8B là **probe chẩn đoán vượt cap** ~9.1B > 4B để cô lập phương pháp và trần retrieval; cấu hình dự thi chính thức tuân thủ cap ≤4B là `qwen35_2b_thinking_v2` với 2.91B tham số, xem `parameter_manifest.json`)*.
 - Tốc độ: Batched generation (4 câu/forward), ~20.3s/câu (gồm cả 4 candidates dài 1500-2500 ký tự). Toàn bộ 200 câu hoàn thành trong ~65 phút.  
 - Ứng viên: $N = 4$ (1 greedy + 3 sampled, $T=0.7, \text{top\_p}=0.95, \epsilon=0.02$).  
 - Prompt: `configs/prompts/rag_detailed_v1.txt`.  

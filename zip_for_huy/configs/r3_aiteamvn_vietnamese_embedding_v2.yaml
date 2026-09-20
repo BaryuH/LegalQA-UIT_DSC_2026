@@ -1,0 +1,33 @@
+# Replacement-candidate dense retriever under the 4B pipeline parameter cap: Vietnamese_Embedding_v2.
+#
+# Model: AITeamVN/Vietnamese_Embedding_v2 (~0.57B, BGE-M3 base fine-tune).
+# Sha verified from Hugging Face API: 18b44161e041bf1d3a333ab5144b5b7b93f914d2
+# Total neural pipeline with alphaedge-ai/Qwen3.5-2B-vie-32768 (~1.77B) + Reranker (~0.57B) = ~2.91B <= 4.0B cap.
+version: sedar-retrieval-v3
+stage: R3
+status: benchmark_only
+model_card: https://huggingface.co/AITeamVN/Vietnamese_Embedding_v2
+
+dense:
+  enabled: true
+  model: AITeamVN/Vietnamese_Embedding_v2
+  model_revision: 18b44161e041bf1d3a333ab5144b5b7b93f914d2
+  source_name: vn_embedding_v2
+  input_format: plain          # BGE-M3 encodes raw text; no query/passage prefix
+  max_seq_length: 2048         # model-card recommendation; aligns with reranker
+  embedding_dim: 1024          # BGE-M3 dense dimension
+  dtype: bf16
+  normalize: true
+  top_n: 150
+
+fusion:
+  method: rrf
+  rrf_k: 60
+  union_cap: 250
+
+comparison:
+  baseline_model: AITeamVN/Vietnamese_Embedding
+  same_corpus: true
+  same_bm25: true
+  same_reader_checkpoint: true
+  same_evidence_budget: true
