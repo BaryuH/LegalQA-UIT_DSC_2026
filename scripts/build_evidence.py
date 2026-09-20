@@ -125,6 +125,29 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="Weight multiplier for citation match bonus (default: 1.0).",
     )
+    parser.add_argument(
+        "--dense-index",
+        type=Path,
+        default=None,
+        help="Optional path to directory containing index.faiss and passage_metadata.jsonl for hybrid retrieval.",
+    )
+    parser.add_argument(
+        "--dense-model",
+        default="AITeamVN/Vietnamese_Embedding_v2",
+        help="Dense embedding model ID (default: AITeamVN/Vietnamese_Embedding_v2).",
+    )
+    parser.add_argument(
+        "--bm25-weight",
+        type=float,
+        default=0.25,
+        help="BM25 weight in RRF fusion (default: 0.25, champion weighting).",
+    )
+    parser.add_argument(
+        "--dense-weight",
+        type=float,
+        default=1.0,
+        help="Dense weight in RRF fusion (default: 1.0, champion weighting).",
+    )
     return parser.parse_args()
 
 
@@ -246,6 +269,41 @@ def main() -> int:
             print(f"[build_evidence] CUDA query cache fallback to CPU: {e}")
             use_cuda = False
 
+    dense_hits_by_qid = None
+    if args.dense_index is not None:
+        from legal_rag.sedar_retrieval.retrieval.dense import (
+            SentenceTransformerEncoder,
+            load_dense_index,
+            normalize_embedding_matrix,
+            search_dense_index,
+        )
+
+        dense_dir = args.dense_index.resolve()
+        print(f"[build_evidence] Loading dense FAISS index from {dense_dir}...")
+        loaded_dense = load_dense_index(dense_dir)
+        print(f"[build_evidence] Loading dense encoder {args.dense_model} on {device}...")
+        dtype_dense = (
+            "bf16"
+            if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+            else "fp16"
+        )
+        dense_encoder = SentenceTransformerEncoder(
+            args.dense_model, device=device, dtype=dtype_dense
+        )
+        print(f"[build_evidence] Encoding {len(query_pairs)} queries for dense retrieval...")
+        query_texts = [text for _, text in query_pairs]
+        q_vectors = dense_encoder.encode(query_texts, batch_size=32)
+        q_vectors = normalize_embedding_matrix(q_vectors)
+        dense_results = search_dense_index(
+            loaded_dense.index, loaded_dense.passage_ids, q_vectors, top_k=rough_top_n
+        )
+        dense_hits_by_qid = {
+            qid: hits for (qid, _), hits in zip(query_pairs, dense_results)
+        }
+        print(
+            f"[build_evidence] Dense retrieval complete! Will fuse BM25 + Dense v2 via RRF "
+            f"(bm25={args.bm25_weight}, dense={args.dense_weight})."
+        )
     try:
         from tqdm import tqdm
 
@@ -270,6 +328,46 @@ def main() -> int:
                 )
             else:
                 raw_hits = retrieve_bm25(index, question_text, top_k=rough_top_n)
+
+            if dense_hits_by_qid is not None and qid in dense_hits_by_qid:
+                d_hits = dense_hits_by_qid[qid]
+                fused_scores: dict[str, float] = {}
+                for hit in raw_hits:
+                    fused_scores[hit.chunk_id] = fused_scores.get(
+                        hit.chunk_id, 0.0
+                    ) + args.bm25_weight / (60.0 + hit.rank)
+                for d_hit in d_hits:
+                    fused_scores[d_hit.passage_id] = fused_scores.get(
+                        d_hit.passage_id, 0.0
+                    ) + args.dense_weight / (60.0 + d_hit.rank)
+                sorted_fused = sorted(
+                    fused_scores.items(), key=lambda it: (-it[1], it[0])
+                )[:rough_top_n]
+                bm25_hit_map = {h.chunk_id: h for h in raw_hits}
+                fused_hits: list[RetrievalHit] = []
+                for rank, (cid, fused_score) in enumerate(sorted_fused, start=1):
+                    if cid in bm25_hit_map:
+                        fused_hits.append(
+                            bm25_hit_map[cid].model_copy(
+                                update={"rank": rank, "bm25_score": float(fused_score)}
+                            )
+                        )
+                    elif cid in chunks:
+                        chunk = chunks[cid]
+                        fused_hits.append(
+                            RetrievalHit(
+                                chunk_id=cid,
+                                document_id=chunk.document_id,
+                                source_path=chunk.source_path,
+                                source_member=chunk.source_member,
+                                section_label=chunk.section_label,
+                                start_offset=chunk.start_offset,
+                                end_offset=chunk.end_offset,
+                                rank=rank,
+                                bm25_score=float(fused_score),
+                            )
+                        )
+                raw_hits = tuple(fused_hits)
             if not raw_hits:
                 row = {"id": qid, "evidence": "(không có trích đoạn phù hợp)"}
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
