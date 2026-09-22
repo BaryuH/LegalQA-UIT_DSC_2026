@@ -18,9 +18,10 @@ from benchmark_meteor_matrix.benchmark.generation import (  # noqa: E402
 from benchmark_meteor_matrix.benchmark.manifest import build_manifest  # noqa: E402
 from benchmark_meteor_matrix.benchmark.metrics import meteor_exact  # noqa: E402
 from benchmark_meteor_matrix.benchmark.selection import (  # noqa: E402
-    mbr,
-    mbr_pruned,
-    mbr_weighted,
+    baseline_first,
+    baseline_longest,
+    baseline_random,
+    longest_grounded,
 )
 
 
@@ -56,55 +57,27 @@ def test_candidate_cache_roundtrip(tmp_path: Path) -> None:
     assert loaded[1].greedy_index is None
 
 
-def test_mbr_selection_consensus() -> None:
-    # 3 candidates:
-    # 0 and 1 are almost identical (high pairwise scores)
-    # 2 is an outlier (low score with both 0 and 1)
-    matrix = np.array(
-        [
-            [0.0, 0.9, 0.1],
-            [0.9, 0.0, 0.1],
-            [0.1, 0.1, 0.0],
-        ]
-    )
-    # Column sums/means: col 0: 1.0, col 1: 1.0, col 2: 0.2
-    # Candidate 0 or 1 should win, definitely not candidate 2
-    sel = mbr(matrix)
-    assert sel.strategy == "mbr"
-    assert sel.index in (0, 1)
+def test_baseline_selectors() -> None:
+    candidates = ("Ngắn", "Đây là câu trả lời dài hơn rất nhiều", "Vừa phải")
+    sel_first = baseline_first(candidates)
+    assert sel_first.strategy == "first"
+    assert sel_first.index == 0
+
+    sel_longest = baseline_longest(candidates)
+    assert sel_longest.strategy == "longest"
+    assert sel_longest.index == 1
+
+    sel_random = baseline_random(candidates, seed=42)
+    assert sel_random.strategy == "random"
+    assert 0 <= sel_random.index < len(candidates)
 
 
-def test_mbr_pruned_filtering() -> None:
-    matrix = np.array(
-        [
-            [0.0, 0.8, 0.2],
-            [0.8, 0.0, 0.3],
-            [0.2, 0.3, 0.0],
-        ]
-    )
-    # Candidate 0 is hallucinated/unsupported -> pruned
-    keep = np.array([False, True, True])
-    sel = mbr_pruned(matrix, keep)
-    assert sel.strategy == "mbr_pruned"
-    assert sel.index == 1  # candidate 1 must be chosen
-
-
-def test_mbr_weighted_with_prior() -> None:
-    # 3 candidates:
-    # Candidate 0 has high prior (quality reference)
-    # Candidate 2 is very similar to candidate 0
-    # Candidate 1 is dissimilar to candidate 0
-    matrix = np.array(
-        [
-            [0.0, 0.1, 0.9],
-            [0.1, 0.0, 0.2],
-            [0.9, 0.2, 0.0],
-        ]
-    )
-    prior = np.array([1.0, 0.1, 0.1])
-    sel = mbr_weighted(matrix, prior)
-    assert sel.strategy == "mbr_weighted"
-    assert sel.index == 2
+def test_longest_grounded_selector() -> None:
+    candidates = ("Trả lời A", "Trả lời B dài hơn", "Trả lời C dài nhất quả đất")
+    keep_mask = [True, True, False]  # Candidate C rejected by gate
+    sel = longest_grounded(candidates, keep_mask)
+    assert sel.strategy == "longest_grounded"
+    assert sel.index == 1  # Candidate B is longest among kept candidates
 
 
 def test_manifest_includes_8bit() -> None:

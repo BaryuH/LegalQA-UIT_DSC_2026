@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Any
 
 from legal_rag.questions import load_inference_questions
+from legal_rag.sedar_retrieval.query.citation_parser import parse_citations
 from legal_rag.sedar_retrieval.ranking.vietnamese_reranker import load_rerank_units
 
 import math
@@ -100,6 +101,23 @@ def _cosine_similarity(vec_a: dict[str, float], vec_b: dict[str, float]) -> floa
     if len(vec_a) > len(vec_b):
         vec_a, vec_b = vec_b, vec_a
     return sum(val * vec_b.get(k, 0.0) for k, val in vec_a.items())
+
+
+def _unit_matches_article(unit: Any, cited_articles: set[str]) -> bool:
+    if not cited_articles:
+        return False
+    unit_id_lower = unit.unit_id.lower()
+    u_norm = _normalize_text(unit.reader_text)
+    for art in cited_articles:
+        art_str = str(art).strip().lower()
+        if not art_str:
+            continue
+        if f"::art::{art_str}" in unit_id_lower or f"_art_{art_str}" in unit_id_lower or f"::{art_str}" in unit_id_lower:
+            return True
+        if f"điều {art_str}." in u_norm or f"điều {art_str} " in u_norm or u_norm.startswith(f"điều {art_str}"):
+            return True
+    return False
+
 
 
 def _require_file(path: Path, flag: str) -> Path:
@@ -506,6 +524,16 @@ def main() -> int:
 
     # Compute exact TF-IDF vectors for all questions (non-training + training)
     all_q_texts: dict[str, str] = dict(nontraining_questions)
+    train_answers: dict[str, str] = {}
+    if args.questions.is_file():
+        try:
+            tr_raw = json.loads(args.questions.read_text(encoding="utf-8"))
+            for qk, qv in tr_raw.items():
+                if isinstance(qv, dict) and "answer" in qv:
+                    train_answers[str(qk)] = str(qv["answer"])
+        except Exception:
+            pass
+
     for qid in labels:
         if qid not in excluded_query_ids:
             q_str = questions.get(qid)
@@ -529,11 +557,31 @@ def main() -> int:
 
             counters["queries_seen"] += 1
 
+            gold_ans = train_answers.get(query_id, "")
+            cited_articles: set[str] = set()
+            cited_docs: set[str] = set()
+            if gold_ans:
+                citations = parse_citations(gold_ans)
+                for c in citations:
+                    if c.article:
+                        cited_articles.add(str(c.article))
+                    if c.document_number:
+                        cited_docs.add(_normalize_text(str(c.document_number)))
+                    if c.document_name:
+                        cited_docs.add(_normalize_text(str(c.document_name)))
+
             # Gate 2: Positive passage quality filter (exclude trivial passages < 50 chars)
             gold_ids = {
                 gid for gid in labels[query_id]
                 if gid in units and len(units[gid].reader_text.strip()) >= 50
             }
+            # Expand gold_ids to include ALL resolved candidate passages matching cited articles in gold_ans
+            for unit_id, _, _ in rows:
+                if unit_id in units and unit_id not in gold_ids:
+                    u = units[unit_id]
+                    if len(u.reader_text.strip()) >= 50 and _unit_matches_article(u, cited_articles):
+                        gold_ids.add(unit_id)
+
             if not gold_ids:
                 counters["queries_without_positive_in_view"] += 1
                 continue
@@ -541,15 +589,26 @@ def main() -> int:
             gold_texts = {_normalize_text(units[gid].reader_text) for gid in gold_ids}
             seen_neg_texts: set[str] = set()
 
-            # Containment leakage: a gold article's own children (and a gold
-            # child's parent) are the same law text at another granularity. They
-            # are not negatives.
+            # Containment leakage + Co-regulating article protection:
+            # All gold articles, their parents/children, AND any candidate passages belonging to
+            # or citing ANY co-regulating article or document in gold_ans are FORBIDDEN from being negatives!
             forbidden = set(gold_ids)
-            for gid in gold_ids:
+            for gid in list(gold_ids):
                 gold_unit = units[gid]
                 if gold_unit.parent_unit_id:
                     forbidden.add(gold_unit.parent_unit_id)
                 forbidden.update(children_by_parent.get(gid, ()))
+
+            for unit_id, _, _ in rows:
+                if unit_id in units and unit_id not in forbidden:
+                    u = units[unit_id]
+                    if _unit_matches_article(u, cited_articles):
+                        forbidden.add(unit_id)
+                        continue
+                    u_norm = _normalize_text(u.reader_text)
+                    if any(doc in u_norm for doc in cited_docs if len(doc) >= 5):
+                        forbidden.add(unit_id)
+                        continue
 
             normalised = (
                 _normalise_ranks(rows)

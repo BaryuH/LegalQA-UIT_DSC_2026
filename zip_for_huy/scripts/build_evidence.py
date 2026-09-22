@@ -482,7 +482,7 @@ def main() -> int:
             ordered_hits = raw_hits
             if cross_encoder is not None:
                 valid_hits = [h for h in raw_hits if h.chunk_id in chunks]
-                passages = [chunks[h.chunk_id].retrieval_text for h in valid_hits]
+                passages = [chunks[h.chunk_id].raw_text for h in valid_hits]
                 if passages:
                     scores = cross_encoder.predict(
                         [(question_text, p) for p in passages],

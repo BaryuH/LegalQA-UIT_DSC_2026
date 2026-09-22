@@ -1,0 +1,37 @@
+{
+  "schema_version": "legalqa.reranker_data_qa_qc.v1",
+  "status": "PASS",
+  "pairs_file": "/mnt/G/LegalQA-UIT_DSC_2026/zip_for_huy/artifacts/reranker_training_data/pairs.jsonl",
+  "pairs_sha256": "30120c8f2c56d8db940900384f1d92ac8ba3320b35b86016e0e0bff0f4c1c6cd",
+  "metrics": {
+    "total_pair_rows": 96257,
+    "query_tokens": {
+      "mean": 19.8,
+      "p50": 19,
+      "max": 46
+    },
+    "positive_tokens": {
+      "mean": 534.1,
+      "p50": 158,
+      "p90": 827.0,
+      "max": 135846
+    },
+    "negatives_per_positive": {
+      "mean": 9.8,
+      "min": 1,
+      "max": 10
+    },
+    "top_document_concentration": {
+      "document": "245154",
+      "count": 851,
+      "share": 0.0088
+    },
+    "upstream_band_share": 0.3589
+  },
+  "gate_failures": {},
+  "gate_warnings": {
+    "Gate2_PositiveQuality": [
+      "3445 positive passages exceed max_passage_tokens (2048). Sample: ['10001', '100045', '100045', '100143', '100143']"
+    ]
+  }
+}

@@ -4,7 +4,7 @@ output_dir: benchmark_meteor_matrix/outputs
 
 data:
   path: processed/train_dev200.json
-  evidence_path: processed/train_dev200_finetuned_reranker_evidence.jsonl
+  evidence_path: processed/train_dev200_finetuned_multi_pos_evidence.jsonl
   limit: 200
 
 prompt_template: configs/prompts/rag_detailed_v1.txt

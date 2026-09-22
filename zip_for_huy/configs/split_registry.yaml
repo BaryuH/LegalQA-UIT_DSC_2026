@@ -1,0 +1,44 @@
+schema_version: h1.split-usage.v1
+description: >
+  Declarative mirror of the executable split registry in
+  src/legal_rag/splits.py. Commands must select one registered role explicitly.
+splits:
+  train:
+    policy: train_development
+    purpose: Development, approved few-shot use, and later fine-tuning.
+    reference_access: none
+    capabilities:
+      - build_index
+      - inspect_retrieval
+      - validate_data
+  warmup:
+    policy: warmup_evaluation
+    purpose: Warm-up evaluation and configuration selection when permitted.
+    reference_access: approved_evaluation
+    capabilities:
+      - build_index
+      - evaluate
+      - inference
+      - inspect_retrieval
+      - submission
+      - validate_data
+  public:
+    policy: public_inference
+    purpose: Official public evaluation without development tuning.
+    reference_access: none
+    capabilities:
+      - build_index
+      - inference
+      - inspect_retrieval
+      - submission
+      - validate_data
+  private:
+    policy: private_final_inference
+    purpose: Final inference only; no tuning or private-reference access.
+    reference_access: none
+    capabilities:
+      - build_index
+      - inference
+      - inspect_retrieval
+      - submission
+      - validate_data

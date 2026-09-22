@@ -1,0 +1,134 @@
+# SEDAR-SFT train profile (SS-05..SS-07 local scaffolding).
+# Reuses the generative finetuned_reader settings schema.
+# Canonical CUDA/QLoRA execution remains gated until SS-04A..SS-04C pass on server.
+project:
+  name: legal-rag
+  profile: sedar_sft
+  python_version: "3.11"
+data:
+  data_dir: data
+  question_path: data/train.json
+  selected_contexts_path: data/selected-contexts.zip
+  split: train
+  split_policy: train_development
+chunking:
+  max_chars: 1200
+  overlap_chars: 200
+  min_chars: 100
+  version: legal-chunker-v1
+retrieval:
+  strategy: bm25_rerank
+  rough_top_n: 12
+  k1: 1.5
+  b: 0.75
+reranker:
+  enabled: true
+  required: false
+  provider: sentence_transformers
+  model: BAAI/bge-m3
+  device: cuda
+  batch_size: 8
+  max_length: 512
+evidence:
+  evidence_top_k: 4
+  max_total_chars: 4000
+  max_chunks_per_document: 2
+generation:
+  provider: mock
+  model: sedar_sft_backend
+  temperature: 0.0
+  max_output_chars: 1200
+  retries: 0
+prompts:
+  direct_version: direct-v1
+  rag_version: rag-v1
+evaluation:
+  enabled: false
+  reference_access: none
+  primary_metric: meteor
+  secondary_metric: rouge_l
+runtime:
+  cache_dir: cache
+  outputs_dir: outputs
+  artifacts_dir: artifacts
+  fail_fast: true
+  seed: 42
+submission:
+  enabled: false
+  format: object_by_question_id
+  answer_field: answer
+  output_filename: submission.zip
+  inner_filename: submission.json
+  encoding: utf-8
+  ensure_ascii: false
+  forbid_extra_fields: true
+  deterministic_order: dataset
+  require_full_coverage: true
+  reject_extra_ids: true
+  reject_duplicate_ids: true
+  reject_non_string_answers: true
+  reject_empty_answers: false
+finetuned_reader:
+  enabled: true
+  required: true
+  type: generative_sft_reader
+  dataset_version: sedar-sft-v1
+  train_prompt_path: configs/prompts/sedar_sft_train_v1.txt
+  inference_prompt_path: configs/prompts/sedar_sft_infer_v1.txt
+  checkpoint_path: checkpoints/sedar_sft/<run_id>
+  checkpoint_manifest_path: checkpoints/sedar_sft/<run_id>/checkpoint_manifest.json
+  max_new_tokens: 512
+  overlap_policy: exclude_and_record
+  overlap_remediation_id: ftr03-train-overlap-exclusion-v1
+  stop_sequences: []
+  dataset_build:
+    bm25_backend: cuda
+    progress_every: 100
+  model:
+    # The server provisions this snapshot outside the repository and links it
+    # to this portable repository-relative path.
+    base_model: models/sedar_sft/vilegalqwen3-1.7b-base
+    revision: 258c56ed40529cced26fa7fcc3ecc0663e914c18
+    tokenizer: models/sedar_sft/vilegalqwen3-1.7b-base
+    loader: auto
+    context_length: 4096
+    dtype: bfloat16
+    load_in_4bit: true
+    trust_remote_code: false
+    local_files_only: true
+  lora:
+    enabled: true
+    adapter_type: qlora
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    # Discovered from Qwen3ForCausalLM on the pinned local snapshot; lm_head
+    # is intentionally excluded from the adapter target set.
+    target_modules:
+      - down_proj
+      - gate_proj
+      - k_proj
+      - o_proj
+      - q_proj
+      - up_proj
+      - v_proj
+    bias: none
+  training:
+    seed: 42
+    # Provisional published model limit; SS-06 must re-select from token stats.
+    max_seq_length: 4096
+    epochs: 2
+    learning_rate: 0.0002
+    train_batch_size: 1
+    eval_batch_size: 1
+    # Provisional; SS-04D/SS-07G may replace with measured AUTO resolution.
+    gradient_accumulation_steps: 16
+    warmup_ratio: 0.03
+    weight_decay: 0.0
+    max_grad_norm: 1.0
+    logging_steps: 10
+    packing: false
+    gradient_checkpointing: true
+  output:
+    dataset_root: artifacts/sedar_sft/datasets
+    checkpoint_root: checkpoints/sedar_sft

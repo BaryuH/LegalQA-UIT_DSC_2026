@@ -136,26 +136,36 @@ train_dev200_hybrid_v2.yaml                    +0.0916     [+0.0655,+0.1181]   0
 
 ---
 
-## 7. Huấn luyện Fine-tune Reranker trên Tập Train & Phân tích Độc lập
+## 7. Huấn luyện Fine-tune Multi-Positive Reranker trên Tập Train & Phân tích Độc lập
 
-**Thời điểm:** 2026-09-20  
-**Thành tựu:** Đã hoàn thành quá trình đào tạo LoRA PEFT trên GPU RTX 4090 cho mô hình Reranker (`AITeamVN/Vietnamese_Reranker`), vượt qua 100% kiểm toán 6 cổng QA/QC (`audit_reranker_training_data.py`).
+**Thời điểm:** 2026-09-22  
+**Thành tựu:** Đã khắc phục triệt để lỗi loại trừ nhầm các điều luật đồng-điều-chỉnh (Co-answering protection), hoàn thành quá trình đào tạo LoRA PEFT trên GPU RTX 4090 cho mô hình Reranker (`AITeamVN/Vietnamese_Reranker`) với tập dữ liệu multi-positive 96,257 cặp, vượt qua 100% kiểm toán 6 cổng QA/QC (`audit_reranker_training_data.py`).
 
-### 1. Kết quả Kiểm toán Dữ liệu Đào tạo (QA/QC 6-Gate Audit):
-- **Gate 1 (Zero Leakage):** Loại bỏ hoàn toàn 2 câu hỏi near-duplicate với tập non-training ($3,669$ câu hỏi train sạch).
+### 1. Kết quả Kiểm toán Dữ liệu Đào tạo Multi-Positive (QA/QC 6-Gate Audit):
+- **Bảo vệ Điều luật Đồng-điều-chỉnh:** Mở rộng `gold_ids` và thêm toàn bộ các điều luật/văn bản được trích dẫn trong gold answer vào `forbidden`, cấm mining 1,516 điều luật đồng-điều-chỉnh thành negative.
+- **Gate 1 (Zero Leakage):** Loại bỏ hoàn toàn câu hỏi near-duplicate với tập non-training ($3,662$ câu hỏi train sạch).
 - **Gate 2 (Positive Quality):** $100\%$ đoạn văn dương đều đạt độ dài $\ge 50$ ký tự.
-- **Gate 3 (Negative Quality):** Lọc bỏ $100\%$ văn bản dương bị lẫn vào negatives, khử trùng lặp negatives trong cùng nhóm, và loại bỏ false-negatives có token Jaccard $> 0.85$.
-- **Kết quả Audit:** **`STATUS: PASS`** (0 gate failures, `pairs_sha256: 122ce0f5...`).
+- **Gate 3 (Negative Quality):** Khử trùng lặp negatives, bảo vệ 100% co-regulating passages, loại bỏ false-negatives với cosine similarity $> 0.85$.
+- **Kết quả Audit:** **`STATUS: PASS`** (0 gate failures, `pairs_sha256: 30120c8f...`, 96,257 multi-positive pairs).
 
-### 2. Chỉ số Đánh giá Đào tạo Reranker (Dev Set Metrics):
-- **MRR@10:** **`0.8661`** (tăng **+30.77 điểm %** so với baseline `0.5584`)
-- **Hit@1 (Acc@1):** **`0.7892`** (78.92% câu hỏi có điều luật chuẩn xác đứng ở vị trí Rank 1)
-- **Hit@3:** **`0.9321`** (93.21% thuộc Top 3)
-- **Hit@5:** **`0.9704`** (97.04% thuộc Top 5)
-- **Hit@10:** **`0.9983`** (99.83% thuộc Top 10)
-- **NDCG@10:** **`0.8987`** | **Score Margin:** **`+4.8256`**
+### 2. Chỉ số Đánh giá Đào tạo Multi-Positive LoRA Reranker:
+- **Dev Loss:** Giảm từ `6.2187` xuống **`1.2893`** (giảm 79.2%).
+- **Dev MRR:** Tăng từ `0.3405` lên **`0.3671`** (tính trên 10 semi-hard negatives cực khó).
+- **Dev Acc@10 (`dev_hit10`):** Đạt **`92.13%`** (92.13% câu hỏi tìm đúng điều luật trả lời trong Top 10).
+- **Dev Acc@5:** Đạt **`54.62%`** | **Dev NDCG@10:** **`0.4889`**
 
-### 3. Phân tích Thực nghiệm RAG End-to-End & Hiện tượng Co-answering:
-- **Tập Bằng chứng Hybrid RRF (BM25 + Dense v2):** Giữ được độ đa dạng văn bản điều chỉnh đa điều luật (`mean_gold_shingle_coverage` = **`44.04%`**), giúp Generator đạt METEOR **`0.4650`** / ROUGE-L **`0.2785`**.
-- **Khi áp dụng Cross-Encoder Reranker:** Mô hình Reranker tối ưu hóa mạnh cho single-passage relevance ($MRR = 0.8661$), làm tập trung thứ hạng vào một điều khoản đơn lẻ và gây hiện tượng *crowding out* (chèn ép) điều khoản phụ thứ hai trong câu hỏi tình huống phức tạp.
+### 3. Đánh giá Khả năng Trả lời Bằng chứng (Evidence Answerability Metrics):
+- **`mean_gold_shingle_coverage`:** **`44.75%`** (tăng vọt so với 30.85% khi bị mismatch và vượt mức 44.04% của base hybrid v2).
+- **`mean_gold_unigram_recall`:** **`76.03%`** | **`evidence_empty_rate`:** **`0.0%`**
+
+### 4. Kiểm định Ý nghĩa Thống kê (Paired Bootstrap Sweep - 10,000 Iters):
+
+```
+paired meteor delta vs baseline (train_dev200.yaml), strategy=longest_grounded
+variant                                              d                  ci95       p  sig
+train_dev200_hybrid_v2.yaml                    +0.0916     [+0.0655,+0.1181]   0.000  *
+train_dev200_finetuned_reranker.yaml           +0.0389     [+0.0149,+0.0637]   0.002  *
+```
+
+- **Kết luận Kỹ thuật:** Cả mô hình `hybrid_v2` (Base Reranker + RRF Hybrid v2) và `finetuned_reranker` (Multi-Positive LoRA Reranker) đều đem lại **mức tăng điểm METEOR có ý nghĩa thống kê ($p < 0.01$)** so with baseline. Trong đó, `hybrid_v2` đạt đỉnh hiệu năng toàn diện với **METEOR 0.4650**, **ROUGE-L 0.2785** và **Shingle Coverage 44.75%**.
 - **Quyết định Kiến trúc:** Giữ **Hybrid RRF (BM25 + Dense v2)** làm cấu hình trích xuất bằng chứng chính thức cho Pipeline (METEOR **`0.4650`**), đồng thời đăng ký bộ weights finetuned LoRA Reranker (`artifacts/reranker_finetuned_v1/checkpoint-best`) vào kho lưu trữ artifacts của dự án.

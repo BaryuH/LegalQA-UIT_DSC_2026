@@ -1,0 +1,14 @@
+{
+  "eval_tag": "step_4400",
+  "epoch": 1,
+  "optimizer_updates": 4400,
+  "train_loss": 2.8399461063998097,
+  "dev_mrr": 0.3671,
+  "dev_hit1": 0.1995,
+  "dev_hit3": 0.3812,
+  "dev_hit5": 0.5395,
+  "dev_hit10": 0.9146,
+  "dev_ndcg10": 0.4868,
+  "dev_margin": -0.4676,
+  "dev_loss": 1.3163
+}

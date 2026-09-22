@@ -1,0 +1,65 @@
+# Public-inference BM25-RAG profile derived from bm25_rag.
+# No public gold answers are loaded; this profile is submission-enabled only.
+project:
+  name: legal-rag
+  profile: bm25-rag
+  python_version: "3.11"
+data:
+  data_dir: data
+  question_path: data/public-official.json
+  selected_contexts_path: data/selected-contexts.zip
+  split: public
+  split_policy: public_inference
+chunking:
+  max_chars: 1200
+  overlap_chars: 200
+  min_chars: 100
+  version: legal-chunker-v1
+retrieval:
+  strategy: bm25
+  rough_top_n: 12
+  k1: 1.5
+  b: 0.75
+reranker:
+  enabled: false
+  required: false
+  provider: none
+evidence:
+  evidence_top_k: 4
+  max_total_chars: 4000
+  max_chunks_per_document: 2
+generation:
+  provider: mock
+  model: deterministic-mock-v1
+  temperature: 0.0
+  max_output_chars: 1200
+  retries: 0
+prompts:
+  direct_version: direct-v1
+  rag_version: rag-v1
+evaluation:
+  enabled: false
+  reference_access: none
+  primary_metric: meteor
+  secondary_metric: rouge_l
+runtime:
+  cache_dir: cache
+  outputs_dir: outputs
+  artifacts_dir: artifacts
+  fail_fast: true
+  seed: 42
+submission:
+  enabled: true
+  format: object_by_question_id
+  answer_field: answer
+  output_filename: submission.zip
+  inner_filename: submission.json
+  encoding: utf-8
+  ensure_ascii: false
+  forbid_extra_fields: true
+  deterministic_order: dataset
+  require_full_coverage: true
+  reject_extra_ids: true
+  reject_duplicate_ids: true
+  reject_non_string_answers: true
+  reject_empty_answers: false
